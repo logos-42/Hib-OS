@@ -184,6 +184,8 @@ impl Shell {
             Ok(None) => {}
             Err(_) => {}
         }
+        // 把挂载表物化进目录树：/proc、/sys、/dev/gpu 等在 ls 里可见。
+        self.materialize_all_mounts();
 
         let has_key = self.handler.consciousness.deepseek_key().is_some();
 
@@ -806,9 +808,14 @@ impl Shell {
             }
         };
         if let Some(result) = crate::sense::act(name, &payload) {
+            let ok = result.is_ok();
             match result {
                 Ok(msg) => println!("act {} [{}] → {}", name, kind.name(), msg),
                 Err(e) => println!("act {} 失败: {}", name, e),
+            }
+            // 挂载表是唯一需要同步到 VFS 的通道：成功挂载后立刻建目录 / 写伪文件。
+            if ok && name == "mount://table" {
+                self.sync_mount_hooks(&payload);
             }
             return;
         }
@@ -969,11 +976,18 @@ impl Shell {
                         if let Some(rest) = url.strip_prefix("file://") {
                             let path = rest.trim_start_matches('/');
                             match self.vfs.cat(path) {
-                                Ok(content) => println!(
-                                    "act browser://gateway → 打开 file://{} ({} 字节)",
-                                    path,
-                                    content.len()
-                                ),
+                                Ok(content) => {
+                                    println!(
+                                        "act browser://gateway → 打开 file:///{} ({} 字节)",
+                                        path,
+                                        content.len()
+                                    );
+                                    // 同步到浏览器状态，使 sense browser://gateway 能看到
+                                    crate::browser::browser()
+                                        .lock()
+                                        .unwrap()
+                                        .note_local(url, &content);
+                                }
                                 Err(e) => {
                                     println!(
                                         "act browser://gateway → 打开失败: {}",
@@ -982,10 +996,8 @@ impl Shell {
                                 }
                             }
                         } else {
-                            println!(
-                                "act browser://gateway → 无网络栈，无法打开 {}",
-                                url
-                            );
+                            // 非 file:// 的 URL 已由 sense 层（真实抓取）处理
+                            println!("act browser://gateway → 用法: open <url>");
                         }
                     }
                     _ => println!(
@@ -1076,10 +1088,137 @@ impl Shell {
     }
 
     // ------------------------------------------------------------------
+    // 挂载表 ↔ VFS 联动
+    // ------------------------------------------------------------------
+
+    /// 把挂载表整体物化进 VFS（启动时调用一次）。
+    fn materialize_all_mounts(&mut self) {
+        let targets: Vec<String> = crate::mount::mounts()
+            .lock()
+            .unwrap()
+            .targets()
+            .into_iter()
+            .map(|(t, _)| t)
+            .collect();
+        for t in targets {
+            self.materialize_mount(&t);
+        }
+    }
+
+    /// 物化单个挂载点：确保目录存在，并按文件系统类型写入伪文件。
+    ///
+    /// 这一步让 `ls /sys` 真的能看到东西，而不是只有挂载表里的一行记录。
+    fn materialize_mount(&mut self, target: &str) {
+        if self.vfs.ensure_dir_tree(target).is_err() {
+            return;
+        }
+        let fstype = crate::mount::mounts()
+            .lock()
+            .unwrap()
+            .find(target)
+            .map(|e| e.fstype.clone())
+            .unwrap_or_default();
+        let base = target.trim_end_matches('/');
+
+        match fstype.as_str() {
+            "procfs" => {
+                let snap = crate::procfs::procfs().lock().unwrap().snapshot();
+                for line in snap.lines() {
+                    let Some((key, val)) = line.split_once(':') else {
+                        continue;
+                    };
+                    if matches!(key, "meminfo" | "loadavg" | "uptime" | "version") {
+                        let _ = self
+                            .vfs
+                            .write(&format!("{}/{}", base, key), &format!("{}\n", val.trim()));
+                    }
+                }
+                let _ = self
+                    .vfs
+                    .write(&format!("{}/stat", base), &format!("{}\n", snap));
+            }
+            "sysfs" => {
+                let vram = {
+                    let v = crate::gpu::vram().lock().unwrap();
+                    format!(
+                        "total={}MiB free={}MiB\n",
+                        v.total_vram() / (1024 * 1024),
+                        v.available() / (1024 * 1024)
+                    )
+                };
+                let _ = self.vfs.write(&format!("{}/gpu_vram", base), &vram);
+                let params = crate::sysctl::sysctl().lock().unwrap().kernel_list();
+                let _ = self
+                    .vfs
+                    .write(&format!("{}/kernel_params", base), &format!("{}\n", params));
+                let ifs = crate::netif::ifaces().lock().unwrap().list();
+                let _ = self
+                    .vfs
+                    .write(&format!("{}/net_interfaces", base), &format!("{}\n", ifs));
+                let verdict = crate::judgment::judgment().lock().unwrap().status();
+                let _ = self
+                    .vfs
+                    .write(&format!("{}/judgment", base), &format!("{}\n", verdict));
+            }
+            "devfs" => {
+                let nodes: Vec<(String, u32, u32, String)> = crate::dev::devtree()
+                    .lock()
+                    .unwrap()
+                    .nodes
+                    .iter()
+                    .map(|n| (n.name.clone(), n.major, n.minor, n.driver.clone()))
+                    .collect();
+                for (name, major, minor, driver) in nodes {
+                    let _ = self.vfs.write(
+                        &format!("{}/{}", base, name),
+                        &format!("<device {}:{} driver={}>\n", major, minor, driver),
+                    );
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// 每次 ls / cat / cd 前刷新伪文件系统内容。
+    fn refresh_virtual_mounts(&mut self) {
+        let targets: Vec<String> = crate::mount::mounts()
+            .lock()
+            .unwrap()
+            .targets()
+            .into_iter()
+            .filter(|(_, fstype)| matches!(fstype.as_str(), "procfs" | "sysfs" | "devfs"))
+            .map(|(t, _)| t)
+            .collect();
+        for t in targets {
+            self.materialize_mount(&t);
+        }
+    }
+
+    /// 挂载 / 卸载成功后的目录树同步。
+    fn sync_mount_hooks(&mut self, payload: &str) {
+        let mut it = payload.split_whitespace();
+        match it.next() {
+            Some("mount") => {
+                let _src = it.next();
+                if let Some(target) = it.next() {
+                    self.materialize_mount(target);
+                }
+            }
+            Some("umount") | Some("unmount") => {
+                if let Some(target) = it.next() {
+                    let _ = self.vfs.remove_dir_all(target);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // ------------------------------------------------------------------
     // 命令实现：文件系统
     // ------------------------------------------------------------------
 
-    fn cmd_ls(&self, path: Option<&str>) {
+    fn cmd_ls(&mut self, path: Option<&str>) {
+        self.refresh_virtual_mounts();
         match self.vfs.ls(path) {
             Ok(items) => {
                 if items.is_empty() {
@@ -1102,6 +1241,7 @@ impl Shell {
     }
 
     fn cmd_cd(&mut self, path: Option<&str>) {
+        self.refresh_virtual_mounts();
         let target = path.unwrap_or("/");
         match self.vfs.cd(target) {
             Ok(()) => {}
@@ -1109,11 +1249,12 @@ impl Shell {
         }
     }
 
-    fn cmd_cat(&self, path: Option<&str>) {
+    fn cmd_cat(&mut self, path: Option<&str>) {
         let Some(path) = path else {
             println!("用法: cat <路径>");
             return;
         };
+        self.refresh_virtual_mounts();
         match self.vfs.cat(path) {
             Ok(content) => {
                 if content.is_empty() {
@@ -1909,7 +2050,7 @@ mod tests {
     #[test]
     fn channels_registry_and_sense() {
         let mut s = Shell::new();
-        assert_eq!(s.channels.len(), 66);
+        assert_eq!(s.channels.len(), 69);
         assert!(s.dispatch("channels"));
         assert!(s.dispatch("sense file://vfs"));
         assert!(s.dispatch("sense gpu://vram"));
@@ -1921,6 +2062,11 @@ mod tests {
         assert!(s.dispatch("sense proc://sysinfo"));
         assert!(s.dispatch("sense net://interfaces"));
         assert!(s.dispatch("sense dev://bus"));
+        assert!(s.dispatch("sense gateway://net"));
+        // 意志层三个通道
+        assert!(s.dispatch("sense motive://self"));
+        assert!(s.dispatch("sense belief://self"));
+        assert!(s.dispatch("sense judgment://self"));
         // 只写通道不可感知 / 不存在通道
         assert!(s.dispatch("sense action://syscall"));
         assert!(s.dispatch("sense nope://none"));
@@ -1936,7 +2082,9 @@ mod tests {
 
         assert!(s.dispatch("act gpu://framebuffer HELLO"));
         assert!(s.dispatch("act dev://null drop-me"));
-        assert!(s.dispatch("act browser://gateway https://example.com"));
+        // browser 的 file:// 由 shell 层直接读 VFS（不触网）
+        assert!(s.dispatch("act browser://gateway open file:///etc/hibos.toml"));
+        assert!(s.dispatch("act browser://gateway history"));
 
         assert!(s.dispatch("act plugin://modules load demo"));
         assert_eq!(s.modules.loaded_count(), 1);
@@ -1947,6 +2095,39 @@ mod tests {
         assert!(s.vfs.cat("/var/log/kernel.log").unwrap().contains("kernel-note"));
 
         assert!(s.channels.total_acts() >= 6);
+    }
+
+    #[test]
+    fn mount_syncs_to_vfs() {
+        let mut s = Shell::new();
+        // /sys 默认不在 VFS 里，由挂载表物化出来
+        assert!(s.vfs.ls(Some("/sys")).is_err());
+        assert!(s.dispatch("ls /sys"));
+        assert!(s.vfs.ls(Some("/sys")).is_ok());
+        assert!(s.vfs.cat("/sys/gpu_vram").unwrap().contains("total="));
+        // /proc 同样是挂载点，内容来自 procfs 实时快照
+        assert!(s.vfs.cat("/proc/loadavg").is_ok());
+
+        // 新挂载立刻出现在目录树
+        assert!(s.dispatch("act mount://table mount tmpfs /data tmpfs"));
+        assert!(s.vfs.ls(Some("/data")).is_ok());
+        // 卸载后目录消失
+        assert!(s.dispatch("act mount://table umount /data"));
+        assert!(s.vfs.ls(Some("/data")).is_err());
+    }
+
+    #[test]
+    fn will_channels_cooperate() {
+        let mut s = Shell::new();
+        // 动机：把 efficacy 拉到最高
+        assert!(s.dispatch("act motive://self urge efficacy +60"));
+        // 信念：给出高置信度
+        assert!(s.dispatch("act belief://self believe 测试命题 90"));
+        // 判断力：读取前两者得出结论
+        assert!(s.dispatch("act judgment://self judge 测试命题"));
+        assert!(s.dispatch("sense judgment://self"));
+        assert!(s.dispatch("sense motive://self"));
+        assert!(s.dispatch("sense belief://self"));
     }
 
     #[test]

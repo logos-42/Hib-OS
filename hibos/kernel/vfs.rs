@@ -378,6 +378,45 @@ impl Vfs {
         }
     }
 
+    /// 递归创建目录（等价 `mkdir -p`）；已存在且是目录则直接成功。
+    ///
+    /// 挂载表与 VFS 联动的基石：挂载点必须在目录树里真实存在，
+    /// 否则 `ls /sys` 之类的命令看不到它。
+    pub fn ensure_dir_tree(&mut self, path: &str) -> Result<(), VfsError> {
+        let comps = self.resolve(path)?;
+        let mut cur = &mut self.root;
+        for c in comps {
+            if !cur.children.contains_key(&c) {
+                cur.children.insert(c.clone(), Node::dir(&c));
+            }
+            let next = cur.children.get_mut(&c).unwrap();
+            if !next.is_dir() {
+                return Err(VfsError::NotADirectory);
+            }
+            cur = next;
+        }
+        Ok(())
+    }
+
+    /// 递归删除目录（含内容），用于卸载伪文件系统时清理挂载点。
+    pub fn remove_dir_all(&mut self, path: &str) -> Result<(), VfsError> {
+        let comps = self.resolve(path)?;
+        if comps.is_empty() {
+            return Err(VfsError::InvalidPath);
+        }
+        let (parent, name) = comps.split_at(comps.len() - 1);
+        let name = name[0].clone();
+        let pnode = self.node_at_mut(parent).ok_or(VfsError::NotFound)?;
+        match pnode.children.get(&name) {
+            None => Err(VfsError::NotFound),
+            Some(n) if !n.is_dir() => Err(VfsError::NotADirectory),
+            Some(_) => {
+                pnode.children.remove(&name);
+                Ok(())
+            }
+        }
+    }
+
     /// 路径补全：返回同一目录下匹配前缀的名称。
     pub fn complete_path(&self, prefix: &str) -> Vec<String> {
         let (dir_part, file_prefix) = match prefix.rfind('/') {
@@ -947,6 +986,30 @@ mod tests {
         v.rm("d1/f").unwrap();
         v.rm("d1").unwrap();
         assert!(v.cat("d1").is_err());
+    }
+
+    #[test]
+    fn ensure_dir_tree_and_remove_dir_all() {
+        let mut v = Vfs::new();
+        // /sys 默认不存在，递归创建后才能 ls
+        assert!(v.ls(Some("/sys")).is_err());
+        v.ensure_dir_tree("/sys/class/gpu").unwrap();
+        assert!(v.ls(Some("/sys")).is_ok());
+        assert!(v.ls(Some("/sys/class/gpu")).is_ok());
+        // 已存在时幂等
+        v.ensure_dir_tree("/sys/class/gpu").unwrap();
+        // 路径上有文件则拒绝
+        v.write("/sys/class/note", "x").unwrap();
+        assert_eq!(
+            v.ensure_dir_tree("/sys/class/note/sub").unwrap_err(),
+            VfsError::NotADirectory
+        );
+
+        // 递归删除非空目录
+        v.remove_dir_all("/sys").unwrap();
+        assert!(v.ls(Some("/sys")).is_err());
+        assert_eq!(v.remove_dir_all("/sys").unwrap_err(), VfsError::NotFound);
+        assert_eq!(v.remove_dir_all("/").unwrap_err(), VfsError::InvalidPath);
     }
 
     #[test]

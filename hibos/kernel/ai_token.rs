@@ -283,6 +283,7 @@ impl AIConsciousness {
             ChannelKind::Memory => ComputePattern::Custom(format!("mem_{}", name)),
             ChannelKind::Process => ComputePattern::Custom(format!("process_{}", name)),
             ChannelKind::User => ComputePattern::Custom(format!("user_{}", name)),
+            ChannelKind::Will => ComputePattern::Custom(format!("will_{}", name)),
         };
         let policy = match kind {
             ChannelKind::Gpu => SchedulePolicy::HighThroughput,

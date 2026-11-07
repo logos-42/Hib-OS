@@ -55,6 +55,8 @@ pub enum ChannelKind {
     Process,
     /// 用户 / 身份
     User,
+    /// 意志 / 动机与信念
+    Will,
 }
 
 impl ChannelKind {
@@ -81,6 +83,7 @@ impl ChannelKind {
             ChannelKind::Trace => "trace",
             ChannelKind::Process => "process",
             ChannelKind::User => "user",
+            ChannelKind::Will => "will",
         }
     }
 }
@@ -278,7 +281,7 @@ pub fn bootstrap() -> ChannelRegistry {
         (ChannelKind::Io, "io://stdin", Access::Read),
         (ChannelKind::Io, "io://stdout", Access::Write),
         (ChannelKind::Gateway, "gateway://shell", Access::ReadWrite),
-        (ChannelKind::Gateway, "gateway://net", Access::Read),
+        (ChannelKind::Gateway, "gateway://net", Access::ReadWrite),
         (ChannelKind::Interface, "interface://abi", Access::Read),
         (ChannelKind::Text, "text://log", Access::Write),
         (ChannelKind::Trace, "trace://exec", Access::ReadWrite),
@@ -336,6 +339,10 @@ pub fn bootstrap() -> ChannelRegistry {
         (ChannelKind::Process, "proc://sysinfo", Access::ReadWrite),
         (ChannelKind::Net, "net://interfaces", Access::ReadWrite),
         (ChannelKind::Device, "dev://bus", Access::ReadWrite),
+        // —— 意志层：动机 / 信念 / 判断力 (三个分工配合的独立通道) ——
+        (ChannelKind::Will, "motive://self", Access::ReadWrite),
+        (ChannelKind::Will, "belief://self", Access::ReadWrite),
+        (ChannelKind::Will, "judgment://self", Access::ReadWrite),
     ];
     for (kind, name, access) in defaults {
         let _ = reg.open(kind, name, access);
@@ -350,8 +357,9 @@ mod tests {
     #[test]
     fn bootstrap_opens_all_channels() {
         let reg = bootstrap();
-        assert_eq!(reg.len(), 66);
+        assert_eq!(reg.len(), 69);
         assert_eq!(reg.of_kind(ChannelKind::Net).count(), 5);
+        assert_eq!(reg.of_kind(ChannelKind::Will).count(), 3);
         assert_eq!(reg.of_kind(ChannelKind::Context).count(), 2);
         assert_eq!(reg.of_kind(ChannelKind::Action).count(), 6);
         assert_eq!(reg.of_kind(ChannelKind::Agent).count(), 2);

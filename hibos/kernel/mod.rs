@@ -9,6 +9,8 @@
 //!    都是同构的感知通道，统一走 sense/act 抽象
 
 pub mod ai_token;
+pub mod belief;
+pub mod browser;
 pub mod bus;
 pub mod caps;
 pub mod cgroup;
@@ -18,14 +20,17 @@ pub mod dev;
 pub mod env;
 pub mod fsmeta;
 pub mod fw;
+pub mod gateway;
 pub mod gpu;
 pub mod init;
 pub mod ipc;
+pub mod judgment;
 pub mod limits;
 pub mod line_editor;
 pub mod mem;
 pub mod modules;
 pub mod monitor;
+pub mod motive;
 pub mod mount;
 pub mod net;
 pub mod netif;

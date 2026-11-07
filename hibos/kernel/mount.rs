@@ -75,6 +75,19 @@ impl MountTable {
             .join("\n")
     }
 
+    /// 按挂载点查找。
+    pub fn find(&self, target: &str) -> Option<&MountEntry> {
+        self.entries.iter().find(|e| e.target == target)
+    }
+
+    /// 全部挂载点副本（供 VFS 联动遍历）。
+    pub fn targets(&self) -> Vec<(String, String)> {
+        self.entries
+            .iter()
+            .map(|e| (e.target.clone(), e.fstype.clone()))
+            .collect()
+    }
+
     /// 挂载点数量。
     pub fn len(&self) -> usize {
         self.entries.len()

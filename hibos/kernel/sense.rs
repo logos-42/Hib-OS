@@ -12,6 +12,8 @@ use crate::monitor::get_time_ns;
 use crate::net::{ETH_NAME, fmt_ip, fmt_mac, net, parse_ip, parse_mac, Packet, RouteEntry};
 use crate::vfs::Vfs;
 
+use crate::belief::beliefs;
+use crate::browser::browser;
 use crate::bus::bus;
 use crate::caps::caps;
 use crate::cgroup::cgroups;
@@ -19,10 +21,13 @@ use crate::dev::devtree;
 use crate::env::envstore;
 use crate::fsmeta::fsmeta;
 use crate::fw::firewall;
+use crate::gateway::gateway;
 use crate::init::init_mgr;
 use crate::ipc::ipc;
+use crate::judgment::judgment;
 use crate::limits::limits;
 use crate::mem::mem;
+use crate::motive::motives;
 use crate::mount::mounts;
 use crate::netif::ifaces;
 use crate::pkg::pkgstore;
@@ -111,8 +116,8 @@ pub fn probe(name: &str) -> Option<String> {
             Some(format!("uptime={}ns tasks={}", s.system_uptime_ns, s.total_tasks_completed))
         }
         "interface://abi" => Some("AiSystemCall 10 变体 / AiSystemCallResult".to_string()),
-        "gateway://net" => Some("offline (网络栈尚未实现)".to_string()),
-        "browser://gateway" => Some("offline (无 HTML/DOM/网络栈, 仅通道占位)".to_string()),
+        "gateway://net" => Some(gateway().lock().unwrap().status()),
+        "browser://gateway" => Some(browser().lock().unwrap().status()),
         "driver://gpu" => {
             let v = vram().lock().unwrap();
             Some(format!(
@@ -219,6 +224,10 @@ pub fn probe(name: &str) -> Option<String> {
         "proc://sysinfo" => Some(procfs().lock().unwrap().snapshot()),
         "net://interfaces" => Some(ifaces().lock().unwrap().list()),
         "dev://bus" => Some(bus().lock().unwrap().list()),
+        // —— 意志层：动机 / 信念 / 判断力 ——
+        "motive://self" => Some(motives().lock().unwrap().status()),
+        "belief://self" => Some(beliefs().lock().unwrap().status()),
+        "judgment://self" => Some(judgment().lock().unwrap().status()),
         _ => None,
     }
 }
@@ -440,6 +449,20 @@ pub fn act(name: &str, payload: &str) -> Option<Result<String, String>> {
         "proc://sysinfo" => Some(act_procfs(payload)),
         "net://interfaces" => Some(act_netif(payload)),
         "dev://bus" => Some(act_bus(payload)),
+        // —— 外部世界出口 ——
+        "gateway://net" => Some(act_gateway(payload)),
+        // `file://` 需要读 shell 的 VFS，返回 None 让 shell 层接管
+        "browser://gateway" => {
+            if payload.contains("file://") {
+                None
+            } else {
+                Some(act_browser(payload))
+            }
+        }
+        // —— 意志层：动机 / 信念 / 判断力 ——
+        "motive://self" => Some(act_motive(payload)),
+        "belief://self" => Some(act_belief(payload)),
+        "judgment://self" => Some(act_judgment(payload)),
         _ => None,
     }
 }
@@ -992,6 +1015,157 @@ fn act_bus(payload: &str) -> Result<String, String> {
             bus().lock().unwrap().remove(addr)
         }
         _ => Ok(bus().lock().unwrap().list()),
+    }
+}
+
+fn act_gateway(payload: &str) -> Result<String, String> {
+    let mut it = payload.split_whitespace();
+    match it.next() {
+        Some("policy") => {
+            let p = it.next().ok_or("用法: policy <allow|deny>")?;
+            gateway().lock().unwrap().set_policy(p)
+        }
+        Some("upstream") => {
+            let u = it.next().ok_or("用法: upstream <direct|http(s)://...>")?;
+            gateway().lock().unwrap().set_upstream(u)
+        }
+        Some("allow") => {
+            let d = it.next().ok_or("用法: allow <域名>")?;
+            gateway().lock().unwrap().add_rule(d, true)
+        }
+        Some("deny") => {
+            let d = it.next().ok_or("用法: deny <域名>")?;
+            gateway().lock().unwrap().add_rule(d, false)
+        }
+        Some("del") | Some("remove") => {
+            let d = it.next().ok_or("用法: del <域名>")?;
+            gateway().lock().unwrap().del_rule(d)
+        }
+        Some("check") => {
+            let h = it.next().ok_or("用法: check <域名>")?;
+            let mut g = gateway().lock().unwrap();
+            let ok = g.check(h);
+            g.record(h, ok, 0);
+            Ok(format!("{} -> {}", h, if ok { "allow" } else { "deny" }))
+        }
+        _ => Ok(gateway().lock().unwrap().status()),
+    }
+}
+
+fn act_browser(payload: &str) -> Result<String, String> {
+    let text = payload.trim();
+    let (sub, rest) = match text.split_once(' ') {
+        Some((a, b)) => (a, b.trim()),
+        None => (text, ""),
+    };
+    match sub {
+        "open" => {
+            if rest.is_empty() {
+                return Err("用法: act browser://gateway open <url>".to_string());
+            }
+            browser().lock().unwrap().open(rest)
+        }
+        "text" => {
+            let n = rest.parse::<usize>().unwrap_or(200);
+            Ok(browser().lock().unwrap().text(n))
+        }
+        "history" | "" => Ok(browser().lock().unwrap().status()),
+        _ => Err("用法: act browser://gateway open <url> | text [n] | history".to_string()),
+    }
+}
+
+fn act_motive(payload: &str) -> Result<String, String> {
+    let mut it = payload.split_whitespace();
+    match it.next() {
+        Some("urge") => {
+            let n = it.next().ok_or("用法: urge <动机> <±增量>")?;
+            let d: i32 = it
+                .next()
+                .and_then(|s| s.parse().ok())
+                .ok_or("用法: urge <动机> <±增量>")?;
+            motives().lock().unwrap().urge(n, d)
+        }
+        Some("set") => {
+            let n = it.next().ok_or("用法: set <动机> <0-100>")?;
+            let v: u8 = it
+                .next()
+                .and_then(|s| s.parse().ok())
+                .ok_or("用法: set <动机> <0-100>")?;
+            motives().lock().unwrap().set(n, v)
+        }
+        Some("reset") => Ok(motives().lock().unwrap().reset()),
+        _ => Ok(motives().lock().unwrap().status()),
+    }
+}
+
+fn act_belief(payload: &str) -> Result<String, String> {
+    let text = payload.trim();
+    let sub = text.split_whitespace().next().unwrap_or("");
+    match sub {
+        "believe" => {
+            let rest = text[sub.len()..].trim();
+            let (prop, conf) = rest
+                .rsplit_once(' ')
+                .ok_or("用法: believe <命题> <0-100>")?;
+            let conf: u8 = conf
+                .trim()
+                .parse()
+                .map_err(|_| "置信度需为 0-100 整数".to_string())?;
+            beliefs().lock().unwrap().believe(prop.trim(), conf)
+        }
+        "observe" => {
+            let rest = text[sub.len()..].trim();
+            let (prop, delta) = rest
+                .rsplit_once(' ')
+                .ok_or("用法: observe <命题> <±增量>")?;
+            let delta: i32 = delta
+                .trim()
+                .parse()
+                .map_err(|_| "增量需为整数".to_string())?;
+            beliefs().lock().unwrap().observe(prop.trim(), delta)
+        }
+        "retract" => {
+            let rest = text[sub.len()..].trim();
+            if rest.is_empty() {
+                return Err("用法: retract <命题>".to_string());
+            }
+            beliefs().lock().unwrap().retract(rest)
+        }
+        "weak" => {
+            let threshold: u8 = text
+                .split_whitespace()
+                .nth(1)
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(50);
+            let list = beliefs().lock().unwrap().below(threshold);
+            if list.is_empty() {
+                Ok(format!("无置信度 < {}% 的信念", threshold))
+            } else {
+                Ok(list
+                    .iter()
+                    .map(|(p, c)| format!("{} ({}%)", p, c))
+                    .collect::<Vec<_>>()
+                    .join("\n"))
+            }
+        }
+        _ => Ok(beliefs().lock().unwrap().status()),
+    }
+}
+
+fn act_judgment(payload: &str) -> Result<String, String> {
+    let text = payload.trim();
+    let sub = text.split_whitespace().next().unwrap_or("");
+    match sub {
+        "judge" => {
+            let rest = text[sub.len()..].trim();
+            judgment().lock().unwrap().judge(if rest.is_empty() {
+                None
+            } else {
+                Some(rest)
+            })
+        }
+        "decide" => judgment().lock().unwrap().decide(),
+        _ => Ok(judgment().lock().unwrap().status()),
     }
 }
 

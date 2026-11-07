@@ -34,7 +34,7 @@ cargo run
 | `sense <通道>` | 读取通道的实时快照 | 可读 (r) |
 | `act <通道> [负载...]` | 向通道写入或触发一次操作 | 可写 (w) |
 
-`channels` 命令列出全部 66 个通道、类别、读写权限以及感知/行动计数。
+`channels` 命令列出全部 69 个通道、类别、读写权限以及感知/行动计数。
 
 ## 系统模块速查
 
@@ -55,7 +55,7 @@ cargo run
 |---|---|---|
 | `file://vfs` | `act file://vfs hello` | 追加一行到 `/var/log/channel.log` |
 | `fs://meta` | `act fs://meta chmod 755 /etc` | 权限 / 属主 / 链接 / 挂载元数据 |
-| `mount://table` | `act mount://table mount tmpfs /data tmpfs ro` | 挂载表（见下节） |
+| `mount://table` | `act mount://table mount tmpfs /data tmpfs ro` | 挂载表，挂载点会物化进 VFS（见下节） |
 
 ### 进程、环境与资源
 
@@ -77,6 +77,8 @@ cargo run
 | `net://dns` | `act net://dns resolve example.com` | DNS 解析 |
 | `socket://tcp` | `act socket://tcp connect host:80 hi` | TCP 连接 |
 | `fw://rules` | `act fw://rules policy DROP` | 防火墙规则与默认策略 |
+| `gateway://net` | `act gateway://net policy deny` | 出站策略与流量闸门 |
+| `browser://gateway` | `act browser://gateway open https://example.com` | 真实抓取页面、提取标题与正文 |
 
 ### 设备
 
@@ -111,6 +113,16 @@ act mount://table umount /data                       # 卸载
 ```
 
 约束：目标必须是绝对路径；目标已被挂载则报错；根 `/` 不允许卸载。
+
+**与 VFS 真实联动**（不再是纯记录）：
+
+- 挂载时自动递归创建目标目录（等价 `mkdir -p`）
+- `procfs` 挂载点写入 `meminfo` / `loadavg` / `uptime` / `version` / `stat`（取自 `proc://sysinfo`）
+- `sysfs` 挂载点写入 `gpu_vram` / `kernel_params` / `net_interfaces` / `judgment`
+- `devfs` 挂载点按设备树写入设备节点
+- 每次 `ls` / `cat` / `cd` 前刷新伪文件系统内容；`umount` 时一并移除该挂载点目录
+
+因此启动后 `ls /` 就能看到 `proc/`、`sys/`，`cat /proc/loadavg`、`cat /sys/gpu_vram` 拿到的都是实时内容。
 
 ### `proc://sysinfo` —— procfs 整机快照
 
@@ -162,22 +174,84 @@ act dev://bus remove 00:06.0                         # 热拔出设备
 
 约束：已绑定驱动的设备重复绑定会报错；未绑定时解绑会报错；总线地址不可重复。
 
+## 意志层：动机 / 信念 / 判断力
+
+前两批通道都在描述"世界"与"能做什么"，这三个通道补上"**为什么做、有多大把握、到底做不做**"。
+它们是**三个独立通道**，但数据是串起来用的：判断力读取动机与信念，自己不改它们。
+
+```text
+motive://self    我做事的倾向    curiosity / order / safety / efficacy（0-100 强度）
+belief://self    我认为世界如何  命题 + 置信度 0-100 + 支持/反驳证据
+judgment://self  我据此怎么裁决  判断分 = 信念置信 ×0.6 + 主导动机强度 ×0.4
+                                 >=70 commit / 40-69 probe / <40 hold
+```
+
+### `motive://self` —— 动机
+
+```sh
+sense motive://self                       # 四条动机的强度条 + 主导动机
+act motive://self urge efficacy +20       # 带符号增量，自动裁剪到 0-100
+act motive://self set safety 95           # 绝对设定
+act motive://self reset                   # 恢复默认
+```
+
+### `belief://self` —— 信念
+
+```sh
+sense belief://self
+act belief://self believe GPU显存可用 90    # 新增或覆盖置信度
+act belief://self observe GPU显存可用 -20  # 加一条反驳证据，置信度下降
+act belief://self weak 60                 # 列出置信度低于 60% 的信念
+act belief://self retract 某个命题         # 撤销
+```
+
+### `judgment://self` —— 判断力
+
+```sh
+sense judgment://self              # 策略、裁决统计、最近裁决
+act judgment://self judge GPU显存可用   # 裁决指定命题
+act judgment://self judge          # 省略命题：自动挑最弱信念
+act judgment://self decide         # 自主判断
+```
+
+示例（动机 safety=95、信念"外部网络可达"=50%）：
+
+```
+judge "外部网络可达": score=68 verdict=probe
+reason: 信念置信 50% ×0.6 + 主导动机 safety(95) ×0.4 = 68
+建议: 建议先 act belief://self observe "外部网络可达" +10 补充证据
+```
+
+三个通道在 `/sys/judgment` 里也有一份快照（挂载物化时写入）。
+
+## 外部世界：网关与浏览器
+
+- `gateway://net`：出站策略闸门。最长域名后缀规则优先，未命中用默认策略（`allow`/`deny`），每次判定计入 `allowed` / `blocked` / `bytes`。
+- `browser://gateway`：
+  - `open http(s)://...` —— 先过网关策略，再用真实网络抓取，提取 `<title>`、剥离标签存正文（最多 8KB），记录历史；4xx/5xx 也保留响应体。
+  - `open file:///etc/hibos.toml` —— 直接读 VFS，并同步到浏览器状态。
+  - `text 200` —— 查看正文前 200 字符；`history` —— 查看最近记录。
+
 ## 测试
 
 ```sh
 cargo test
 ```
 
-当前 146 个单元测试全部通过，覆盖通道注册、权限模型、各系统模块的边界条件（重复挂载、非法前缀、MTU 越界、重复绑定等）。
+当前 175 个单元测试全部通过，覆盖通道注册、权限模型、各系统模块的边界条件（重复挂载、非法前缀、MTU 越界、重复绑定、判断阈值、置信度裁剪等）。
 
 ## 设计说明
 
 每个系统模块都是"一个全局单例 + 一组纯逻辑方法 + 若干单元测试"，由 `kernel/sense.rs` 的 `probe` / `act` 统一路由到通道，因此**新增模块不需要改动 shell**：
 
-1. 新建 `kernel/xxx.rs`，暴露 `xxx() -> &'static Mutex<Xxx>`，实现 `list()` 与各 `act` 方法；
+1. 新建 `kernel/xxx.rs`，暴露 `xxx() -> &'static Mutex<Xxx>`，实现 `status()` 与各 `act` 方法；
 2. 在 `kernel/channels.rs` 的 `bootstrap()` 注册通道 URI 与权限；
 3. 在 `kernel/sense.rs` 的 `probe` 与 `act` 加一条分支；
 4. 在 `kernel/mod.rs` 声明模块。
+
+需要跨模块读取时直接锁对方的全局单例即可（例如 `judgment.rs` 读 `motive::motives()` 与
+`belief::beliefs()`）。注意保持单向依赖，避免两个模块互相加锁造成死锁。
+若引入新的通道类别，还需同步 `ChannelKind::name()` 与 `ai_token.rs` 中的感知映射。
 
 ## 许可证
 
