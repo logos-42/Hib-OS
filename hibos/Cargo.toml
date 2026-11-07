@@ -1,0 +1,13 @@
+[package]
+name = "hibos"
+version = "0.1.0"
+edition = "2021"
+authors = ["logos-42"]
+license = "MIT"
+
+[[bin]]
+name = "hibos"
+path = "kernel/mod.rs"
+
+[dependencies]
+ureq = "2"
