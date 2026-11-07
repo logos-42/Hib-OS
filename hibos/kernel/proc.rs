@@ -121,6 +121,12 @@ impl ProcTable {
         out.trim_end().to_string()
     }
 
+    /// 进程总数（含内核自身），供 procfs 汇总负载。
+    pub fn count(&mut self) -> usize {
+        self.refresh();
+        self.procs.len()
+    }
+
     /// 扁平进程列表。
     pub fn list(&mut self) -> String {
         self.refresh();

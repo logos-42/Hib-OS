@@ -40,6 +40,11 @@ impl MemManager {
         )
     }
 
+    /// 返回 (总量, 已用) 字节数，供 procfs 汇总 meminfo。
+    pub fn usage(&self) -> (u64, u64) {
+        (self.total, self.used)
+    }
+
     pub fn alloc(&mut self, bytes: u64) -> Result<String, String> {
         if self.used.saturating_add(bytes) > self.total {
             return Err("主机 RAM 不足".to_string());

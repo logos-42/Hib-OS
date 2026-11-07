@@ -323,6 +323,19 @@ pub fn bootstrap() -> ChannelRegistry {
         (ChannelKind::Device, "time://cron", Access::ReadWrite),
         (ChannelKind::App, "pkg://store", Access::ReadWrite),
         (ChannelKind::Process, "tty://jobs", Access::ReadWrite),
+        // —— 系统设置类：sysctl / 身份 / 环境 / 限制 / 防火墙 / cgroup / 电源 ——
+        (ChannelKind::Interface, "sysctl://kernel", Access::ReadWrite),
+        (ChannelKind::Interface, "config://system", Access::ReadWrite),
+        (ChannelKind::Io, "env://process", Access::ReadWrite),
+        (ChannelKind::Action, "limits://process", Access::ReadWrite),
+        (ChannelKind::Net, "fw://rules", Access::ReadWrite),
+        (ChannelKind::Action, "cgroup://groups", Access::ReadWrite),
+        (ChannelKind::Action, "power://state", Access::ReadWrite),
+        // —— 第二批系统模块：挂载表 / procfs / 多网卡 / 设备总线 ——
+        (ChannelKind::File, "mount://table", Access::ReadWrite),
+        (ChannelKind::Process, "proc://sysinfo", Access::ReadWrite),
+        (ChannelKind::Net, "net://interfaces", Access::ReadWrite),
+        (ChannelKind::Device, "dev://bus", Access::ReadWrite),
     ];
     for (kind, name, access) in defaults {
         let _ = reg.open(kind, name, access);
@@ -337,15 +350,15 @@ mod tests {
     #[test]
     fn bootstrap_opens_all_channels() {
         let reg = bootstrap();
-        assert_eq!(reg.len(), 55);
-        assert_eq!(reg.of_kind(ChannelKind::Net).count(), 3);
+        assert_eq!(reg.len(), 66);
+        assert_eq!(reg.of_kind(ChannelKind::Net).count(), 5);
         assert_eq!(reg.of_kind(ChannelKind::Context).count(), 2);
-        assert_eq!(reg.of_kind(ChannelKind::Action).count(), 3);
+        assert_eq!(reg.of_kind(ChannelKind::Action).count(), 6);
         assert_eq!(reg.of_kind(ChannelKind::Agent).count(), 2);
         assert_eq!(reg.of_kind(ChannelKind::Gpu).count(), 4);
-        assert_eq!(reg.of_kind(ChannelKind::Device).count(), 10);
+        assert_eq!(reg.of_kind(ChannelKind::Device).count(), 11);
         assert_eq!(reg.of_kind(ChannelKind::Memory).count(), 4);
-        assert_eq!(reg.of_kind(ChannelKind::Process).count(), 2);
+        assert_eq!(reg.of_kind(ChannelKind::Process).count(), 3);
         assert_eq!(reg.of_kind(ChannelKind::User).count(), 1);
         assert_eq!(reg.of_kind(ChannelKind::App).count(), 3);
         assert_eq!(reg.of_kind(ChannelKind::Browser).count(), 1);

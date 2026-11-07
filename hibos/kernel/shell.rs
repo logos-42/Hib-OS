@@ -1477,6 +1477,13 @@ impl Shell {
                 ACTION: act time://cron add <秒> <命令>|run       定时任务\n\
                 ACTION: act pkg://store install|remove <包>       软件包\n\
                 ACTION: act tty://jobs fg|bg|kill <pid>           作业控制\n\
+                ACTION: act sysctl://kernel set <key> <value>     内核参数 (hostname/ip_forward/log.level)\n\
+                ACTION: act config://system set <key> <value>     系统身份 (hostname/timezone/locale)\n\
+                ACTION: act env://process set <key> <value>       环境变量\n\
+                ACTION: act limits://process set <key> <value>    资源限制\n\
+                ACTION: act fw://rules add|policy|del ...         防火墙规则\n\
+                ACTION: act cgroup://groups create|set|attach     控制组配额\n\
+                ACTION: act power://state suspend|reboot|wake     电源姿态\n\
                 规则：先用 sense 了解状态，再决定 act / 创建资源 / 操作文件；不要执行破坏性操作除非必要；用简体中文回答，并在需要时在末尾给出 ACTION。",
             catalog
         );
@@ -1902,13 +1909,18 @@ mod tests {
     #[test]
     fn channels_registry_and_sense() {
         let mut s = Shell::new();
-        assert_eq!(s.channels.len(), 55);
+        assert_eq!(s.channels.len(), 66);
         assert!(s.dispatch("channels"));
         assert!(s.dispatch("sense file://vfs"));
         assert!(s.dispatch("sense gpu://vram"));
         assert!(s.dispatch("sense dev://timer"));
         assert!(s.dispatch("sense driver://gpu"));
         assert!(s.dispatch("sense browser://gateway"));
+        // 第二批系统模块通道
+        assert!(s.dispatch("sense mount://table"));
+        assert!(s.dispatch("sense proc://sysinfo"));
+        assert!(s.dispatch("sense net://interfaces"));
+        assert!(s.dispatch("sense dev://bus"));
         // 只写通道不可感知 / 不存在通道
         assert!(s.dispatch("sense action://syscall"));
         assert!(s.dispatch("sense nope://none"));

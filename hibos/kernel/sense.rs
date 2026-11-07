@@ -12,15 +12,25 @@ use crate::monitor::get_time_ns;
 use crate::net::{ETH_NAME, fmt_ip, fmt_mac, net, parse_ip, parse_mac, Packet, RouteEntry};
 use crate::vfs::Vfs;
 
+use crate::bus::bus;
 use crate::caps::caps;
+use crate::cgroup::cgroups;
 use crate::dev::devtree;
+use crate::env::envstore;
 use crate::fsmeta::fsmeta;
+use crate::fw::firewall;
 use crate::init::init_mgr;
 use crate::ipc::ipc;
+use crate::limits::limits;
 use crate::mem::mem;
+use crate::mount::mounts;
+use crate::netif::ifaces;
 use crate::pkg::pkgstore;
+use crate::power::power;
 use crate::proc::proctable;
+use crate::procfs::procfs;
 use crate::socket::netio;
+use crate::sysctl::sysctl;
 use crate::time::timekeeper;
 use crate::tty::tty;
 use crate::user::userdb;
@@ -196,6 +206,19 @@ pub fn probe(name: &str) -> Option<String> {
             let mut t = tty().lock().unwrap();
             Some(t.jobs())
         }
+        // —— 系统设置类 ——
+        "sysctl://kernel" => Some(sysctl().lock().unwrap().kernel_list()),
+        "config://system" => Some(sysctl().lock().unwrap().identity_list()),
+        "env://process" => Some(envstore().lock().unwrap().list()),
+        "limits://process" => Some(limits().lock().unwrap().list()),
+        "fw://rules" => Some(firewall().lock().unwrap().list()),
+        "cgroup://groups" => Some(cgroups().lock().unwrap().list()),
+        "power://state" => Some(power().lock().unwrap().status()),
+        // —— 第二批系统模块 ——
+        "mount://table" => Some(mounts().lock().unwrap().list()),
+        "proc://sysinfo" => Some(procfs().lock().unwrap().snapshot()),
+        "net://interfaces" => Some(ifaces().lock().unwrap().list()),
+        "dev://bus" => Some(bus().lock().unwrap().list()),
         _ => None,
     }
 }
@@ -406,6 +429,17 @@ pub fn act(name: &str, payload: &str) -> Option<Result<String, String>> {
         "time://cron" => Some(act_cron(payload)),
         "pkg://store" => Some(act_pkg(payload)),
         "tty://jobs" => Some(act_tty(payload)),
+        "sysctl://kernel" => Some(act_sysctl(payload, true)),
+        "config://system" => Some(act_sysctl(payload, false)),
+        "env://process" => Some(act_env(payload)),
+        "limits://process" => Some(act_limits(payload)),
+        "fw://rules" => Some(act_fw(payload)),
+        "cgroup://groups" => Some(act_cgroup(payload)),
+        "power://state" => Some(act_power(payload)),
+        "mount://table" => Some(act_mount(payload)),
+        "proc://sysinfo" => Some(act_procfs(payload)),
+        "net://interfaces" => Some(act_netif(payload)),
+        "dev://bus" => Some(act_bus(payload)),
         _ => None,
     }
 }
@@ -733,6 +767,234 @@ fn act_tty(payload: &str) -> Result<String, String> {
     }
 }
 
+fn act_sysctl(payload: &str, kernel: bool) -> Result<String, String> {
+    let mut it = payload.splitn(3, ' ');
+    match it.next() {
+        Some("set") => {
+            let k = it.next().ok_or("用法: set <key> <value>")?;
+            let v = it.next().ok_or("用法: set <key> <value>")?;
+            if kernel {
+                sysctl().lock().unwrap().set_kernel(k, v)
+            } else {
+                sysctl().lock().unwrap().set_identity(k, v)
+            }
+        }
+        _ => {
+            if kernel {
+                Ok(sysctl().lock().unwrap().kernel_list())
+            } else {
+                Ok(sysctl().lock().unwrap().identity_list())
+            }
+        }
+    }
+}
+
+fn act_env(payload: &str) -> Result<String, String> {
+    let mut it = payload.splitn(3, ' ');
+    match it.next() {
+        Some("set") => {
+            let k = it.next().ok_or("用法: set <key> <value>")?;
+            let v = it.next().ok_or("用法: set <key> <value>")?;
+            Ok(envstore().lock().unwrap().set(k, v))
+        }
+        Some("get") => {
+            let k = it.next().ok_or("用法: get <key>")?;
+            Ok(envstore().lock().unwrap().get(k))
+        }
+        Some("unset") => {
+            let k = it.next().ok_or("用法: unset <key>")?;
+            Ok(envstore().lock().unwrap().unset(k))
+        }
+        _ => Ok(envstore().lock().unwrap().list()),
+    }
+}
+
+fn act_limits(payload: &str) -> Result<String, String> {
+    let mut it = payload.split_whitespace();
+    match it.next() {
+        Some("set") => {
+            let k = it.next().ok_or("用法: set <key> <value>")?;
+            let v = it
+                .next()
+                .and_then(|s| s.parse::<u64>().ok())
+                .ok_or("用法: set <key> <value>")?;
+            limits().lock().unwrap().set(k, v)
+        }
+        Some("get") => {
+            let k = it.next().ok_or("用法: get <key>")?;
+            Ok(limits().lock().unwrap().get(k))
+        }
+        _ => Ok(limits().lock().unwrap().list()),
+    }
+}
+
+fn act_fw(payload: &str) -> Result<String, String> {
+    let mut it = payload.split_whitespace();
+    match it.next() {
+        Some("add") => {
+            let action = it.next().ok_or("用法: add <allow|deny> <proto> <port> [src]")?;
+            let proto = it.next().ok_or("用法: add <allow|deny> <proto> <port> [src]")?;
+            let port = it.next().ok_or("用法: add <allow|deny> <proto> <port> [src]")?;
+            let src = it.next().unwrap_or("any");
+            Ok(firewall().lock().unwrap().add(action, proto, port, src))
+        }
+        Some("del") => {
+            let id = it.next().and_then(|s| s.parse::<u64>().ok()).ok_or("用法: del <id>")?;
+            firewall().lock().unwrap().del(id)
+        }
+        Some("policy") => {
+            let p = it.next().ok_or("用法: policy <ACCEPT|DROP>")?;
+            firewall().lock().unwrap().set_policy(p)
+        }
+        _ => Ok(firewall().lock().unwrap().list()),
+    }
+}
+
+fn act_cgroup(payload: &str) -> Result<String, String> {
+    let mut it = payload.split_whitespace();
+    match it.next() {
+        Some("create") => {
+            let n = it.next().ok_or("用法: create <name>")?;
+            cgroups().lock().unwrap().create(n)
+        }
+        Some("del") => {
+            let n = it.next().ok_or("用法: del <name>")?;
+            cgroups().lock().unwrap().delete(n)
+        }
+        Some("set") => {
+            let n = it.next().ok_or("用法: set <name> <cpu%> <memMiB>")?;
+            let cpu = it.next().and_then(|s| s.parse().ok()).ok_or("用法: set <name> <cpu%> <memMiB>")?;
+            let mem = it.next().and_then(|s| s.parse().ok()).ok_or("用法: set <name> <cpu%> <memMiB>")?;
+            cgroups().lock().unwrap().set_limit(n, cpu, mem)
+        }
+        Some("attach") => {
+            let n = it.next().ok_or("用法: attach <name> <pid>")?;
+            let pid = it.next().and_then(|s| s.parse().ok()).ok_or("用法: attach <name> <pid>")?;
+            cgroups().lock().unwrap().attach(n, pid)
+        }
+        _ => Ok(cgroups().lock().unwrap().list()),
+    }
+}
+
+fn act_power(payload: &str) -> Result<String, String> {
+    let mut it = payload.split_whitespace();
+    match it.next() {
+        Some("suspend") => power().lock().unwrap().set("suspend"),
+        Some("reboot") => power().lock().unwrap().set("reboot"),
+        Some("shutdown") => power().lock().unwrap().set("shutdown"),
+        Some("wake") => Ok(power().lock().unwrap().wake()),
+        _ => Ok(power().lock().unwrap().status()),
+    }
+}
+
+fn act_mount(payload: &str) -> Result<String, String> {
+    let mut it = payload.split_whitespace();
+    match it.next() {
+        Some("mount") => {
+            let src = it.next().ok_or("用法: mount <源> <目标> [类型] [ro|rw]")?;
+            let target = it.next().ok_or("用法: mount <源> <目标> [类型] [ro|rw]")?;
+            let mut fstype = "auto";
+            let mut ro = false;
+            for arg in it {
+                match arg {
+                    "ro" => ro = true,
+                    "rw" => ro = false,
+                    other => fstype = other,
+                }
+            }
+            mounts().lock().unwrap().mount(src, target, fstype, ro)
+        }
+        Some("umount") | Some("unmount") => {
+            let target = it.next().ok_or("用法: umount <目标>")?;
+            mounts().lock().unwrap().umount(target)
+        }
+        Some("remount") => {
+            let target = it.next().ok_or("用法: remount <目标> <ro|rw>")?;
+            let mode = it.next().unwrap_or("rw");
+            let ro = match mode {
+                "ro" => true,
+                "rw" => false,
+                _ => return Err("用法: remount <目标> <ro|rw>".to_string()),
+            };
+            mounts().lock().unwrap().remount(target, ro)
+        }
+        _ => Ok(mounts().lock().unwrap().list()),
+    }
+}
+
+fn act_procfs(payload: &str) -> Result<String, String> {
+    match payload.trim() {
+        "" | "snapshot" | "read" => Ok(procfs().lock().unwrap().snapshot()),
+        "refresh" => Ok(procfs().lock().unwrap().refresh()),
+        _ => Err("用法: act proc://sysinfo refresh|snapshot".to_string()),
+    }
+}
+
+fn act_netif(payload: &str) -> Result<String, String> {
+    let mut it = payload.split_whitespace();
+    match it.next() {
+        Some("up") => {
+            let n = it.next().ok_or("用法: up <网卡>")?;
+            ifaces().lock().unwrap().set_link(n, true)
+        }
+        Some("down") => {
+            let n = it.next().ok_or("用法: down <网卡>")?;
+            ifaces().lock().unwrap().set_link(n, false)
+        }
+        Some("addr") => {
+            let n = it.next().ok_or("用法: addr <网卡> <ip>/<前缀>")?;
+            let cidr = it.next().ok_or("用法: addr <网卡> <ip>/<前缀>")?;
+            ifaces().lock().unwrap().set_addr(n, cidr)
+        }
+        Some("mtu") => {
+            let n = it.next().ok_or("用法: mtu <网卡> <68-65535>")?;
+            let mtu = it
+                .next()
+                .and_then(|s| s.parse::<u32>().ok())
+                .ok_or("用法: mtu <网卡> <68-65535>")?;
+            ifaces().lock().unwrap().set_mtu(n, mtu)
+        }
+        Some("add") => {
+            let n = it.next().ok_or("用法: add <网卡> [mac]")?;
+            let mac = it.next().unwrap_or("02:00:00:00:00:ff");
+            ifaces().lock().unwrap().add(n, mac)
+        }
+        Some("del") | Some("remove") => {
+            let n = it.next().ok_or("用法: del <网卡>")?;
+            ifaces().lock().unwrap().del(n)
+        }
+        _ => Ok(ifaces().lock().unwrap().list()),
+    }
+}
+
+fn act_bus(payload: &str) -> Result<String, String> {
+    let mut it = payload.split_whitespace();
+    match it.next() {
+        Some("bind") => {
+            let addr = it.next().ok_or("用法: bind <地址> <驱动>")?;
+            let driver = it.next().ok_or("用法: bind <地址> <驱动>")?;
+            bus().lock().unwrap().bind(addr, driver)
+        }
+        Some("unbind") => {
+            let addr = it.next().ok_or("用法: unbind <地址>")?;
+            bus().lock().unwrap().unbind(addr)
+        }
+        Some("rescan") => bus().lock().unwrap().rescan(),
+        Some("add") => {
+            let addr = it.next().ok_or("用法: add <地址> <vendor:device> <类别> [驱动]")?;
+            let id = it.next().ok_or("用法: add <地址> <vendor:device> <类别> [驱动]")?;
+            let class = it.next().unwrap_or("misc");
+            let driver = it.next();
+            bus().lock().unwrap().add(addr, id, class, driver)
+        }
+        Some("remove") | Some("del") => {
+            let addr = it.next().ok_or("用法: remove <地址>")?;
+            bus().lock().unwrap().remove(addr)
+        }
+        _ => Ok(bus().lock().unwrap().list()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -788,6 +1050,42 @@ mod tests {
         assert!(act("net://eth0", "ping 10.0.0.2").unwrap().is_err());
         let r = act("net://eth0", "link up").unwrap().unwrap();
         assert_eq!(r, "链路已启通");
+    }
+
+    #[test]
+    fn new_system_modules_probe_and_act() {
+        // 四个新通道都必须有非空探针
+        for name in [
+            "mount://table",
+            "proc://sysinfo",
+            "net://interfaces",
+            "dev://bus",
+        ] {
+            let out = probe(name).unwrap_or_else(|| panic!("通道 {} 无探针", name));
+            assert!(!out.is_empty(), "通道 {} 探针为空", name);
+        }
+
+        // 挂载表：挂载 -> 卸载，根目录不可卸载
+        let r = act("mount://table", "mount tmpfs /cache tmpfs ro")
+            .unwrap()
+            .unwrap();
+        assert!(r.contains("/cache"), "{}", r);
+        assert!(act("mount://table", "umount /").unwrap().is_err());
+        assert!(act("mount://table", "umount /cache").unwrap().is_ok());
+
+        // procfs：刷新递增采样计数
+        let r = act("proc://sysinfo", "refresh").unwrap().unwrap();
+        assert!(r.contains("loadavg:") && r.contains("meminfo:"), "{}", r);
+
+        // 多网卡：MTU 与链路状态
+        let r = act("net://interfaces", "mtu wlan0 9000").unwrap().unwrap();
+        assert!(r.contains("9000"), "{}", r);
+        assert!(act("net://interfaces", "mtu wlan0 1").unwrap().is_err());
+
+        // 设备总线：扫描与非法绑定
+        let r = act("dev://bus", "rescan").unwrap().unwrap();
+        assert!(r.contains("总线扫描"), "{}", r);
+        assert!(act("dev://bus", "bind 00:99.0 x").unwrap().is_err());
     }
 
     #[test]
