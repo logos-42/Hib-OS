@@ -293,6 +293,11 @@ pub fn probe(name: &str) -> Option<String> {
             Some(crate::scheduler_domains::status_line())
         }
         "sched://inspiration" => Some(crate::inspiration::core().lock().unwrap().status()),
+        // —— Subagent-A 新增：内存与页表相关通道 ——
+        "swap://area" => Some(swap_summary().unwrap_or_else(|_| "swap 未初始化".to_string())),
+        "pagetable://walk" => Some(pt_summary()),
+        "slab://stats" => Some(slab_summary()),
+        "buddy://stats" => Some(buddy_summary()),
         _ => None,
     }
 }
@@ -756,6 +761,11 @@ fn act_raw(name: &str, payload: &str) -> Option<Result<String, String>> {
             Some(act_sched(payload))
         }
         "sched://inspiration" => Some(crate::inspiration::act(payload)),
+        // —— Subagent-A 新增：内存与页表相关通道的行动 ——
+        "swap://area" => Some(act_swap(payload)),
+        "pagetable://walk" => Some(act_pagetable(payload)),
+        "slab://stats" => Some(act_slab(payload)),
+        "buddy://stats" => Some(act_buddy(payload)),
         _ => None,
     }
 }
@@ -2303,6 +2313,174 @@ fn act_mouse(payload: &str) -> Result<String, String> {
         }
         _ => Err("用法: act input://mouse move <x> <y> | click <x> <y> | wheel <x> <y> [delta]"
             .to_string()),
+    }
+}
+
+// ---- Subagent-A 新增：内存与页表通道的行动实现 ----
+
+fn act_swap(payload: &str) -> Result<String, String> {
+    let mut it = payload.split_whitespace();
+    match it.next() {
+        Some("stats") => Ok(swap_summary().unwrap_or_else(|_| "swap 未初始化".to_string())),
+        Some("out") => {
+            let addr: usize = it
+                .next()
+                .and_then(|s| s.parse::<usize>().ok())
+                .ok_or("用法: act swap://area out <addr> <data>")?;
+            let data = it.next().unwrap_or("").as_bytes();
+            let slot = crate::swap_sim::swap_out(addr, data)
+                .map_err(|e| format!("swap out 失败: {}", e))?;
+            Ok(format!("已换出 addr={} 到 slot={}", addr, slot.index()))
+        }
+        Some("in") => {
+            let slot_idx: usize = it
+                .next()
+                .and_then(|s| s.parse::<usize>().ok())
+                .ok_or("用法: act swap://area in <slot>")?;
+            let data = crate::swap_sim::swap_in(crate::swap_sim::SwapSlot(slot_idx))
+                .map_err(|e| format!("swap in 失败: {}", e))?;
+            Ok(format!("已从 slot={} 换入 {} 字节", slot_idx, data.len()))
+        }
+        Some("free") => {
+            let slot_idx: usize = it
+                .next()
+                .and_then(|s| s.parse::<usize>().ok())
+                .ok_or("用法: act swap://area free <slot>")?;
+            crate::swap_sim::free_swap_slot(crate::swap_sim::SwapSlot(slot_idx))
+                .map_err(|e| format!("释放 slot 失败: {}", e))?;
+            Ok(format!("已释放 swap slot={}", slot_idx))
+        }
+        _ => Err(
+            "用法: act swap://area stats | out <addr> <data> | in <slot> | free <slot>"
+                .to_string(),
+        ),
+    }
+}
+
+fn act_pagetable(payload: &str) -> Result<String, String> {
+    let mut it = payload.split_whitespace();
+    match it.next() {
+        Some("map") => {
+            let vaddr: u64 = it
+                .next()
+                .and_then(|s| u64::from_str_radix(s.trim_start_matches("0x"), 16))
+                .ok_or("用法: act pagetable://walk map <vaddr> <paddr> [rw] [user]")?;
+            let paddr: u64 = it
+                .next()
+                .and_then(|s| u64::from_str_radix(s.trim_start_matches("0x"), 16))
+                .ok_or("用法: act pagetable://walk map <vaddr> <paddr> [rw] [user]")?;
+            let writable = it.any(|s| s == "rw");
+            let user = it.any(|s| s == "user");
+            let flags = crate::page_table_sim::PTEFlags {
+                present: true,
+                writable,
+                user,
+                executable: false,
+                dirty: false,
+                accessed: false,
+            };
+            crate::page_table_sim::pt_map(vaddr, paddr, true, writable, user)
+                .map_err(|e| format!("页表映射失败: {:?}", e))?;
+            Ok(format!("已映射 vaddr=0x{:x} -> paddr=0x{:x}", vaddr, paddr))
+        }
+        Some("unmap") => {
+            let vaddr: u64 = it
+                .next()
+                .and_then(|s| u64::from_str_radix(s.trim_start_matches("0x"), 16))
+                .ok_or("用法: act pagetable://walk unmap <vaddr>")?;
+            crate::page_table_sim::pt_unmap(vaddr)
+                .map_err(|e| format!("取消映射失败: {:?}", e))?;
+            Ok(format!("已取消映射 vaddr=0x{:x}", vaddr))
+        }
+        Some("translate") | Some("walk") => {
+            let vaddr: u64 = it
+                .next()
+                .and_then(|s| u64::from_str_radix(s.trim_start_matches("0x"), 16))
+                .ok_or("用法: act pagetable://walk translate <vaddr> [write] [user]")?;
+            let write = it.any(|s| s == "write");
+            let user = it.any(|s| s == "user");
+            let (paddr, _pte, _offset) = crate::page_table_sim::pt_translate(vaddr, write, user)
+                .map_err(|e| format!("地址转换失败: {:?}", e))?;
+            Ok(format!(
+                "vaddr=0x{:x} -> paddr=0x{:x} (write={} user={})",
+                vaddr, paddr, write, user
+            ))
+        }
+        Some("stats") => Ok(pt_summary()),
+        _ => Err(
+            "用法: act pagetable://walk map <vaddr> <paddr> [rw] [user] | unmap <vaddr> | translate <vaddr> | stats"
+                .to_string(),
+        ),
+    }
+}
+
+fn act_slab(payload: &str) -> Result<String, String> {
+    let mut it = payload.split_whitespace();
+    match it.next() {
+        Some("alloc") => {
+            let size: usize = it
+                .next()
+                .and_then(|s| s.parse::<usize>().ok())
+                .ok_or("用法: act slab://stats alloc <size>")?;
+            let (handle, cache_id) = crate::slab_alloc::slab_alloc_obj(size)
+                .map_err(|e| format!("slab 分配失败: {:?}", e))?;
+            Ok(format!(
+                "已分配 slab 对象 cache={} index={} size={}",
+                cache_id, handle.obj_index, size
+            ))
+        }
+        Some("free") => {
+            let cache_id: u64 = it
+                .next()
+                .and_then(|s| s.parse::<u64>().ok())
+                .ok_or("用法: act slab://stats free <cache_id> <obj_index>")?;
+            let obj_index: usize = it
+                .next()
+                .and_then(|s| s.parse::<usize>().ok())
+                .ok_or("用法: act slab://stats free <cache_id> <obj_index>")?;
+            let handle = crate::slab_alloc::ObjHandle::new(cache_id, obj_index);
+            crate::slab_alloc::slab_free_obj(handle)
+                .map_err(|e| format!("slab 释放失败: {:?}", e))?;
+            Ok(format!("已释放 slab 对象 cache={} index={}", cache_id, obj_index))
+        }
+        Some("stats") => Ok(slab_summary()),
+        _ => Err(
+            "用法: act slab://stats alloc <size> | free <cache_id> <obj_index> | stats"
+                .to_string(),
+        ),
+    }
+}
+
+fn act_buddy(payload: &str) -> Result<String, String> {
+    let mut it = payload.split_whitespace();
+    match it.next() {
+        Some("alloc") => {
+            let order: usize = it
+                .next()
+                .and_then(|s| s.parse::<usize>().ok())
+                .ok_or("用法: act buddy://stats alloc <order>")?;
+            let addr = crate::buddy_alloc::buddy_alloc(order)
+                .map_err(|e| format!("伙伴分配失败: {:?}", e))?;
+            Ok(format!("已分配 order={} page={}", order, addr.index()))
+        }
+        Some("free") => {
+            let addr: usize = it
+                .next()
+                .and_then(|s| s.parse::<usize>().ok())
+                .ok_or("用法: act buddy://stats free <page> <order>")?;
+            let order: usize = it
+                .next()
+                .and_then(|s| s.parse::<usize>().ok())
+                .ok_or("用法: act buddy://stats free <page> <order>")?;
+            crate::buddy_alloc::buddy_free(crate::buddy_alloc::PageAddr(addr), order)
+                .map_err(|e| format!("伙伴释放失败: {:?}", e))?;
+            Ok(format!("已释放 page={} order={}", addr, order))
+        }
+        Some("stats") => Ok(buddy_summary()),
+        _ => Err(
+            "用法: act buddy://stats alloc <order> | free <page> <order> | stats"
+                .to_string(),
+        ),
     }
 }
 

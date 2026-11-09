@@ -57,6 +57,14 @@ pub enum ChannelKind {
     User,
     /// 意志 / 动机与信念
     Will,
+    /// 交换分区 (swap)
+    Swap,
+    /// 多级页表
+    PageTable,
+    /// slab 对象缓存
+    Slab,
+    /// 伙伴系统页框分配器
+    Buddy,
 }
 
 impl ChannelKind {
@@ -84,6 +92,10 @@ impl ChannelKind {
             ChannelKind::Process => "process",
             ChannelKind::User => "user",
             ChannelKind::Will => "will",
+            ChannelKind::Swap => "swap",
+            ChannelKind::PageTable => "pagetable",
+            ChannelKind::Slab => "slab",
+            ChannelKind::Buddy => "buddy",
         }
     }
 }

@@ -51,6 +51,7 @@ pub mod protection;
 pub mod realm;
 pub mod scheduler;
 pub mod scheduler_domains;
+pub mod security;
 pub mod fiber;
 pub mod sense;
 pub mod socket;
@@ -61,6 +62,7 @@ pub mod time;
 pub mod tty;
 pub mod user;
 pub mod deepseek;
+pub mod debug;
 pub mod shell;
 pub mod syscall;
 pub mod syscall_handler;
@@ -70,6 +72,18 @@ pub mod loader;
 pub mod irq;
 pub mod mm;
 pub mod file_channel;
+
+// —— Subagent-A 新增：内核核心与通道系统扩充 ——
+pub mod channel_ext;
+pub mod buddy_alloc;
+pub mod slab_alloc;
+pub mod page_cache;
+pub mod swap_sim;
+pub mod page_table_sim;
+pub mod multicore_sched;
+pub mod async_runtime;
+pub mod signal;
+pub mod ipc_ext;
 
 use ai_token::{ActionProcess, AIConsciousness, ComputeGraph, GraphOpType, TokenCreateRequest};
 use scheduler::{CpuPriority, GpuScheduler};

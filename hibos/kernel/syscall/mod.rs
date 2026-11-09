@@ -1,4 +1,7 @@
 //! 系统调用接口 —— AI 意识本体与 GPU 内核之间的交互边界。
+//!
+//! 本目录下还并行存在 POSIX 兼容层、ELF 加载器与动态链接器，
+//! 它们与 `AiSystemCall` 并行存在，不替换现有系统调用。
 
 use crate::ai_token::{
     ComputeGraph, ConceptId, ErrorCode, ProcessResult, ProcessState, SchedulePolicy,
@@ -6,6 +9,10 @@ use crate::ai_token::{
 };
 use crate::gpu::GpuCapabilities;
 use crate::scheduler::CpuPriority;
+
+pub mod posix_layer;
+pub mod elf_loader;
+pub mod dynamic_linker;
 
 /// 系统调用编号与参数。
 #[derive(Clone, Debug)]
