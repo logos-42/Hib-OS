@@ -1,0 +1,41 @@
+# 真像素 GUI（`gui` feature）
+
+Hib OS 不再只有终端 ASCII 假桌面，而是一套真正的像素 GUI 栈：
+
+| 模块 | 说明 |
+|---|---|
+| `kernel/gui/surface.rs` | 32bpp ARGB 表面，alpha 混合、矩形/圆角/渐变、5×7 字体光栅化。 |
+| `kernel/gui/window.rs` | 窗口对象，每个窗口拥有独立客户端表面；标题栏/关闭/最小化/最大化/缩放按钮；命中测试；内置终端模型（键盘 → 窗口 → 像素闭环）。 |
+| `kernel/gui/compositor.rs` | 壁纸、z-order、焦点、自上而下命中测试、窗口提升/置顶、损坏区域合成、光标。 |
+| `kernel/gui/input.rs` | 键盘/鼠标事件队列，按 z-order 路由到焦点窗口；标题栏拖动、右下角缩放、滚轮滚动。 |
+| `kernel/gui/bmp.rs` | 24 位 BMP 编码/保存，零依赖，可直接在资源管理器查看。 |
+| `kernel/gui/backend.rs` | （`--features gui`）winit 0.30 + softbuffer 0.4.8 真实窗口，最近邻缩放，400ms 节流实时刷新。 |
+
+三者共享同一份像素：终端 ANSI 预览、`gui shot` 导出的 BMP、`gui run` 打开的真实窗口，都由同一个 `Compositor` 合成。
+
+## 快速上手
+
+```sh
+cargo build --features gui
+cargo run --features gui -- --shell
+# 进入 shell 后：
+gui desktop      # 显示桌面摘要 + 真彩预览
+gui shot         # 导出 gui-output.bmp (960x600)
+gui run          # 打开真实窗口（阻塞到关闭；窗口内 Enter 的命令由 shell 事后执行）
+gui open TERMINAL
+gui focus 1
+gui click 100 100
+gui key hello\n
+```
+
+## 通道
+
+| 通道 | 类别 | 说明 |
+|---|---|---|
+| `gui://windows` | Desktop | 窗口合成状态 |
+| `input://kbd` | Desktop | 键盘输入 |
+| `input://mouse` | Desktop | 鼠标输入 |
+
+## 返回索引
+
+[返回目录](../README.md)
