@@ -24,6 +24,7 @@ use std::time::{Duration, Instant};
 use crate::monitor::get_time_ns;
 use crate::scheduler::{self, CpuPriority};
 use crate::scheduler_domains::SchedDomain;
+use crate::fiber;
 
 /// 执行体标识。
 pub type ExecId = u64;
@@ -495,6 +496,8 @@ pub fn wake(key: &str) -> usize {
     for domain in involved_domains {
         let _ = crate::scheduler_domains::wake_key(domain, key);
     }
+    // 通道事件即调度事件：若当前运行在纤程上下文中，检查是否该被抢占。
+    fiber::check_preemption();
     woke
 }
 
@@ -591,12 +594,14 @@ pub fn checkpoint() {
     if let Some(b) = g.bodies.get_mut(&id) {
         b.checkpoints += 1;
     }
+    // 通道安全点即纤程抢占点：检查是否该被抢占。
+    fiber::check_preemption();
 }
 
 /// 让出一次执行权（协作式）。
 ///
 /// 目前等价于一次安全点检查 + 一次极短让出；真正的抢占式切换
-/// 要等用户态上下文切换落地后替换实现。
+/// 由纤程调度器的监视线程通过时间片实现。
 pub fn yield_now() {
     checkpoint();
     std::thread::yield_now();

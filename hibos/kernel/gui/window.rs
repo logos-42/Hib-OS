@@ -20,8 +20,16 @@ pub type WindowId = u64;
 pub const TITLEBAR_H: u32 = 28;
 /// 边框宽度。
 pub const BORDER: u32 = 1;
-/// 关闭按钮直径。
+/// 红绿灯直径。
 pub const CLOSE_BTN: u32 = 14;
+/// 红绿灯距窗口右边距 / 按钮间距（保持在标题栏右上角）。
+pub const TRAFFIC_RIGHT_GAP: i32 = 10;
+pub const TRAFFIC_GAP: i32 = 8;
+
+/// macOS 标准三色。
+pub const MAC_RED: (u8, u8, u8) = (0xff, 0x5f, 0x57);
+pub const MAC_YELLOW: (u8, u8, u8) = (0xfe, 0xbc, 0x2e);
+pub const MAC_GREEN: (u8, u8, u8) = (0x28, 0xc8, 0x40);
 
 /// 鼠标命中窗口的哪个部位。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -164,10 +172,10 @@ impl Window {
         Rect::new(self.x, self.y, self.w, TITLEBAR_H)
     }
 
-    /// 关闭按钮（标题栏右侧）。
+    /// Mac 风格红绿灯：保持在标题栏右上角，关闭(红)在最右。
     pub fn close_rect(&self) -> Rect {
         Rect::new(
-            self.x + self.w as i32 - CLOSE_BTN as i32 - 10,
+            self.x + self.w as i32 - CLOSE_BTN as i32 - TRAFFIC_RIGHT_GAP,
             self.y + (TITLEBAR_H as i32 - CLOSE_BTN as i32) / 2,
             CLOSE_BTN,
             CLOSE_BTN,
@@ -176,13 +184,13 @@ impl Window {
 
     pub fn minimize_rect(&self) -> Rect {
         let mut r = self.close_rect();
-        r.x -= CLOSE_BTN as i32 + 8;
+        r.x -= CLOSE_BTN as i32 + TRAFFIC_GAP;
         r
     }
 
     pub fn maximize_rect(&self) -> Rect {
         let mut r = self.close_rect();
-        r.x -= (CLOSE_BTN as i32 + 8) * 2;
+        r.x -= (CLOSE_BTN as i32 + TRAFFIC_GAP) * 2;
         r
     }
 
@@ -370,12 +378,14 @@ impl Window {
         dst.fill_rect(tb.x, tb.y, tb.w, tb.h, palette::MANTLE);
         // 左侧强调条
         dst.fill_rect(tb.x, tb.y, 3, tb.h, self.accent);
-        dst.draw_text(tb.x + 12, tb.y + 6, &self.title, palette::TEXT, 2);
+        // 标题左侧对齐，右侧让出红绿灯区域
+        let title_max = tb.right() - (CLOSE_BTN as i32 + TRAFFIC_GAP) * 3 - TRAFFIC_RIGHT_GAP;
+        dst.draw_text_clipped(tb.x + 12, tb.y + 6, &self.title, palette::TEXT, 2, title_max);
 
-        // 4. 控制按钮
-        draw_button(dst, self.close_rect(), palette::RED, "x");
-        draw_button(dst, self.minimize_rect(), palette::YELLOW, "-");
-        draw_button(dst, self.maximize_rect(), palette::GREEN, "o");
+        // 4. Mac 红绿灯：焦点窗口才显示操作符号
+        draw_traffic_light(dst, self.close_rect(), MAC_RED, LightGlyph::Close, focused);
+        draw_traffic_light(dst, self.minimize_rect(), MAC_YELLOW, LightGlyph::Minimize, focused);
+        draw_traffic_light(dst, self.maximize_rect(), MAC_GREEN, LightGlyph::Maximize, focused);
 
         // 5. 客户端
         let cr = self.client_rect();
@@ -389,12 +399,95 @@ impl Window {
     }
 }
 
-fn draw_button(dst: &mut Surface, rect: Rect, color: u32, glyph_ch: &str) {
-    dst.fill_round_rect(rect, rect.h / 2, color);
-    // 深色字形
-    let tx = rect.x + (rect.w as i32 - Surface::text_width(glyph_ch, 1) as i32) / 2;
-    let ty = rect.y + (rect.h as i32 - 7) / 2;
-    dst.draw_text(tx, ty, glyph_ch, palette::CRUST, 1);
+#[derive(Clone, Copy)]
+enum LightGlyph {
+    Close,
+    Minimize,
+    Maximize,
+}
+
+fn mix(a: u8, b: u8, k: f32) -> u8 {
+    ((a as f32) * (1.0 - k) + (b as f32) * k).clamp(0.0, 255.0) as u8
+}
+
+/// 画一颗 Mac 风格红绿灯：抗锯齿圆 + 球面渐变 + 顶部高光 + 外圈暗描边。
+///
+/// 不用 `fill_round_rect` 的硬边，而是逐像素按到圆心的距离算覆盖率，
+/// 因此边缘是平滑的，看起来像真实的玻璃按钮而不是像素方块。
+fn draw_traffic_light(
+    dst: &mut Surface,
+    rect: Rect,
+    base: (u8, u8, u8),
+    glyph: LightGlyph,
+    show_glyph: bool,
+) {
+    let r = rect.w as f32 / 2.0;
+    let cx = rect.x as f32 + r;
+    let cy = rect.y as f32 + rect.h as f32 / 2.0;
+    let (br, bg, bb) = base;
+
+    for yy in 0..rect.h as i32 {
+        for xx in 0..rect.w as i32 {
+            let dx = (rect.x + xx) as f32 + 0.5 - cx;
+            let dy = (rect.y + yy) as f32 + 0.5 - cy;
+            let d = (dx * dx + dy * dy).sqrt();
+            if d > r + 0.5 {
+                continue;
+            }
+            // 上亮下暗：模拟球面受光
+            let light = 1.0 + (0.5 - yy as f32 / rect.h as f32) * 0.20;
+            let mut cr = (br as f32 * light).min(255.0) as u8;
+            let mut cg = (bg as f32 * light).min(255.0) as u8;
+            let mut cb = (bb as f32 * light).min(255.0) as u8;
+            // 顶部弧形高光斑
+            let hy = dy + r * 0.36;
+            let hd = (dx * dx + hy * hy).sqrt();
+            if hd < r * 0.66 {
+                let k = (1.0 - hd / (r * 0.66)) * 0.34;
+                cr = mix(cr, 255, k);
+                cg = mix(cg, 255, k);
+                cb = mix(cb, 255, k);
+            }
+            // 外圈 1px 暗描边，把球从标题栏里"抠"出来
+            if d > r - 1.15 {
+                cr = mix(cr, 0x28, 0.40);
+                cg = mix(cg, 0x20, 0.40);
+                cb = mix(cb, 0x20, 0.40);
+            }
+            // 距离场产生的抗锯齿 alpha
+            let alpha = ((r + 0.5 - d) * 255.0).clamp(0.0, 255.0) as u8;
+            dst.blend(rect.x + xx, rect.y + yy, argb(alpha, cr, cg, cb));
+        }
+    }
+    if show_glyph {
+        draw_light_glyph(dst, rect, glyph);
+    }
+}
+
+/// 悬停（这里用窗口焦点近似）时显示的细线符号，取代原来的位图字符 x/-/o。
+fn draw_light_glyph(dst: &mut Surface, rect: Rect, glyph: LightGlyph) {
+    let ink = argb(255, 0x3a, 0x2c, 0x28);
+    let cx = rect.x + rect.w as i32 / 2;
+    let cy = rect.y + rect.h as i32 / 2;
+    match glyph {
+        LightGlyph::Close => {
+            for i in -3..=3 {
+                dst.put(cx + i, cy + i, ink);
+                dst.put(cx + i, cy - i, ink);
+            }
+        }
+        LightGlyph::Minimize => {
+            for i in -3..=3 {
+                dst.put(cx + i, cy, ink);
+            }
+        }
+        LightGlyph::Maximize => {
+            for i in -3..=3 {
+                dst.put(cx + i, cy, ink);
+                dst.put(cx, cy + i, ink);
+            }
+        }
+    }
 }
 
 /// 标题栏里的文字基线（供测试断言）。
@@ -410,6 +503,7 @@ pub fn cols_of(win: &Window) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::gui::surface::{blue_of, green_of, red_of};
 
     #[test]
     fn hit_test_regions() {
@@ -470,13 +564,54 @@ mod tests {
     fn render_draws_pixels_and_title() {
         let win = Window::terminal(5, "HELLO", 10, 10, 200, 150, "> ");
         let mut screen = Surface::filled(400, 300, palette::BASE);
-        win.render(&mut screen, true);
+        win.render(&mut screen, false);
         assert!(screen.lit_pixels() > 1000);
         // 标题栏强调色
         assert_eq!(screen.get(11, 11), Some(palette::BLUE));
-        // 关闭按钮左内侧（中心是深色字形）
+        // 红球（未聚焦时不画深色符号）
         let c = win.close_rect();
-        assert_eq!(screen.get(c.x + 1, c.y + c.h as i32 / 2), Some(palette::RED));
+        let p = screen.get(c.x + c.w as i32 / 2, c.y + 2).unwrap();
+        assert!(red_of(p) > 180, "红球中心应为红色系: {:08x}", p);
+    }
+
+    #[test]
+    fn mac_traffic_lights_are_ordered_rounded_and_shaded() {
+        let win = Window::new(9, "MAC", 20, 20, 300, 180, palette::BLUE);
+        let c = win.close_rect();
+        let m = win.minimize_rect();
+        let x = win.maximize_rect();
+        assert!(x.x < m.x && m.x < c.x, "右上角依次为 绿→黄→红(关闭在最右)");
+
+        let mut s = Surface::filled(400, 250, palette::BASE);
+        win.render(&mut s, false);
+        let centre = |r: Rect| {
+            s.get(r.x + r.w as i32 / 2, r.y + r.h as i32 / 2)
+                .unwrap()
+        };
+        let p_red = centre(c);
+        let p_yellow = centre(m);
+        let p_green = centre(x);
+        assert!(red_of(p_red) > 180 && green_of(p_red) < 190, "红球 {:08x}", p_red);
+        assert!(red_of(p_yellow) > 180 && green_of(p_yellow) > 120, "黄球 {:08x}", p_yellow);
+        assert!(green_of(p_green) > 130 && red_of(p_green) < 150, "绿球 {:08x}", p_green);
+        // 圆外四角应保持标题栏底色 -> 说明是圆而不是方块
+        assert_eq!(s.get(c.x, c.y), Some(palette::MANTLE));
+        // 球面受光：上半球比下半球亮
+        let top = s.get(c.x + c.w as i32 / 2, c.y + 2).unwrap();
+        let bottom = s.get(c.x + c.w as i32 / 2, c.y + c.h as i32 - 3).unwrap();
+        assert!(red_of(top) >= red_of(bottom), "上半球应有高光");
+    }
+
+    #[test]
+    fn focused_window_reveals_traffic_glyphs() {
+        let win = Window::new(10, "F", 0, 0, 200, 120, palette::BLUE);
+        let mut idle = Surface::filled(250, 150, palette::BASE);
+        win.render(&mut idle, false);
+        let mut hover = Surface::filled(250, 150, palette::BASE);
+        win.render(&mut hover, true);
+        let c = win.close_rect();
+        let (cx, cy) = (c.x + c.w as i32 / 2, c.y + c.h as i32 / 2);
+        assert_ne!(idle.get(cx, cy), hover.get(cx, cy), "聚焦时应显示 × 符号");
     }
 
     #[test]

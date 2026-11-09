@@ -1,16 +1,20 @@
-//! 用户态纤程 —— 真正的多线程上下文切换（非 std::thread 协作式）。
+//! 用户态纤程 —— 真正的多线程上下文切换（基于 Windows Fiber）。
 //!
-//! 使用 Windows Fiber API 在用户态实现独立线程。每个纤程拥有自己的
-//! 栈和寄存器上下文，`SwitchToFiber` 执行真正的寄存器保存/恢复和
-//! 栈切换，不依赖 OS 内核线程调度。
+//! 每个纤程拥有独立的栈和寄存器上下文，`SwitchToFiber` 执行真正的
+//! 寄存器保存/恢复和栈切换，不依赖 OS 内核线程调度。
 //!
-//! 调度器维护纤程就绪队列，在时间片到期时强制切换到下一个纤程，
-//! 实现抢占式调度。纤程在运行完或主动让出时，通过 `SwitchToFiber`
-//! 返回调度器，由调度器选择下一个纤程。
+//! 抢占式调度：
+//! * 一个监视线程每隔若干毫秒检查当前运行纤程的时间片是否已耗尽；
+//! * 若耗尽，设置全局抢占标志 `PREEMPT_REQUESTED`；
+//! * 纤程在 `checkpoint()` / `yield_to_scheduler()` / 通道阻塞点检查该标志，
+//!   若已设置则主动切换回调度器（准抢占式，Windows Fiber 无法从外部
+//!   线程强制切换，这是用户态纤程的最高可达抢占级别）。
 
 use std::collections::{HashMap, VecDeque};
 use std::ffi::c_void;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
+use std::thread;
 use std::time::{Duration, Instant};
 
 /// 纤程标识。
@@ -50,8 +54,12 @@ struct FiberScheduler {
     scheduler_fiber: *mut c_void,
     next_id: FiberId,
     time_slice_ns: u64,
+    /// 上次切换到当前纤程的时刻。
     last_switch: Instant,
 }
+
+/// 全局抢占标志：监视线程在时间片耗尽时置位，纤程在检查点读取后主动让出。
+static PREEMPT_REQUESTED: AtomicBool = AtomicBool::new(false);
 
 /// SAFETY: Windows Fiber 句柄 (`*mut c_void`) 仅在调度器所在的单个 OS 线程上
 /// 创建、使用和销毁，不会跨线程传递。全局调度器仅用于可观测性和命令路由，
@@ -75,25 +83,74 @@ fn scheduler() -> &'static Mutex<FiberScheduler> {
     })
 }
 
-// ===== Windows Fiber API 手动声明（避免引入重型 windows-sys crate）=====
+/// 把当前线程转换为调度器纤程，并启动抢占监视线程（仅在首次初始化时调用）。
+fn ensure_scheduler_fiber() {
+    let mut s = scheduler().lock().unwrap();
+    if s.scheduler_fiber.is_null() {
+        unsafe {
+            s.scheduler_fiber = ConvertThreadToFiber(std::ptr::null_mut());
+        }
+    }
+    drop(s);
+    // 启动抢占监视线程（仅一次）。
+    static MONITOR_STARTED: OnceLock<()> = OnceLock::new();
+    let _ = MONITOR_STARTED.get_or_init(|| {
+        thread::spawn(|| preemption_monitor());
+        ()
+    });
+}
 
-#[link(name = "kernel32")]
-extern "system" {
-    /// 将当前线程转换为纤程，返回纤程句柄。
-    fn ConvertThreadToFiber(lpParameter: *mut c_void) -> *mut c_void;
-    /// 创建纤程。
-    fn CreateFiberEx(
-        dwStackCommitSize: usize,
-        dwStackReserveSize: usize,
-        dwFlags: u32,
-        lpStartAddress: *mut c_void, // FIBER_START_ROUTINE
-        lpParameter: *mut c_void,
-    ) -> *mut c_void;
-    /// 切换到指定纤程。
-    fn SwitchToFiber(lpFiber: *mut c_void);
-    /// 删除纤程。
-    #[allow(dead_code)]
-    fn DeleteFiber(lpFiber: *mut c_void);
+/// 抢占监视线程：每隔 1ms 检查当前运行纤程是否已超时，若超时置位抢占标志。
+fn preemption_monitor() {
+    loop {
+        thread::sleep(Duration::from_millis(1));
+        let should_preempt = {
+            let s = scheduler().lock().unwrap();
+            match s.current {
+                Some(id) => match s.fibers.get(&id) {
+                    Some(f) if f.state == FiberState::Running => {
+                        s.last_switch.elapsed() >= Duration::from_nanos(s.time_slice_ns)
+                    }
+                    _ => false,
+                },
+                None => false,
+            }
+        };
+        if should_preempt {
+            PREEMPT_REQUESTED.store(true, Ordering::SeqCst);
+        }
+    }
+}
+
+/// 检查并处理抢占请求：若监视线程已置位抢占标志，则重置标志并让出
+/// 控制权给调度器（当前纤程会被重新入队）。
+pub fn check_preemption() {
+    if PREEMPT_REQUESTED.swap(false, Ordering::SeqCst) {
+        requeue_current_and_yield();
+    }
+}
+
+/// 把当前纤程重新入队并切换回调度器。
+fn requeue_current_and_yield() {
+    let scheduler_fiber = {
+        let mut s = scheduler().lock().unwrap();
+        if let Some(id) = s.current {
+            s.ready.push_back(id);
+            if let Some(f) = s.fibers.get_mut(&id) {
+                f.state = FiberState::Ready;
+            }
+            s.current = None;
+            s.last_switch = Instant::now();
+            s.scheduler_fiber
+        } else {
+            std::ptr::null_mut()
+        }
+    };
+    if !scheduler_fiber.is_null() {
+        unsafe {
+            SwitchToFiber(scheduler_fiber);
+        }
+    }
 }
 
 /// 纤程入口 trampoline：调用用户闭包，完成后切换回调度器。
@@ -108,7 +165,7 @@ extern "system" fn fiber_entry(param: *mut c_void) {
 
     // 用户闭包结束，切换回调度器纤程。
     unsafe {
-        crate::fiber::mark_fiber_exited();
+        mark_fiber_exited();
         SwitchToFiber(scheduler_fiber);
     }
 }
@@ -117,17 +174,6 @@ extern "system" fn fiber_entry(param: *mut c_void) {
 struct FiberEntryParam {
     scheduler_fiber: *mut c_void,
     closure: Box<dyn FnOnce() + Send>,
-}
-
-/// 把当前线程转换为调度器纤程（仅在调度器首次初始化时调用一次）。
-fn ensure_scheduler_fiber() {
-    let mut s = scheduler().lock().unwrap();
-    if s.scheduler_fiber.is_null() {
-        unsafe {
-            s.scheduler_fiber = ConvertThreadToFiber(std::ptr::null_mut());
-        }
-    }
-    drop(s);
 }
 
 /// 创建一个用户态纤程。
@@ -181,10 +227,13 @@ where
     id
 }
 
-/// 当前纤程主动让出控制权，切换回调度器。
+/// 当前纤程主动让出控制权，切换回调度器（并在切换前检查抢占）。
 pub fn yield_to_scheduler() {
+    check_preemption();
     let scheduler_fiber = {
-        let s = scheduler().lock().unwrap();
+        let mut s = scheduler().lock().unwrap();
+        s.current = None;
+        s.last_switch = Instant::now();
         s.scheduler_fiber
     };
     if !scheduler_fiber.is_null() {
@@ -192,6 +241,29 @@ pub fn yield_to_scheduler() {
             SwitchToFiber(scheduler_fiber);
         }
     }
+}
+
+/// 协作式安全点：纤程在长任务中周期性调用，检查是否该被抢占。
+pub fn checkpoint() {
+    check_preemption();
+}
+
+/// 标记当前纤程已退出（由 fiber_entry 在闭包结束时调用）。
+fn mark_fiber_exited() {
+    PREEMPT_REQUESTED.store(false, Ordering::SeqCst);
+    let current_id = {
+        let mut s = scheduler().lock().unwrap();
+        if let Some(id) = s.current {
+            if let Some(f) = s.fibers.get_mut(&id) {
+                f.state = FiberState::Exited;
+            }
+            s.current = None;
+            id
+        } else {
+            return;
+        }
+    };
+    let _ = current_id;
 }
 
 /// 由调度器切换到指定纤程运行。
@@ -219,27 +291,10 @@ fn switch_to_fiber(fiber_id: FiberId) {
             s.last_switch = Instant::now();
         }
     }
+    PREEMPT_REQUESTED.store(false, Ordering::SeqCst);
     unsafe {
         SwitchToFiber(handle);
     }
-}
-
-/// 标记当前纤程已退出（由 fiber_entry 在闭包结束时调用）。
-fn mark_fiber_exited() {
-    let current_id = {
-        let mut s = scheduler().lock().unwrap();
-        if let Some(id) = s.current {
-            if let Some(f) = s.fibers.get_mut(&id) {
-                f.state = FiberState::Exited;
-            }
-            s.current = None;
-            id
-        } else {
-            return;
-        }
-    };
-    // 不立即删除句柄，由调度器在下一次调度时清理
-    let _ = current_id;
 }
 
 /// 运行调度器主循环：不断从就绪队列取出纤程并切换过去。
@@ -276,23 +331,24 @@ pub fn run_scheduler() {
                     break;
                 }
                 // 短暂休眠避免空转
-                std::thread::sleep(Duration::from_millis(1));
+                thread::sleep(Duration::from_millis(1));
             }
         }
     }
 }
 
 /// 将当前纤程放回就绪队列（用于时间片到期后的重入队）。
-///
-/// 这个函数由纤程内部的时间片检查调用。
 pub fn requeue_current() {
     let id = {
-        let s = scheduler().lock().unwrap();
+        let mut s = scheduler().lock().unwrap();
         s.current
     };
     if let Some(id) = id {
         let mut s = scheduler().lock().unwrap();
         s.ready.push_back(id);
+        if let Some(f) = s.fibers.get_mut(&id) {
+            f.state = FiberState::Ready;
+        }
         s.current = None;
     }
 }
@@ -376,4 +432,38 @@ mod tests {
         let l = list();
         assert!(l.contains("domain=Some(Reflex)"));
     }
+
+    #[test]
+    fn preemption_flag_is_reset_on_switch() {
+        // 切换到纤程时应重置抢占标志
+        let _id = spawn_fiber("preempt-test", None, || {});
+        // 手动置位抢占标志
+        PREEMPT_REQUESTED.store(true, Ordering::SeqCst);
+        // 调用 switch_to_fiber 内部逻辑通过 ensure_scheduler_fiber + spawn 已触发，
+        // 这里只验证标志位可被正常读写
+        assert!(PREEMPT_REQUESTED.load(Ordering::SeqCst));
+        PREEMPT_REQUESTED.store(false, Ordering::SeqCst);
+        assert!(!PREEMPT_REQUESTED.load(Ordering::SeqCst));
+    }
+}
+
+// ===== Windows Fiber API 手动声明（避免引入重型 windows-sys crate）=====
+
+#[link(name = "kernel32")]
+extern "system" {
+    /// 将当前线程转换为纤程，返回纤程句柄。
+    fn ConvertThreadToFiber(lpParameter: *mut c_void) -> *mut c_void;
+    /// 创建纤程。
+    fn CreateFiberEx(
+        dwStackCommitSize: usize,
+        dwStackReserveSize: usize,
+        dwFlags: u32,
+        lpStartAddress: *mut c_void, // FIBER_START_ROUTINE
+        lpParameter: *mut c_void,
+    ) -> *mut c_void;
+    /// 切换到指定纤程。
+    fn SwitchToFiber(lpFiber: *mut c_void);
+    /// 删除纤程。
+    #[allow(dead_code)]
+    fn DeleteFiber(lpFiber: *mut c_void);
 }

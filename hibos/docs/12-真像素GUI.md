@@ -28,6 +28,8 @@ cargo run --features gui -- --shell
 gui desktop      # 显示桌面摘要 + 真彩预览
 gui shot         # 导出 gui-output.bmp (960x600)
 gui run          # 打开真实窗口（阻塞到关闭；窗口内 Enter 的命令由 shell 事后执行）
+# 说明：标题栏**右上角**是 Mac 风格红绿灯（绿/黄/红圆球，抗锯齿+高光+描边），
+# 聚焦或悬停时圆球上才浮出 × / − / + 细线符号，与 macOS 一致。
 gui open TERMINAL
 gui focus 1
 gui click 100 100
