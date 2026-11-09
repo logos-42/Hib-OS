@@ -18,6 +18,7 @@ use std::time::Duration;
 use crate::exec::{self, ExecId};
 use crate::monitor::get_time_ns;
 use crate::scheduler::CpuPriority;
+use crate::scheduler_domains::SchedDomain;
 use crate::sense;
 use crate::sync::Barrier;
 
@@ -64,6 +65,9 @@ struct AgentEntry {
     state: AgentState,
     exec_id: ExecId,
     priority: CpuPriority,
+    /// 所属调度域（None 表示全局域）。
+    #[allow(dead_code)]
+    domain: Option<SchedDomain>,
     mailbox: VecDeque<String>,
     done: u64,
     failed: u64,
@@ -165,6 +169,7 @@ pub fn spawn(name: &str, role: &str, priority: CpuPriority) -> Result<AgentId, S
                 state: AgentState::Idle,
                 exec_id: 0,
                 priority,
+                domain: None,
                 mailbox: VecDeque::new(),
                 done: 0,
                 failed: 0,
@@ -180,6 +185,73 @@ pub fn spawn(name: &str, role: &str, priority: CpuPriority) -> Result<AgentId, S
 
     let mb = mailbox_key(id);
     let exec_id = exec::spawn(&format!("agent:{}", name), priority, move || {
+        agent_loop(id, &mb);
+    });
+
+    let mut o = orch().lock().unwrap();
+    if let Some(a) = o.agents.get_mut(&id) {
+        a.exec_id = exec_id;
+    }
+    Ok(id)
+}
+
+/// 派生一个归属指定调度域的子智能体（真线程 + 真邮箱）。
+pub fn spawn_in_domain(
+    name: &str,
+    role: &str,
+    priority: CpuPriority,
+    domain: SchedDomain,
+) -> Result<AgentId, String> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err("用法: act agent://orchestrator spawn <名称> [角色]".to_string());
+    }
+    let parent_agent = {
+        let me = exec::current();
+        let o = orch().lock().unwrap();
+        o.agents
+            .values()
+            .find(|a| a.exec_id != 0 && Some(a.exec_id) == me)
+            .map(|a| a.id)
+    };
+    let id = {
+        let mut o = orch().lock().unwrap();
+        if o.by_name.contains_key(name) {
+            return Err(format!("子智能体 {} 已存在", name));
+        }
+        let id = o.next_id;
+        o.next_id += 1;
+        o.spawned += 1;
+        o.by_name.insert(name.to_string(), id);
+        o.agents.insert(
+            id,
+            AgentEntry {
+                id,
+                name: name.to_string(),
+                role: if role.is_empty() {
+                    "worker".to_string()
+                } else {
+                    role.to_string()
+                },
+                state: AgentState::Idle,
+                exec_id: 0,
+                priority,
+                domain: Some(domain),
+                mailbox: VecDeque::new(),
+                done: 0,
+                failed: 0,
+                stop: false,
+                born_ns: get_time_ns() as u128,
+                parent: parent_agent,
+                last_result: None,
+                epoch_seen: 0,
+            },
+        );
+        id
+    };
+
+    let mb = mailbox_key(id);
+    let exec_id = exec::spawn_in_domain(&format!("agent:{}", name), priority, domain, move || {
         agent_loop(id, &mb);
     });
 

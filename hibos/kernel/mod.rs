@@ -49,6 +49,7 @@ pub mod procfs;
 pub mod protection;
 pub mod realm;
 pub mod scheduler;
+pub mod scheduler_domains;
 pub mod sense;
 pub mod socket;
 pub mod sync;

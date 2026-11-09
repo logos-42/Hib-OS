@@ -717,6 +717,10 @@ impl Shell {
                 }
                 Err(e) => println!("{}", e),
             },
+            "wallpaper" | "wp" => match gui::wallpaper::act(&rest) {
+                Ok(msg) => println!("{}", msg),
+                Err(e) => println!("gui wallpaper 失败: {}", e),
+            },
             "open" | "term" | "terminal" => {
                 let title = if rest.is_empty() { "TERMINAL".to_string() } else { rest };
                 let id = gui::open_terminal(&title, 420, 280);
@@ -1537,23 +1541,35 @@ impl Shell {
     }
 
     fn cmd_wallpaper(&mut self, parts: &[&str]) {
-        let available = ["default", "hibos", "deepseek", "ai", "consciousness"];
+        let available = [
+            "default", "hibos", "deepseek", "ai", "consciousness",
+            "sunset", "aurora", "circuit", "nebula", "grid", "solid",
+        ];
         match parts.get(1).copied() {
             None | Some("list") => {
                 println!("可用壁纸: {}", available.join(", "));
-                println!("当前壁纸: {}", self.wallpaper);
+                println!("当前字符桌面壁纸: {}", self.wallpaper);
+                println!(
+                    "像素桌面: {}",
+                    crate::gui::wallpaper::bank().lock().unwrap().status().lines().next().unwrap_or("")
+                );
             }
             Some("set") => {
                 let name = parts.get(2).copied().unwrap_or("default");
                 if available.contains(&name) {
                     self.wallpaper = name.to_string();
-                    println!("[wallpaper] 已设置壁纸: {}", name);
+                    // 同一份状态同步到真像素合成器，改一处全系统生效。
+                    match crate::gui::wallpaper::set_named(name) {
+                        Ok(msg) => println!("[wallpaper] 已设置 {}: {}", name, msg),
+                        Err(e) => println!("[wallpaper] 像素壁纸同步失败: {}", e),
+                    }
                 } else {
                     println!("未知壁纸: {} (可用: {})", name, available.join(", "));
                 }
             }
             Some("current") => {
-                println!("当前壁纸: {}", self.wallpaper);
+                println!("当前字符桌面壁纸: {}", self.wallpaper);
+                println!("当前像素壁纸: {}", crate::gui::wallpaper::bank().lock().unwrap().name);
             }
             _ => println!("用法: wallpaper [list|set <name>|current]"),
         }
@@ -1952,7 +1968,7 @@ pub fn usage_line(cmd: &str) -> Option<&'static str> {
         "queue" => "queue",
         "stats" => "stats",
         "desktop" => "desktop [--pixels]",
-        "gui" => "gui [desktop|shot [路径]|run|open <标题>|close <id>|focus <id>|move <id> <x> <y>|click <x> <y>|key <文本>|text <文本>]",
+        "gui" => "gui [desktop|shot [路径]|run|wallpaper <list|set|load|fit|save|preview>|open <标题>|close <id>|focus <id>|move <id> <x> <y>|click <x> <y>|key <文本>|text <文本>]",
         "pwd" => "pwd",
         "ls" => "ls [路径]",
         "cd" => "cd [路径]",
@@ -1967,7 +1983,7 @@ pub fn usage_line(cmd: &str) -> Option<&'static str> {
         "save" => "save",
         "load" => "load",
         "resetfs" => "resetfs",
-        "wallpaper" => "wallpaper [list|set <name>|current]",
+        "wallpaper" => "wallpaper [list|set <name>|current]  (同时切换字符与像素桌面)",
         "deepseek" => "llm [status|key [list|set <provider> <key>|del <provider>|show <provider>]|chat <provider> <消息>|loop <provider>]",
         "llm" => "llm [status|key [list|set <provider> <key>|del <provider>|show <provider>]|chat <provider> <消息>|loop <provider>]",
         "modules" => "modules",
@@ -2011,7 +2027,7 @@ pub fn describe(cmd: &str) -> Option<&'static str> {
         "save" => "把文件系统保存为 JSON",
         "load" => "从 JSON 载入文件系统",
         "resetfs" => "恢复默认目录树",
-        "wallpaper" => "设置桌面壁纸 (default/hibos/deepseek/ai/consciousness)",
+        "wallpaper" => "设置桌面壁纸 (default/hibos/deepseek/ai/consciousness + sunset/aurora/circuit/nebula/grid/solid)",
         "deepseek" => "llm 命令别名，配置多提供商 LLM API Key 与对话",
         "llm" => "配置多提供商 LLM API Key (deepseek 等)，支持单轮对话与闭环循环对话",
         "modules" => "列出已加载内核模块",
@@ -2161,7 +2177,7 @@ mod tests {
     #[test]
     fn channels_registry_and_sense() {
         let mut s = Shell::new();
-        assert_eq!(s.channels.len(), 99);
+        assert_eq!(s.channels.len(), 106);
         assert!(s.dispatch("channels"));
         assert!(s.dispatch("sense file://vfs"));
         assert!(s.dispatch("sense gpu://vram"));

@@ -39,6 +39,9 @@ pub struct Compositor {
     width: u32,
     height: u32,
     wallpaper: Wallpaper,
+    /// true = 用全局像素壁纸库（shell / 通道 / 合成器共用）；
+    /// false = 用旧式枚举背景（兼容直接调 `set_wallpaper` 的调用方与测试）。
+    use_wallpaper_bank: bool,
     /// 从底到顶。
     windows: Vec<Window>,
     next_id: WindowId,
@@ -58,6 +61,7 @@ impl Compositor {
             width,
             height,
             wallpaper: Wallpaper::Nebula,
+            use_wallpaper_bank: true,
             windows: Vec::new(),
             next_id: 1,
             focused: None,
@@ -79,10 +83,17 @@ impl Compositor {
 
     pub fn set_wallpaper(&mut self, w: Wallpaper) {
         self.wallpaper = w;
+        self.use_wallpaper_bank = false;
     }
 
     pub fn wallpaper(&self) -> Wallpaper {
         self.wallpaper
+    }
+
+    /// 切回全局像素壁纸库并指定风格。
+    pub fn use_named_wallpaper(&mut self, name: &str) -> Result<String, String> {
+        self.use_wallpaper_bank = true;
+        super::wallpaper::bank().lock().unwrap().set_style(name)
     }
 
     pub fn windows(&self) -> &[Window] {
@@ -248,6 +259,12 @@ impl Compositor {
 
     fn paint_wallpaper(&mut self) {
         let mut frame = std::mem::replace(&mut self.frame, Surface::new(1, 1));
+        if self.use_wallpaper_bank {
+            // 真正可见的像素壁纸（含图片壁纸），由全局壁纸库统一提供。
+            super::wallpaper::render_into(&mut frame);
+            self.frame = frame;
+            return;
+        }
         frame.fill(palette::BASE);
         match self.wallpaper {
             Wallpaper::Solid(c) => frame.fill(c),

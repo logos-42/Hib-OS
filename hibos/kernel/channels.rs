@@ -380,6 +380,14 @@ pub fn bootstrap() -> ChannelRegistry {
         (ChannelKind::Interface, "sec://acl", Access::ReadWrite),
         (ChannelKind::User, "realm://current", Access::Read),
         (ChannelKind::Desktop, "gui://shell", Access::ReadWrite),
+        (ChannelKind::Desktop, "gui://wallpaper", Access::ReadWrite),
+        // —— 多调度域（多内核）：sched://<域> ——
+        (ChannelKind::Action, "sched://reflex", Access::ReadWrite),
+        (ChannelKind::Action, "sched://perception", Access::ReadWrite),
+        (ChannelKind::Action, "sched://deliberation", Access::ReadWrite),
+        (ChannelKind::Action, "sched://memory", Access::ReadWrite),
+        (ChannelKind::Action, "sched://governance", Access::ReadWrite),
+        (ChannelKind::Action, "sched://domains", Access::Read),
     ];
     for (kind, name, access) in defaults {
         let _ = reg.open(kind, name, access);
@@ -394,11 +402,11 @@ mod tests {
     #[test]
     fn bootstrap_opens_all_channels() {
         let reg = bootstrap();
-        assert_eq!(reg.len(), 99);
+        assert_eq!(reg.len(), 106);
         assert_eq!(reg.of_kind(ChannelKind::Net).count(), 5);
         assert_eq!(reg.of_kind(ChannelKind::Will).count(), 4);
         assert_eq!(reg.of_kind(ChannelKind::Context).count(), 2);
-        assert_eq!(reg.of_kind(ChannelKind::Action).count(), 16);
+        assert_eq!(reg.of_kind(ChannelKind::Action).count(), 22);
         assert_eq!(reg.of_kind(ChannelKind::Agent).count(), 3);
         assert_eq!(reg.of_kind(ChannelKind::Gpu).count(), 6);
         assert_eq!(reg.of_kind(ChannelKind::Device).count(), 14);

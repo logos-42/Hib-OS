@@ -133,13 +133,16 @@ impl Semaphore {
         ok
     }
 
-    /// 归还一个配额。
+    /// 归还一个配额，并向等待该信号量的调度域令牌发 wake_key。
     pub fn release(&self) {
+        let key = format!("sem://{}", self.id);
         let mut g = self.state.lock().unwrap();
         g.count += 1;
         g.releases += 1;
         drop(g);
         self.cv.notify_all();
+        // 通道事件即调度事件：信号量释放唤醒等待该键的令牌。
+        exec::signal(&key);
     }
 
     pub fn status(&self) -> String {
@@ -222,8 +225,11 @@ impl Barrier {
             g.epoch += 1;
             g.trips += 1;
             let ep = g.epoch;
+            let key = format!("barrier://{}", self.id);
             drop(g);
             self.cv.notify_all();
+            // 屏障到达即通道事件：唤醒等待该屏障的调度域令牌。
+            exec::signal(&key);
             note_run();
             return Some(ep);
         }
@@ -413,6 +419,9 @@ impl<T> Drop for PmGuard<'_, T> {
                     exec::restore_priority(o);
                 }
             }
+            // 互斥锁释放即通道事件：唤醒等待该锁的调度域令牌。
+            let key = format!("pmutex://{:p}", self.mutex);
+            exec::signal(&key);
             self.mutex.cv.notify_one();
         }
     }

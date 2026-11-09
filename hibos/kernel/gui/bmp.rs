@@ -7,7 +7,7 @@ use std::fs;
 use std::io;
 use std::path::Path;
 
-use super::surface::{blue_of, green_of, red_of, Surface};
+use super::surface::{argb, blue_of, green_of, red_of, Surface};
 
 /// 编码为 24 位 BMP 字节流（BITMAPINFOHEADER, BI_RGB, 行自底向上）。
 pub fn encode(surface: &Surface) -> Vec<u8> {
@@ -76,6 +76,51 @@ pub fn decode_header(bytes: &[u8]) -> Option<(u32, u32, u16, usize)> {
     let bpp = u16::from_le_bytes(bytes[28..30].try_into().ok()?);
     let size = u32::from_le_bytes(bytes[2..6].try_into().ok()?) as usize;
     Some((w as u32, h as u32, bpp, size))
+}
+
+/// 解码 24/32bpp 未压缩 BMP 为 32bpp 表面（支持自底向上与自顶向下）。
+///
+/// 有了它，任意 BMP 图片都能直接当作像素壁纸加载。
+pub fn decode(bytes: &[u8]) -> Result<Surface, String> {
+    if bytes.len() < 54 || &bytes[0..2] != b"BM" {
+        return Err("不是 BMP 文件".to_string());
+    }
+    let w_i = i32::from_le_bytes(bytes[18..22].try_into().unwrap());
+    let h_i = i32::from_le_bytes(bytes[22..26].try_into().unwrap());
+    let bpp = u16::from_le_bytes(bytes[28..30].try_into().unwrap());
+    let offset = u32::from_le_bytes(bytes[10..14].try_into().unwrap()) as usize;
+    if w_i <= 0 || h_i == 0 || !(bpp == 24 || bpp == 32) {
+        return Err(format!("不支持的 BMP: {}x{} {}bpp", w_i, h_i, bpp));
+    }
+    let w = w_i as u32;
+    let h = h_i.abs() as u32;
+    let top_down = h_i < 0;
+    let src_bpp = (bpp / 8) as usize;
+    let row_bytes = ((w as usize * src_bpp + 3) / 4) * 4;
+    if offset + row_bytes * h as usize > bytes.len() {
+        return Err("BMP 像素数据不完整".to_string());
+    }
+
+    let mut s = Surface::new(w, h);
+    for y in 0..h {
+        let src_y = if top_down { y } else { h - 1 - y };
+        let base = offset + src_y as usize * row_bytes;
+        for x in 0..w {
+            let p = base + x as usize * src_bpp;
+            let b = bytes[p];
+            let g = bytes[p + 1];
+            let r = bytes[p + 2];
+            let a = if bpp == 32 { bytes[p + 3] } else { 255 };
+            s.put(x as i32, y as i32, argb(a, r, g, b));
+        }
+    }
+    Ok(s)
+}
+
+/// 从文件解码。
+pub fn load(path: impl AsRef<Path>) -> Result<Surface, String> {
+    let bytes = fs::read(path).map_err(|e| format!("读取 BMP 失败: {}", e))?;
+    decode(&bytes)
 }
 
 #[cfg(test)]

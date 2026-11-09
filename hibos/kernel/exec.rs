@@ -23,6 +23,7 @@ use std::time::{Duration, Instant};
 
 use crate::monitor::get_time_ns;
 use crate::scheduler::{self, CpuPriority};
+use crate::scheduler_domains::SchedDomain;
 
 /// 执行体标识。
 pub type ExecId = u64;
@@ -95,6 +96,8 @@ pub struct Body {
     pub wait_key: Option<String>,
     /// 父执行体（子意识主体的来源）。
     pub parent: Option<ExecId>,
+    /// 所属调度域（None 表示全局/默认域，不归属任何专用 MLFQ）。
+    pub domain: Option<SchedDomain>,
     pub created_ns: u128,
     pub exit_ns: Option<u128>,
     pub exit_code: Option<i32>,
@@ -103,7 +106,7 @@ pub struct Body {
     pub wakeups: u64,
     pub checkpoints: u64,
     /// 被 `wake` 置位、但尚未被等待者消费的信号。
-    signaled: bool,
+    pub signaled: bool,
     /// 优先级被继承抬升过。
     pub inherited: bool,
 }
@@ -196,6 +199,7 @@ where
                 base_priority: priority,
                 wait_key: None,
                 parent,
+                domain: None,
                 created_ns: get_time_ns() as u128,
                 exit_ns: None,
                 exit_code: None,
@@ -222,6 +226,69 @@ where
 
     if started.is_err() {
         // 线程创建失败：不要留下一个永远 Running 的僵尸。
+        let mut g = ex().inner.lock().unwrap();
+        g.failed_spawns += 1;
+        if let Some(b) = g.bodies.get_mut(&id) {
+            b.state = RunState::Exited;
+            b.exit_ns = Some(get_time_ns() as u128);
+            b.exit_code = Some(-1);
+        }
+        drop(g);
+        ex().cv.notify_all();
+    }
+    id
+}
+
+/// 派生一个归属指定调度域的真执行体（真 OS 线程）。
+///
+/// 与 [`spawn`] 的区别：新执行体会被记入指定调度域的 MLFQ 队列，
+/// 该域独立调度，不与全局/其它域共享就绪队列。
+pub fn spawn_in_domain<F>(name: &str, priority: CpuPriority, domain: SchedDomain, f: F) -> ExecId
+where
+    F: FnOnce() + Send + 'static,
+{
+    let parent = current();
+    let id = {
+        let mut g = ex().inner.lock().unwrap();
+        let id = g.next_id;
+        g.next_id += 1;
+        g.spawned += 1;
+        g.bodies.insert(
+            id,
+            Body {
+                id,
+                name: name.to_string(),
+                state: RunState::Running,
+                priority,
+                base_priority: priority,
+                wait_key: None,
+                parent,
+                domain: Some(domain),
+                created_ns: get_time_ns() as u128,
+                exit_ns: None,
+                exit_code: None,
+                cpu_ns: 0,
+                wakeups: 0,
+                checkpoints: 0,
+                signaled: false,
+                inherited: false,
+            },
+        );
+        id
+    };
+
+    let thread_name = format!("hibos-{}-{}", sanitize(name), id);
+    let started = std::thread::Builder::new()
+        .name(thread_name)
+        .spawn(move || {
+            CURRENT.with(|c| c.set(Some(id)));
+            let began = Instant::now();
+            let outcome = std::panic::catch_unwind(AssertUnwindSafe(f));
+            let code = if outcome.is_ok() { 0 } else { 1 };
+            finish(id, began.elapsed(), code);
+        });
+
+    if started.is_err() {
         let mut g = ex().inner.lock().unwrap();
         g.failed_spawns += 1;
         if let Some(b) = g.bodies.get_mut(&id) {
@@ -394,11 +461,15 @@ pub fn block_on(key: &str, timeout: Option<Duration>) -> WakeReason {
 }
 
 /// 唤醒某个通道键上的全部等待者。返回被唤醒的数量。
+///
+/// 与 [`signal`] 的区别：`wake` 是电平触发（只影响当前等待者），不闩锁令牌。
+/// 但同样会向各调度域发 `wake_key`，保证「通道事件即调度事件」。
 pub fn wake(key: &str) -> usize {
     let ex = ex();
     let mut g = ex.inner.lock().unwrap();
     let ids = g.wait_table.get(key).cloned().unwrap_or_default();
     let mut woke = 0;
+    let mut involved_domains: Vec<SchedDomain> = Vec::new();
     for id in &ids {
         if let Some(b) = g.bodies.get_mut(id) {
             // 已退出/已挂起的等待者只登记信号，不改变其状态。
@@ -408,11 +479,21 @@ pub fn wake(key: &str) -> usize {
                 b.wakeups += 1;
             }
             woke += 1;
+            if let Some(domain) = b.domain {
+                if !involved_domains.contains(&domain) {
+                    involved_domains.push(domain);
+                }
+            }
         }
     }
     drop(g);
     if woke > 0 {
         ex.cv.notify_all();
+    }
+    // 感知驱动抢占：向各涉及调度域发 wake_key，让等待该通道的令牌回到 MLFQ 就绪队列。
+    let _ = scheduler::wake_key_global(key);
+    for domain in involved_domains {
+        let _ = crate::scheduler_domains::wake_key(domain, key);
     }
     woke
 }
@@ -459,6 +540,7 @@ pub fn signal(key: &str) -> usize {
         return 0;
     }
     let mut woke = 0;
+    let mut involved_domains: Vec<SchedDomain> = Vec::new();
     for id in &ids {
         if let Some(b) = g.bodies.get_mut(id) {
             b.signaled = true;
@@ -466,12 +548,21 @@ pub fn signal(key: &str) -> usize {
                 b.state = RunState::Running;
             }
             woke += 1;
+            if let Some(domain) = b.domain {
+                if !involved_domains.contains(&domain) {
+                    involved_domains.push(domain);
+                }
+            }
         }
     }
     drop(g);
     ex.cv.notify_all();
-    // 感知驱动抢占：通道事件同时唤醒调度器中等待该键的令牌。
+    // 感知驱动抢占：向全局调度器及各涉及调度域发 wake_key，
+    // 让等待该通道的令牌回到对应 MLFQ 的就绪队列。
     let _ = scheduler::wake_key_global(key);
+    for domain in involved_domains {
+        let _ = crate::scheduler_domains::wake_key(domain, key);
+    }
     woke
 }
 

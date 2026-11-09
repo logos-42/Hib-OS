@@ -18,6 +18,7 @@ pub mod compositor;
 pub mod input;
 pub mod shell;
 pub mod surface;
+pub mod wallpaper;
 pub mod window;
 
 #[cfg(feature = "gui")]

@@ -616,8 +616,12 @@ pub fn compose(info: &DesktopInfo) -> Screen {
 /// 未知名称回退到纯色背景。
 fn draw_wallpaper(s: &mut Screen, name: &str) {
     match name {
-        "default" | "hibos" => draw_wallpaper_hibos(s),
-        "deepseek" | "ai" | "consciousness" => draw_wallpaper_deepseek(s),
+        "default" | "hibos" | "circuit" | "sunset" | "grid" | "solid" => {
+            draw_wallpaper_hibos(s)
+        }
+        "deepseek" | "ai" | "consciousness" | "aurora" | "nebula" => {
+            draw_wallpaper_deepseek(s)
+        }
         _ => {
             // 纯色渐变背景
             for y in 2..ROWS.saturating_sub(1) {

@@ -328,9 +328,9 @@ pub fn release(channel: &str, owner: ExecId) -> bool {
 pub fn commit(channel: &str, owner: ExecId, expected: Epoch, data: &str) -> Result<Epoch, CommitError> {
     let slot = slot(channel);
     let epoch = slot.commit(owner, expected, data)?;
-    // 提交即事件：唤醒所有在这条通道上等待的意识主体。
-    exec::wake(channel);
-    exec::wake(&format!("lease://wait/{}", channel));
+    // 提交即事件：向各调度域发 wake_key，让等待该通道的令牌回到 MLFQ 就绪队列。
+    exec::signal(channel);
+    exec::signal(&format!("lease://wait/{}", channel));
     Ok(epoch)
 }
 
@@ -338,8 +338,8 @@ pub fn commit(channel: &str, owner: ExecId, expected: Epoch, data: &str) -> Resu
 pub fn force(channel: &str, data: &str) -> Epoch {
     let slot = slot(channel);
     let epoch = slot.force(data);
-    exec::wake(channel);
-    exec::wake(&format!("lease://wait/{}", channel));
+    exec::signal(channel);
+    exec::signal(&format!("lease://wait/{}", channel));
     epoch
 }
 
@@ -489,21 +489,28 @@ mod tests {
         use std::sync::atomic::{AtomicBool, Ordering};
         use std::sync::Arc;
         let ch = "unittest://lease/wake";
-        // 先把 epoch 推到 1，确保 wait_next 的 before 稳定。
-        force(ch, "init");
 
         let hit = Arc::new(AtomicBool::new(false));
         let hit2 = hit.clone();
         exec::spawn("lease-waiter", CpuPriority::High, move || {
+            // 第一次 wait_next：阻塞直到第一次 force 唤醒
             if let Some(s) = wait_next(ch, Some(Duration::from_secs(2))) {
-                if s.epoch >= 2 {
-                    hit2.store(true, Ordering::SeqCst);
+                if s.epoch >= 1 {
+                    // 第二次 wait_next：阻塞直到第二次 force 唤醒
+                    if let Some(s2) = wait_next(ch, Some(Duration::from_secs(2))) {
+                        if s2.epoch >= 2 {
+                            hit2.store(true, Ordering::SeqCst);
+                        }
+                    }
                 }
             }
         });
-        std::thread::sleep(Duration::from_millis(30));
-        force(ch, "second");
-        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        // 给等待者时间进入 block_on
+        std::thread::sleep(Duration::from_millis(50));
+        force(ch, "first");  // epoch 1，唤醒第一次等待
+        std::thread::sleep(Duration::from_millis(50));
+        force(ch, "second"); // epoch 2，唤醒第二次等待
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
         while !hit.load(Ordering::SeqCst) && std::time::Instant::now() < deadline {
             std::thread::yield_now();
         }

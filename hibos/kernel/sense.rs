@@ -47,11 +47,14 @@ use crate::proc::proctable;
 use crate::proc2;
 use crate::procfs::procfs;
 use crate::socket::netio;
+use crate::scheduler_domains;
 use crate::sysctl::sysctl;
 use crate::sync;
 use crate::time::timekeeper;
 use crate::tty::tty;
 use crate::user::userdb;
+use crate::ai_token::TokenId;
+use crate::scheduler::CpuPriority;
 use exec::ExecId;
 use proc2::ProcId;
 use std::sync::{Mutex, OnceLock};
@@ -284,6 +287,11 @@ pub fn probe(name: &str) -> Option<String> {
         "gpu://faults" => Some(protection::protection().lock().unwrap().faults()),
         "sec://acl" | "realm://current" => Some(realm::realm_status()),
         "gui://shell" => Some(gui::shell::desktop_shell().lock().unwrap().status()),
+        "gui://wallpaper" => Some(gui::wallpaper::bank().lock().unwrap().status()),
+        // —— 多调度域 ——
+        "sched://reflex" | "sched://perception" | "sched://deliberation" | "sched://memory" | "sched://governance" | "sched://domains" => {
+            Some(crate::scheduler_domains::status_line())
+        }
         _ => None,
     }
 }
@@ -741,6 +749,11 @@ fn act_raw(name: &str, payload: &str) -> Option<Result<String, String>> {
         "sec://acl" => Some(act_realm(payload)),
         "realm://current" => Some(Ok(realm::realm_status())),
         "gui://shell" => Some(act_gui_shell(payload)),
+        "gui://wallpaper" => Some(gui::wallpaper::act(payload)),
+        // —— 多调度域 ——
+        "sched://reflex" | "sched://perception" | "sched://deliberation" | "sched://memory" | "sched://governance" | "sched://domains" => {
+            Some(act_sched(payload))
+        }
         _ => None,
     }
 }
@@ -960,6 +973,86 @@ fn act_gui_shell(payload: &str) -> Result<String, String> {
         }
         "compose" => Ok(s.compose_to_gpu()),
         _ => Ok(s.status()),
+    }
+}
+
+/// 多调度域的行动实现 —— `sched://<域>`。
+///
+/// 接口：
+/// * `sched://<域> enqueue <low|medium|high|critical>` —— 入队一个新任务到指定域
+/// * `sched://<域> pick_next` —— 选出该域下一个要运行的 token
+/// * `sched://<域> expiry` —— 该域时间片到期，运行任务降级重入队
+/// * `sched://<域> wake <通道键>` —— 唤醒该域中等待该通道的 token
+/// * `sched://<域> status` —— 查看该域状态
+/// * `sched://domains status` —— 查看全部调度域状态
+fn act_sched(payload: &str) -> Result<String, String> {
+    let text = payload.trim();
+    let mut it = text.splitn(3, ' ');
+    let sub = it.next().unwrap_or("");
+    let _domain_str = it.next().unwrap_or("").trim();
+    let op = it.next().unwrap_or("").trim();
+
+    match sub {
+        "domains" => {
+            if op == "status" {
+                Ok(scheduler_domains::status())
+            } else {
+                Err("用法: sched://domains status".to_string())
+            }
+        }
+        domain_str => {
+            let domain = scheduler_domains::parse_domain(domain_str)?;
+            match op {
+                "enqueue" => {
+                    let priority_str = text
+                        .split_whitespace()
+                        .nth(3)
+                        .unwrap_or("medium");
+                    let priority = match priority_str {
+                        "low" => CpuPriority::Low,
+                        "medium" => CpuPriority::Medium,
+                        "high" => CpuPriority::High,
+                        "critical" => CpuPriority::Critical,
+                        other => {
+                            return Err(format!(
+                                "未知优先级 {}（low/medium/high/critical）",
+                                other
+                            ))
+                        }
+                    };
+                    let token_id = TokenId::new();
+                    scheduler_domains::enqueue(domain, token_id, priority, None);
+                    Ok(format!(
+                        "已入队 token={:?} 到域 {} (优先级={})",
+                        token_id, domain_str, priority.name()
+                    ))
+                }
+                "pick_next" => match scheduler_domains::pick_next(domain) {
+                    Some(tid) => Ok(format!("域 {} 下一个运行 token={:?}", domain_str, tid)),
+                    None => Ok(format!("域 {} 队列为空", domain_str)),
+                },
+                "expiry" => {
+                    scheduler_domains::on_time_slice_expiry(domain);
+                    Ok(format!("域 {} 时间片到期，任务已降级重入队", domain_str))
+                }
+                "wake" => {
+                    let channel_key = text
+                        .split_whitespace()
+                        .nth(3)
+                        .ok_or("用法: sched://<域> wake <通道键>")?;
+                    let n = scheduler_domains::wake_key(domain, channel_key);
+                    Ok(format!(
+                        "域 {} 唤醒 {} 个等待 {} 的 token",
+                        domain_str, n, channel_key
+                    ))
+                }
+                "status" => Ok(format!("域 {}：{}", domain_str, scheduler_domains::status_line())),
+                _ => Err(
+                    "用法: sched://<域> enqueue <优先级> | pick_next | expiry | wake <通道键> | status | domains status"
+                        .to_string(),
+                ),
+            }
+        }
     }
 }
 
