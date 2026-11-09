@@ -12,6 +12,7 @@ use crate::monitor::get_time_ns;
 use crate::net::{ETH_NAME, fmt_ip, fmt_mac, net, parse_ip, parse_mac, Packet, RouteEntry};
 use crate::vfs::Vfs;
 
+use crate::agent;
 use crate::belief::beliefs;
 use crate::browser::browser;
 use crate::bus::bus;
@@ -19,12 +20,15 @@ use crate::caps::caps;
 use crate::cgroup::cgroups;
 use crate::dev::devtree;
 use crate::env::envstore;
+use crate::exec;
 use crate::fsmeta::fsmeta;
 use crate::fw::firewall;
 use crate::gateway::gateway;
+use crate::gui;
 use crate::init::init_mgr;
 use crate::ipc::ipc;
 use crate::judgment::judgment;
+use crate::lease;
 use crate::limits::limits;
 use crate::mem::mem;
 use crate::motive::motives;
@@ -36,6 +40,7 @@ use crate::proc::proctable;
 use crate::procfs::procfs;
 use crate::socket::netio;
 use crate::sysctl::sysctl;
+use crate::sync;
 use crate::time::timekeeper;
 use crate::tty::tty;
 use crate::user::userdb;
@@ -228,6 +233,20 @@ pub fn probe(name: &str) -> Option<String> {
         "motive://self" => Some(motives().lock().unwrap().status()),
         "belief://self" => Some(beliefs().lock().unwrap().status()),
         "judgment://self" => Some(judgment().lock().unwrap().status()),
+        // —— 执行体 / 同步 / 租约 / 子智能体（真机制，不是记账）——
+        "exec://threads" => Some(format!(
+            "{}\n{}",
+            exec::status_line(),
+            exec::list()
+        )),
+        "sync://primitives" => Some(sync::status()),
+        "lease://channels" => Some(lease::status()),
+        "agent://orchestrator" => Some(agent::status()),
+        "agent://workers" => Some(agent::list()),
+        "agent://results" => Some(agent::results()),
+        // —— GUI：窗口 / 键盘 / 鼠标 ——
+        "gui://windows" => Some(gui::status()),
+        "input://kbd" | "input://mouse" => Some(gui::input_status()),
         _ => None,
     }
 }
@@ -463,6 +482,15 @@ pub fn act(name: &str, payload: &str) -> Option<Result<String, String>> {
         "motive://self" => Some(act_motive(payload)),
         "belief://self" => Some(act_belief(payload)),
         "judgment://self" => Some(act_judgment(payload)),
+        // —— 执行体 / 同步 / 租约 / 子智能体 ——
+        "exec://threads" => Some(act_exec(payload)),
+        "sync://primitives" => Some(act_sync(payload)),
+        "lease://channels" => Some(act_lease(payload)),
+        "agent://orchestrator" | "agent://workers" => Some(agent::dispatch(payload)),
+        // —— GUI：窗口 / 键盘 / 鼠标 ——
+        "gui://windows" => Some(act_gui(payload)),
+        "input://kbd" => Some(act_kbd(payload)),
+        "input://mouse" => Some(act_mouse(payload)),
         _ => None,
     }
 }
@@ -1166,6 +1194,380 @@ fn act_judgment(payload: &str) -> Result<String, String> {
         }
         "decide" => judgment().lock().unwrap().decide(),
         _ => Ok(judgment().lock().unwrap().status()),
+    }
+}
+
+// ---- 执行体 / 同步 / 租约 ----
+
+fn act_exec(payload: &str) -> Result<String, String> {
+    let text = payload.trim();
+    let mut it = text.splitn(2, ' ');
+    let sub = it.next().unwrap_or("");
+    let rest = it.next().unwrap_or("").trim();
+    match sub {
+        "spawn" => {
+            // 派生一个真执行体，跑一条任务 DSL（与子智能体相同的语法）。
+            let parts: Vec<&str> = rest.splitn(3, ' ').collect();
+            let name = parts.first().copied().unwrap_or("exec")
+                .to_string();
+            let body = parts.get(1..).map(|p| p.join(" ")).unwrap_or_default();
+            if body.trim().is_empty() {
+                return Err("用法: spawn <名称> <sense|act|sleep ...>".to_string());
+            }
+            let body2 = body.clone();
+            let id = exec::spawn(&name, crate::scheduler::CpuPriority::Medium, move || {
+                let r = if body2.starts_with("sense ") {
+                    sense_probe_str(body2.trim_start_matches("sense ").trim())
+                } else if body2.starts_with("act ") {
+                    let x = body2.trim_start_matches("act ").trim();
+                    match x.split_once(' ') {
+                        Some((c, b)) => match act(c, b) {
+                            Some(Ok(s)) => s,
+                            Some(Err(e)) => format!("err: {}", e),
+                            None => format!("no-act: {}", c),
+                        },
+                        None => format!("no-act: {}", x),
+                    }
+                } else {
+                    format!("echo: {}", body2)
+                };
+                let _ = r;
+            });
+            Ok(format!("已派生执行体 {} (exec={}) 任务: {}", name, id, body))
+        }
+        "suspend" => {
+            let id = rest
+                .parse::<exec::ExecId>()
+                .map_err(|_| "用法: suspend <exec-id>".to_string())?;
+            Ok(if exec::suspend(id) {
+                format!("exec={} 已挂起", id)
+            } else {
+                format!("exec={} 不存在或已退出", id)
+            })
+        }
+        "resume" => {
+            let id = rest
+                .parse::<exec::ExecId>()
+                .map_err(|_| "用法: resume <exec-id>".to_string())?;
+            Ok(if exec::resume(id) {
+                format!("exec={} 已恢复", id)
+            } else {
+                format!("exec={} 未处于挂起态", id)
+            })
+        }
+        "wake" => {
+            if rest.is_empty() {
+                return Err("用法: wake <通道键>".to_string());
+            }
+            let n = exec::signal(rest);
+            Ok(format!("已唤醒 {} 个等待 {} 的执行体", n, rest))
+        }
+        "join" => {
+            let id = rest
+                .parse::<exec::ExecId>()
+                .map_err(|_| "用法: join <exec-id>".to_string())?;
+            match exec::join(id, Some(std::time::Duration::from_secs(5))) {
+                Some(code) => Ok(format!("exec={} 已退出 exit={}", id, code)),
+                None => Err(format!("join exec={} 超时或不存在", id)),
+            }
+        }
+        "reap" => Ok(format!("已回收 {} 个已退出执行体", exec::reap())),
+        "waits" => {
+            let w = exec::wait_table();
+            if w.is_empty() {
+                return Ok("（等待表为空）".to_string());
+            }
+            Ok(w.iter()
+                .map(|(k, v)| format!("{} <- {:?}", k, v))
+                .collect::<Vec<_>>()
+                .join("\n"))
+        }
+        "boost" => {
+            let mut p = rest.split_whitespace();
+            let id = p
+                .next()
+                .and_then(|s| s.parse::<exec::ExecId>().ok())
+                .ok_or("用法: boost <exec-id> <low|medium|high|critical>")?;
+            let prio = parse_priority(p.next().unwrap_or("high"))?;
+            exec::boost_priority(id, prio);
+            Ok(format!("exec={} 优先级已抬到 {}", id, prio.name()))
+        }
+        "list" | "" => Ok(exec::list()),
+        "status" => Ok(exec::status_line()),
+        _ => Err(
+            "用法: act exec://threads spawn|suspend|resume|wake|join|reap|waits|boost|list|status"
+                .to_string(),
+        ),
+    }
+}
+
+fn sense_probe_str(name: &str) -> String {
+    probe(name).unwrap_or_else(|| format!("no-probe: {}", name))
+}
+
+fn parse_priority(s: &str) -> Result<crate::scheduler::CpuPriority, String> {
+    match s.to_ascii_lowercase().as_str() {
+        "low" => Ok(crate::scheduler::CpuPriority::Low),
+        "medium" | "med" => Ok(crate::scheduler::CpuPriority::Medium),
+        "high" => Ok(crate::scheduler::CpuPriority::High),
+        "critical" | "rt" => Ok(crate::scheduler::CpuPriority::Critical),
+        other => Err(format!("未知优先级 {}（low/medium/high/critical）", other)),
+    }
+}
+
+fn act_sync(payload: &str) -> Result<String, String> {
+    let text = payload.trim();
+    let mut it = text.splitn(2, ' ');
+    let sub = it.next().unwrap_or("");
+    let rest = it.next().unwrap_or("").trim();
+    match sub {
+        "sem" => {
+            // sem <名称> <配额>            —— 创建/复用
+            // sem <名称> post|release     —— 归还
+            // sem <名称> wait [超时ms]     —— 阻塞获取
+            let mut p = rest.split_whitespace();
+            let name = p.next().ok_or("用法: sem <名称> <配额>|post|wait [ms]")?;
+            let op = p.next().unwrap_or("1");
+            let sem = match op.parse::<usize>() {
+                Ok(n) => sync::named_semaphore(name, n),
+                Err(_) => sync::named_semaphore(name, 1),
+            };
+            match op {
+                "post" | "release" => {
+                    sem.release();
+                    Ok(format!("sem {} 已归还 -> {}", name, sem.status()))
+                }
+                "wait" | "acquire" => {
+                    let ms = p.next().and_then(|s| s.parse::<u64>().ok());
+                    let ok = sem.acquire(ms.map(std::time::Duration::from_millis));
+                    Ok(format!("sem {} acquire={} -> {}", name, ok, sem.status()))
+                }
+                _ => Ok(format!("sem {} -> {}", name, sem.status())),
+            }
+        }
+        "barrier" => {
+            // barrier <名称> <人数> [超时ms]
+            let mut p = rest.split_whitespace();
+            let name = p.next().unwrap_or("default");
+            let n = p
+                .next()
+                .and_then(|s| s.parse::<usize>().ok())
+                .unwrap_or(1)
+                .max(1);
+            let ms = p.next().and_then(|s| s.parse::<u64>().ok());
+            let b = sync::named_barrier(name, n);
+            let ep = b.arrive_and_wait(
+                Some(std::time::Duration::from_millis(ms.unwrap_or(500))),
+            );
+            match ep {
+                Some(e) => Ok(format!("barrier {} aligned epoch={} -> {}", name, e, b.status())),
+                None => Err(format!("barrier {} 超时：世界观不一致 -> {}", name, b.status())),
+            }
+        }
+        "list" | "status" | "" => Ok(sync::status()),
+        _ => Err("用法: act sync://primitives sem <名称> <配额>|post|wait [ms] | barrier <名称> <人数> [ms] | list"
+            .to_string()),
+    }
+}
+
+fn act_lease(payload: &str) -> Result<String, String> {
+    let text = payload.trim();
+    let mut it = text.splitn(2, ' ');
+    let sub = it.next().unwrap_or("");
+    let rest = it.next().unwrap_or("").trim();
+    // 当前执行体作为租约 owner；shell / 裸线程用 0。
+    let me = exec::current().unwrap_or(0);
+    match sub {
+        "acquire" => {
+            let mut p = rest.split_whitespace();
+            let ch = p.next().ok_or("用法: acquire <通道> [ttl_ms]")?;
+            let ttl = p
+                .next()
+                .and_then(|s| s.parse::<u64>().ok())
+                .map(std::time::Duration::from_millis);
+            match lease::acquire_with_priority(
+                ch,
+                me,
+                crate::scheduler::CpuPriority::High,
+                ttl,
+            ) {
+                Ok(ep) => Ok(format!("已获得 {} 写租约 owner={} epoch={}", ch, me, ep)),
+                Err(c) => Err(c.to_string()),
+            }
+        }
+        "commit" => {
+            // commit <通道> <期望epoch> <数据...>
+            let mut p = rest.splitn(3, ' ');
+            let ch = p.next().ok_or("用法: commit <通道> <期望epoch> <数据>")?;
+            let expected = p
+                .next()
+                .and_then(|s| s.parse::<u64>().ok())
+                .ok_or("用法: commit <通道> <期望epoch> <数据>")?;
+            let data = p.next().unwrap_or("");
+            match lease::commit(ch, me, expected, data) {
+                Ok(ep) => Ok(format!("已提交 {} -> epoch={}", ch, ep)),
+                Err(e) => Err(e.to_string()),
+            }
+        }
+        "release" => {
+            if rest.is_empty() {
+                return Err("用法: release <通道>".to_string());
+            }
+            Ok(if lease::release(rest, me) {
+                format!("已释放 {} 的租约", rest)
+            } else {
+                format!("{} 上没有你的租约", rest)
+            })
+        }
+        "force" => {
+            // force <通道> <数据...>
+            let (ch, data) = rest
+                .split_once(' ')
+                .ok_or("用法: force <通道> <数据>")?;
+            let ep = lease::force(ch, data);
+            Ok(format!("已强制写入 {} -> epoch={}", ch, ep))
+        }
+        "wait" => {
+            // wait <通道> [超时ms] —— 阻塞到下一版世界（事件驱动）
+            let mut p = rest.split_whitespace();
+            let ch = p.next().ok_or("用法: wait <通道> [超时ms]")?;
+            let ms = p
+                .next()
+                .and_then(|s| s.parse::<u64>().ok())
+                .unwrap_or(1000);
+            match lease::wait_next(ch, Some(std::time::Duration::from_millis(ms))) {
+                Some(s) => Ok(format!(
+                    "{} 已更新 epoch={} seq={} writer={:?} data={:?}",
+                    ch, s.epoch, s.seq, s.writer, &*s.data
+                )),
+                None => Err(format!("等待 {} 下一版超时", ch)),
+            }
+        }
+        "show" => {
+            if rest.is_empty() {
+                Ok(lease::status())
+            } else {
+                Ok(lease::channel_status(rest))
+            }
+        }
+        "list" | "" => Ok(lease::status()),
+        _ => Err(
+            "用法: act lease://channels acquire|commit|release|force|wait|show|list".to_string(),
+        ),
+    }
+}
+
+// ---- GUI 通道的行动实现 ----
+
+fn act_gui(payload: &str) -> Result<String, String> {
+    let text = payload.trim();
+    let mut it = text.splitn(2, ' ');
+    let sub = it.next().unwrap_or("");
+    let rest = it.next().unwrap_or("").trim();
+    gui::ensure_demo();
+    match sub {
+        "open" | "term" | "terminal" => {
+            let title = if rest.is_empty() { "TERMINAL" } else { rest };
+            let id = gui::open_terminal(title, 420, 280);
+            Ok(format!("已打开终端窗口 win#{} ({})", id, title))
+        }
+        "close" => {
+            let id = rest.parse::<u64>().map_err(|_| "用法: close <win-id>")?;
+            Ok(if gui::close_window(id) {
+                format!("已关闭 win#{}", id)
+            } else {
+                format!("win#{} 不存在", id)
+            })
+        }
+        "focus" => {
+            let id = rest.parse::<u64>().map_err(|_| "用法: focus <win-id>")?;
+            Ok(if gui::focus_window(id) {
+                format!("已聚焦 win#{}", id)
+            } else {
+                format!("win#{} 不存在", id)
+            })
+        }
+        "move" => {
+            let mut p = rest.split_whitespace();
+            let id = p.next().and_then(|s| s.parse::<u64>().ok()).ok_or("用法: move <win-id> <x> <y>")?;
+            let x = p.next().and_then(|s| s.parse::<i32>().ok()).ok_or("用法: move <win-id> <x> <y>")?;
+            let y = p.next().and_then(|s| s.parse::<i32>().ok()).ok_or("用法: move <win-id> <x> <y>")?;
+            Ok(if gui::move_window(id, x, y) {
+                format!("win#{} -> ({}, {})", id, x, y)
+            } else {
+                format!("win#{} 不存在", id)
+            })
+        }
+        "click" => {
+            let mut p = rest.split_whitespace();
+            let x = p.next().and_then(|s| s.parse::<i32>().ok()).ok_or("用法: click <x> <y>")?;
+            let y = p.next().and_then(|s| s.parse::<i32>().ok()).ok_or("用法: click <x> <y>")?;
+            let eff = gui::click(x, y);
+            Ok(format!("点击 ({}, {}) 产生 {} 个副作用: {:?}", x, y, eff.len(), eff))
+        }
+        "shot" | "save" => {
+            let path = if rest.is_empty() { "gui-output.bmp" } else { rest };
+            gui::screenshot(path)
+        }
+        "list" | "windows" | "status" | "info" | "" => Ok(gui::status()),
+        _ => Err("用法: act gui://windows open <标题> | close <id> | focus <id> | move <id> <x> <y> | click <x> <y> | shot [路径] | list"
+            .to_string()),
+    }
+}
+
+fn act_kbd(payload: &str) -> Result<String, String> {
+    // 负载就是一段文本；`\n` 触发回车，`\b` 触发退格。
+    let text = payload.replace("\\n", "\n").replace("\\b", "\u{8}");
+    let effects = gui::key_text(&text);
+    let cmds: Vec<String> = effects
+        .iter()
+        .filter_map(|e| match e {
+            crate::gui::input::Effect::Command { line, .. } => Some(line.clone()),
+            _ => None,
+        })
+        .collect();
+    Ok(if cmds.is_empty() {
+        format!("键盘输入已投递 ({} 字符, {} 副作用)", text.chars().count(), effects.len())
+    } else {
+        format!(
+            "键盘输入已投递；窗口命令: {}",
+            cmds.join(" | ")
+        )
+    })
+}
+
+fn act_mouse(payload: &str) -> Result<String, String> {
+    let text = payload.trim();
+    let mut it = text.splitn(2, ' ');
+    let sub = it.next().unwrap_or("");
+    let rest = it.next().unwrap_or("").trim();
+    let mut p = rest.split_whitespace();
+    let num = |s: Option<&str>, name: &str| -> Result<i32, String> {
+        s.and_then(|v| v.parse::<i32>().ok())
+            .ok_or_else(|| format!("用法: {} <x> <y> [delta]", name))
+    };
+    match sub {
+        "move" => {
+            let x = num(p.next(), "move")?;
+            let y = num(p.next(), "move")?;
+            gui::mouse_move(x, y);
+            Ok(format!("鼠标移动到 ({}, {})", x, y))
+        }
+        "click" => {
+            let x = num(p.next(), "click")?;
+            let y = num(p.next(), "click")?;
+            let eff = gui::click(x, y);
+            Ok(format!("点击 ({}, {}) -> {:?}", x, y, eff))
+        }
+        "wheel" => {
+            let x = num(p.next(), "wheel")?;
+            let y = num(p.next(), "wheel")?;
+            let d = p.next().and_then(|v| v.parse::<i32>().ok()).unwrap_or(-1);
+            let eff = gui::inject(crate::gui::input::Event::Wheel { x, y, delta: d });
+            Ok(format!("滚轮 ({}, {}) delta={} -> {:?}", x, y, d, eff))
+        }
+        _ => Err("用法: act input://mouse move <x> <y> | click <x> <y> | wheel <x> <y> [delta]"
+            .to_string()),
     }
 }
 

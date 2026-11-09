@@ -11,3 +11,10 @@ path = "kernel/mod.rs"
 
 [dependencies]
 ureq = "2"
+winit = { version = "0.30", optional = true }
+softbuffer = { version = "0.4", optional = true }
+
+[features]
+default = []
+# 真实窗口后端：winit 事件循环 + softbuffer 软件光栅输出。
+gui = ["dep:winit", "dep:softbuffer"]

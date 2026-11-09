@@ -1,0 +1,475 @@
+//! 窗口对象 —— 有身份、有像素、有客户端区域的真实窗口。
+//!
+//! 与文本桌面的「字符窗口」不同：这里的窗口拥有自己的 32bpp 客户端表面
+//! (`client`)，内容是真的像素；`render()` 负责把标题栏、边框和客户端表面
+//! 画到合成目标上。窗口还带最小化/最大化/关闭等真实状态，
+//! 命中测试（标题栏 / 关闭按钮 / 客户端）由 `hit()` 给出。
+//!
+//! 客户端内容模型有两种：
+//! * `TerminalModel` —— 内置终端（可读写的行缓冲，验证键盘输入闭环）。
+//! * 任意 `Surface` —— 应用可直接往 `client` 上画像素。
+
+use super::surface::{argb, palette, Rect, Surface};
+use crate::gpu::framebuffer::{ADVANCE, LINE_HEIGHT};
+
+/// 窗口标识。
+pub type WindowId = u64;
+
+/// 标题栏高度（像素）。
+pub const TITLEBAR_H: u32 = 28;
+/// 边框宽度。
+pub const BORDER: u32 = 1;
+/// 关闭按钮直径。
+pub const CLOSE_BTN: u32 = 14;
+
+/// 鼠标命中窗口的哪个部位。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Hit {
+    Client,
+    TitleBar,
+    CloseButton,
+    MinimizeButton,
+    MaximizeButton,
+    ResizeCorner,
+    None,
+}
+
+/// 内置终端内容模型（验证「键盘 → 窗口 → 像素」闭环）。
+#[derive(Clone, Debug, Default)]
+pub struct TerminalModel {
+    pub lines: Vec<String>,
+    pub input: String,
+    pub prompt: String,
+    pub scroll: usize,
+}
+
+impl TerminalModel {
+    pub fn new(prompt: &str) -> Self {
+        Self {
+            lines: Vec::new(),
+            input: String::new(),
+            prompt: prompt.to_string(),
+            scroll: 0,
+        }
+    }
+
+    pub fn push_line(&mut self, line: impl Into<String>) {
+        self.lines.push(line.into());
+        while self.lines.len() > 500 {
+            self.lines.remove(0);
+        }
+        self.scroll = self.lines.len();
+    }
+
+    /// 处理一次回车，返回 true 表示调用了 `clear`（内容已清空）。
+    pub fn enter(&mut self) -> bool {
+        let line = std::mem::take(&mut self.input);
+        let echoed = format!("{}{}", self.prompt, line);
+        self.push_line(echoed);
+        if line.trim() == "clear" {
+            self.lines.clear();
+        }
+        line.trim() == "clear"
+    }
+
+    pub fn type_char(&mut self, ch: char) {
+        if self.input.chars().count() < 200 {
+            self.input.push(ch);
+        }
+    }
+
+    pub fn backspace(&mut self) {
+        self.input.pop();
+    }
+}
+
+/// 一个窗口。
+pub struct Window {
+    pub id: WindowId,
+    pub title: String,
+    /// 左上角（屏幕坐标，含装饰）。
+    pub x: i32,
+    pub y: i32,
+    /// 总尺寸（含装饰）。
+    pub w: u32,
+    pub h: u32,
+    pub visible: bool,
+    pub minimized: bool,
+    pub maximized: bool,
+    pub resizable: bool,
+    /// 客户端表面（内容区，尺寸 = w-2BORDER × h-TITLEBAR-BORDER）。
+    pub client: Surface,
+    /// 内置终端模型；为 None 时表示纯像素窗口。
+    pub terminal: Option<TerminalModel>,
+    /// 文本缩放。
+    pub scale: u32,
+    /// 标题栏颜色（不同应用不同色带）。
+    pub accent: u32,
+    /// 客户端内容版本号：变化后合成器需要重绘。
+    pub content_epoch: u64,
+}
+
+impl Window {
+    /// 创建一个纯像素窗口。
+    pub fn new(id: WindowId, title: &str, x: i32, y: i32, w: u32, h: u32, accent: u32) -> Self {
+        let cw = w.saturating_sub(BORDER * 2).max(1);
+        let chh = h.saturating_sub(TITLEBAR_H + BORDER).max(1);
+        Self {
+            id,
+            title: title.to_string(),
+            x,
+            y,
+            w,
+            h,
+            visible: true,
+            minimized: false,
+            maximized: false,
+            resizable: true,
+            client: Surface::filled(cw, chh, palette::BASE),
+            terminal: None,
+            scale: 2,
+            accent,
+            content_epoch: 1,
+        }
+    }
+
+    /// 创建一个内置终端窗口。
+    pub fn terminal(id: WindowId, title: &str, x: i32, y: i32, w: u32, h: u32, prompt: &str) -> Self {
+        let mut win = Self::new(id, title, x, y, w, h, palette::BLUE);
+        win.terminal = Some(TerminalModel::new(prompt));
+        win.repaint();
+        win
+    }
+
+    /// 整个窗口（含装饰）的矩形。
+    pub fn rect(&self) -> Rect {
+        Rect::new(self.x, self.y, self.w, self.h)
+    }
+
+    /// 客户端区域（屏幕坐标）。
+    pub fn client_rect(&self) -> Rect {
+        Rect::new(
+            self.x + BORDER as i32,
+            self.y + TITLEBAR_H as i32,
+            self.client.width(),
+            self.client.height(),
+        )
+    }
+
+    pub fn titlebar_rect(&self) -> Rect {
+        Rect::new(self.x, self.y, self.w, TITLEBAR_H)
+    }
+
+    /// 关闭按钮（标题栏右侧）。
+    pub fn close_rect(&self) -> Rect {
+        Rect::new(
+            self.x + self.w as i32 - CLOSE_BTN as i32 - 10,
+            self.y + (TITLEBAR_H as i32 - CLOSE_BTN as i32) / 2,
+            CLOSE_BTN,
+            CLOSE_BTN,
+        )
+    }
+
+    pub fn minimize_rect(&self) -> Rect {
+        let mut r = self.close_rect();
+        r.x -= CLOSE_BTN as i32 + 8;
+        r
+    }
+
+    pub fn maximize_rect(&self) -> Rect {
+        let mut r = self.close_rect();
+        r.x -= (CLOSE_BTN as i32 + 8) * 2;
+        r
+    }
+
+    /// 命中测试。
+    pub fn hit(&self, px: i32, py: i32) -> Hit {
+        if !self.visible || self.minimized {
+            return Hit::None;
+        }
+        if self.close_rect().contains(px, py) {
+            return Hit::CloseButton;
+        }
+        if self.minimize_rect().contains(px, py) {
+            return Hit::MinimizeButton;
+        }
+        if self.maximize_rect().contains(px, py) {
+            return Hit::MaximizeButton;
+        }
+        // 右下角缩放区必须早于 client 判断，否则永远命中 Client。
+        if self.resizable
+            && px >= self.x + self.w as i32 - 12
+            && py >= self.y + self.h as i32 - 12
+            && self.rect().contains(px, py)
+        {
+            return Hit::ResizeCorner;
+        }
+        if self.titlebar_rect().contains(px, py) {
+            return Hit::TitleBar;
+        }
+        if self.client_rect().contains(px, py) {
+            return Hit::Client;
+        }
+        Hit::None
+    }
+
+    /// 移动窗口。
+    pub fn move_to(&mut self, x: i32, y: i32) {
+        self.x = x;
+        self.y = y;
+    }
+
+    /// 调整窗口尺寸（客户端表面随之重建）。
+    pub fn resize(&mut self, w: u32, h: u32) {
+        let w = w.max(120);
+        let h = h.max(TITLEBAR_H + BORDER + 20);
+        if w == self.w && h == self.h {
+            return;
+        }
+        let cw = w - BORDER * 2;
+        let chh = h - TITLEBAR_H - BORDER;
+        let old = std::mem::replace(&mut self.client, Surface::filled(cw, chh, palette::BASE));
+        // 保留原有内容（左上对齐）。
+        self.client.draw_surface(&old, 0, 0);
+        self.w = w;
+        self.h = h;
+        self.repaint();
+    }
+
+    /// 键盘输入：字符 / 退格 / 回车。
+    pub fn type_char(&mut self, ch: char) {
+        if let Some(t) = self.terminal.as_mut() {
+            t.type_char(ch);
+            self.repaint();
+        }
+    }
+
+    pub fn backspace(&mut self) {
+        if let Some(t) = self.terminal.as_mut() {
+            t.backspace();
+            self.repaint();
+        }
+    }
+
+    pub fn enter(&mut self) -> Option<String> {
+        if let Some(t) = self.terminal.as_mut() {
+            let cmd = t.input.trim().to_string();
+            t.enter();
+            self.repaint();
+            Some(cmd)
+        } else {
+            None
+        }
+    }
+
+    pub fn scroll_by(&mut self, delta: i32) {
+        if let Some(t) = self.terminal.as_mut() {
+            let n = t.lines.len();
+            let cur = t.scroll.min(n);
+            t.scroll = (cur as i32 + delta).clamp(0, n as i32) as usize;
+            self.repaint();
+        }
+    }
+
+    /// 把终端行缓冲重绘到客户端表面。
+    ///
+    /// 折行在这里**显式**完成：每个逻辑行先按可用列数切成若干视觉行，
+    /// 再逐视觉行推进 y。这样长命令行不会盖住下一行。
+    pub fn repaint(&mut self) {
+        self.content_epoch += 1;
+        let Some(t) = self.terminal.clone() else {
+            return;
+        };
+        let bg = palette::BASE;
+        self.client.fill(bg);
+        let chh = self.client.height() as i32;
+        let line_h = LINE_HEIGHT as i32 * self.scale.max(1) as i32;
+        let pad = 8i32;
+        let cols = Surface::cols_for_width(
+            self.client.width().saturating_sub(pad as u32 * 2),
+            self.scale,
+        )
+        .max(1);
+        let max_lines = ((chh - pad * 2) / line_h).max(1) as usize;
+
+        // 头部提示
+        self.client
+            .draw_text(pad, pad, "HIB OS / REAL PIXEL WINDOW", palette::OVERLAY1, 1);
+
+        // 逻辑行 → 视觉行
+        let mut all: Vec<String> = Vec::new();
+        for line in &t.lines {
+            all.extend(Surface::wrap_text(line, cols, self.scale));
+        }
+        all.extend(Surface::wrap_text(
+            &format!("{}{}_", t.prompt, t.input),
+            cols,
+            self.scale,
+        ));
+        if all.is_empty() {
+            all.push(String::new());
+        }
+
+        let end = all.len();
+        let start = t.scroll.min(end).saturating_sub(max_lines);
+        let visible = &all[start..end.min(start + max_lines)];
+
+        let mut y = pad + LINE_HEIGHT as i32 * 2;
+        for line in visible {
+            if y + line_h > chh {
+                break;
+            }
+            let color = if line.starts_with(&t.prompt) {
+                palette::TEXT
+            } else if line.contains("ERR") || line.contains("error") {
+                palette::RED
+            } else {
+                palette::SUBTEXT0
+            };
+            self.client
+                .draw_text_clipped(pad, y, line, color, self.scale, self.client.width() as i32 - pad);
+            y += line_h;
+        }
+    }
+
+    /// 窗口渲染：阴影 + 边框 + 标题栏 + 客户端。
+    pub fn render(&self, dst: &mut Surface, focused: bool) {
+        if !self.visible || self.minimized {
+            return;
+        }
+        let r = self.rect();
+
+        // 1. 投影（半透明黑，右下偏移 6px）
+        let shadow = Rect::new(r.x + 6, r.y + 8, r.w, r.h);
+        dst.fill_round_rect(shadow, 6, argb(70, 0, 0, 0));
+
+        // 2. 窗口背景 + 边框
+        dst.fill_round_rect(r, 6, palette::CRUST);
+        let border = if focused { self.accent } else { palette::SURFACE0 };
+        dst.stroke_rect(r, border);
+
+        // 3. 标题栏
+        let tb = Rect::new(r.x + 1, r.y + 1, r.w.saturating_sub(2), TITLEBAR_H - 1);
+        dst.fill_rect(tb.x, tb.y, tb.w, tb.h, palette::MANTLE);
+        // 左侧强调条
+        dst.fill_rect(tb.x, tb.y, 3, tb.h, self.accent);
+        dst.draw_text(tb.x + 12, tb.y + 6, &self.title, palette::TEXT, 2);
+
+        // 4. 控制按钮
+        draw_button(dst, self.close_rect(), palette::RED, "x");
+        draw_button(dst, self.minimize_rect(), palette::YELLOW, "-");
+        draw_button(dst, self.maximize_rect(), palette::GREEN, "o");
+
+        // 5. 客户端
+        let cr = self.client_rect();
+        dst.draw_surface(&self.client, cr.x, cr.y);
+        dst.stroke_rect(cr, if focused { self.accent } else { palette::SURFACE0 });
+
+        // 6. 焦点指示：客户端底部细线
+        if focused {
+            dst.fill_rect(cr.x, cr.bottom() - 2, cr.w, 2, self.accent);
+        }
+    }
+}
+
+fn draw_button(dst: &mut Surface, rect: Rect, color: u32, glyph_ch: &str) {
+    dst.fill_round_rect(rect, rect.h / 2, color);
+    // 深色字形
+    let tx = rect.x + (rect.w as i32 - Surface::text_width(glyph_ch, 1) as i32) / 2;
+    let ty = rect.y + (rect.h as i32 - 7) / 2;
+    dst.draw_text(tx, ty, glyph_ch, palette::CRUST, 1);
+}
+
+/// 标题栏里的文字基线（供测试断言）。
+pub fn title_baseline(win: &Window) -> i32 {
+    win.y + 6 + 7
+}
+
+/// 客户端每行字符数（估算）。
+pub fn cols_of(win: &Window) -> usize {
+    ((win.client.width() as i32 - 16).max(1) / (ADVANCE as i32 * win.scale as i32)) as usize
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hit_test_regions() {
+        let win = Window::new(1, "TEST", 10, 20, 200, 150, palette::BLUE);
+        assert_eq!(win.hit(10, 20), Hit::TitleBar);
+        assert_eq!(win.hit(50, 20), Hit::TitleBar);
+        assert_eq!(win.hit(100, 60), Hit::Client);
+        assert_eq!(win.hit(5, 5), Hit::None);
+        let c = win.close_rect();
+        assert_eq!(win.hit(c.x + 2, c.y + 2), Hit::CloseButton);
+    }
+
+    #[test]
+    fn move_and_resize_keep_client_in_sync() {
+        let mut win = Window::new(2, "T", 0, 0, 160, 120, palette::GREEN);
+        win.move_to(30, 40);
+        assert_eq!(win.x, 30);
+        win.resize(300, 200);
+        assert_eq!(win.w, 300);
+        assert_eq!(win.client.width(), 298);
+        assert_eq!(win.client.height(), 200 - TITLEBAR_H - 1);
+        // 最小尺寸被钳制
+        win.resize(10, 10);
+        assert!(win.w >= 120);
+    }
+
+    #[test]
+    fn terminal_input_roundtrip() {
+        let mut win = Window::terminal(3, "TERM", 0, 0, 320, 240, "> ");
+        win.type_char('h');
+        win.type_char('i');
+        assert_eq!(win.terminal.as_ref().unwrap().input, "hi");
+        win.backspace();
+        assert_eq!(win.terminal.as_ref().unwrap().input, "h");
+        win.type_char('i');
+        let cmd = win.enter().unwrap();
+        assert_eq!(cmd, "hi");
+        assert!(win.terminal.as_ref().unwrap().lines.iter().any(|l| l == "> hi"));
+        assert_eq!(win.terminal.as_ref().unwrap().input, "");
+    }
+
+    #[test]
+    fn clear_command_empties_scrollback() {
+        let mut win = Window::terminal(4, "TERM", 0, 0, 320, 240, "$ ");
+        for c in "echo".chars() {
+            win.type_char(c);
+        }
+        win.enter();
+        assert!(!win.terminal.as_ref().unwrap().lines.is_empty());
+        for c in "clear".chars() {
+            win.type_char(c);
+        }
+        win.enter();
+        assert!(win.terminal.as_ref().unwrap().lines.is_empty());
+    }
+
+    #[test]
+    fn render_draws_pixels_and_title() {
+        let win = Window::terminal(5, "HELLO", 10, 10, 200, 150, "> ");
+        let mut screen = Surface::filled(400, 300, palette::BASE);
+        win.render(&mut screen, true);
+        assert!(screen.lit_pixels() > 1000);
+        // 标题栏强调色
+        assert_eq!(screen.get(11, 11), Some(palette::BLUE));
+        // 关闭按钮左内侧（中心是深色字形）
+        let c = win.close_rect();
+        assert_eq!(screen.get(c.x + 1, c.y + c.h as i32 / 2), Some(palette::RED));
+    }
+
+    #[test]
+    fn minimized_windows_are_not_hit_or_rendered() {
+        let mut win = Window::new(6, "HIDDEN", 0, 0, 100, 100, palette::BLUE);
+        win.minimized = true;
+        assert_eq!(win.hit(10, 10), Hit::None);
+        // 用纯黑背景，渲染后应保持全黑。
+        let mut s = Surface::filled(200, 200, 0);
+        win.render(&mut s, false);
+        assert_eq!(s.lit_pixels(), 0);
+    }
+}

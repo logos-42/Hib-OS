@@ -8,6 +8,7 @@
 //! 5. Unified Perception —— 上下文/行动/文件/智能体/桌面/路径/IO/网关/接口/硬件/文本/轨迹
 //!    都是同构的感知通道，统一走 sense/act 抽象
 
+pub mod agent;
 pub mod ai_token;
 pub mod belief;
 pub mod browser;
@@ -18,13 +19,16 @@ pub mod channels;
 pub mod desktop;
 pub mod dev;
 pub mod env;
+pub mod exec;
 pub mod fsmeta;
 pub mod fw;
 pub mod gateway;
 pub mod gpu;
+pub mod gui;
 pub mod init;
 pub mod ipc;
 pub mod judgment;
+pub mod lease;
 pub mod limits;
 pub mod line_editor;
 pub mod mem;
@@ -41,6 +45,7 @@ pub mod procfs;
 pub mod scheduler;
 pub mod sense;
 pub mod socket;
+pub mod sync;
 pub mod sysctl;
 pub mod time;
 pub mod tty;

@@ -34,7 +34,7 @@ cargo run
 | `sense <通道>` | 读取通道的实时快照 | 可读 (r) |
 | `act <通道> [负载...]` | 向通道写入或触发一次操作 | 可写 (w) |
 
-`channels` 命令列出全部 69 个通道、类别、读写权限以及感知/行动计数。
+`channels` 命令列出全部 76 个通道、类别、读写权限以及感知/行动计数。
 
 ## 系统模块速查
 
@@ -94,10 +94,19 @@ cargo run
 |---|---|---|
 | `sysctl://kernel` | `act sysctl://kernel set vm.swappiness 10` | 内核参数 |
 | `config://system` | `act config://system set hostname ai-node` | 主机身份（hostname/locale/timezone） |
-| `power://state` | `act power://state suspend` | 电源姿态与历史 |
+| `power://state` | `act power://state suspend` | 电源姿态与历史；真挂起/恢复全部执行体，等待表保留 |
 | `pkg://store` | `act pkg://store install curl` | 包管理 |
 | `user://db` | `act user://db adduser alice` | 用户与身份 |
-| `sec://caps` | `act sec://caps grant CAP_NET_ADMIN` | 能力位 |
+| `sec://caps` | `act sec://caps grant CAP_NET_ADMIN` | 能力位（root 以能力集合而非 uid=0 表示） |
+
+### 执行体 / 同步 / 租约 / 子智能体（真并发原语）
+
+| 通道 | 示例 | 说明 |
+|---|---|---|
+| `exec://threads` | `act exec://threads spawn t1 sense gpu://vram` | 真线程执行体，跑 sense/act 任务 DSL |
+| `sync://primitives` | `act sync://primitives sem s1 3` / `wait` | 命名信号量（FIFO+超时）、认知屏障 |
+| `lease://channels` | `act lease://channels acquire ctx://m` / `commit` | 单写者租约 + epoch 快照 + 乐观 CAS 提交 |
+| `agent://results` | `sense agent://results` | 子智能体任务结果表 |
 
 ## 第二批系统模块（本轮新增）
 
@@ -232,13 +241,51 @@ reason: 信念置信 50% ×0.6 + 主导动机 safety(95) ×0.4 = 68
   - `open file:///etc/hibos.toml` —— 直接读 VFS，并同步到浏览器状态。
   - `text 200` —— 查看正文前 200 字符；`history` —— 查看最近记录。
 
+## 真像素 GUI（`gui` feature）
+
+Hib OS 不再只有终端 ASCII 假桌面，而是一套真正的像素 GUI 栈：
+
+- `kernel/gui/surface.rs`：32bpp ARGB 表面，alpha 混合、矩形/圆角/渐变、5×7 字体光栅化。
+- `kernel/gui/window.rs`：窗口对象，每个窗口拥有独立客户端表面；标题栏/关闭/最小化/最大化/缩放按钮；命中测试；内置终端模型（键盘 → 窗口 → 像素闭环）。
+- `kernel/gui/compositor.rs`：壁纸、z-order、焦点、自上而下命中测试、窗口提升/置顶、损坏区域合成、光标。
+- `kernel/gui/input.rs`：键盘/鼠标事件队列，按 z-order 路由到焦点窗口；标题栏拖动、右下角缩放、滚轮滚动。
+- `kernel/gui/bmp.rs`：24 位 BMP 编码/保存，零依赖，可直接在资源管理器查看。
+- `kernel/gui/backend.rs`（`--features gui`）：winit 0.30 + softbuffer 0.4.8 真实窗口，最近邻缩放，400ms 节流实时刷新。
+
+三者共享同一份像素：终端 ANSI 预览、`gui shot` 导出的 BMP、`gui run` 打开的真实窗口，都由同一个 `Compositor` 合成。
+
+```sh
+cargo build --features gui
+cargo run --features gui -- --shell
+# 进入 shell 后：
+gui desktop      # 显示桌面摘要 + 真彩预览
+gui shot         # 导出 gui-output.bmp (960x600)
+gui run          # 打开真实窗口（阻塞到关闭；窗口内 Enter 的命令由 shell 事后执行）
+gui open TERMINAL
+gui focus 1
+gui click 100 100
+gui key hello\n
+```
+
+### 通道注册表（本轮新增）
+
+| 通道 | 类别 | 说明 |
+|---|---|---|
+| `exec://threads` | Action | 真线程执行体与 wait_table |
+| `sync://primitives` | Action | 命名信号量 / 认知屏障 |
+| `lease://channels` | Memory | 单写者租约 + epoch |
+| `agent://results` | Agent | 子智能体结果表 |
+| `gui://windows` | Desktop | 窗口合成状态 |
+| `input://kbd` | Desktop | 键盘输入 |
+| `input://mouse` | Desktop | 鼠标输入 |
+
 ## 测试
 
 ```sh
 cargo test
 ```
 
-当前 175 个单元测试全部通过，覆盖通道注册、权限模型、各系统模块的边界条件（重复挂载、非法前缀、MTU 越界、重复绑定、判断阈值、置信度裁剪等）。
+当前 252 个单元测试全部通过，覆盖通道注册、权限模型、各系统模块的边界条件（重复挂载、非法前缀、MTU 越界、重复绑定、判断阈值、置信度裁剪等）。
 
 ## 设计说明
 

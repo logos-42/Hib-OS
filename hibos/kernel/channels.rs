@@ -273,10 +273,16 @@ pub fn bootstrap() -> ChannelRegistry {
         (ChannelKind::Context, "context://model", Access::ReadWrite),
         (ChannelKind::Action, "action://syscall", Access::Write),
         (ChannelKind::Action, "action://scheduler", Access::Read),
+        (ChannelKind::Action, "exec://threads", Access::ReadWrite),
+        (ChannelKind::Action, "sync://primitives", Access::ReadWrite),
         (ChannelKind::Agent, "agent://orchestrator", Access::ReadWrite),
         (ChannelKind::Agent, "agent://workers", Access::ReadWrite),
+        (ChannelKind::Agent, "agent://results", Access::Read),
         (ChannelKind::Desktop, "desktop://screen", Access::Write),
         (ChannelKind::Desktop, "desktop://framebuffer", Access::Write),
+        (ChannelKind::Desktop, "gui://windows", Access::ReadWrite),
+        (ChannelKind::Desktop, "input://kbd", Access::ReadWrite),
+        (ChannelKind::Desktop, "input://mouse", Access::ReadWrite),
         (ChannelKind::Path, "path://cwd", Access::ReadWrite),
         (ChannelKind::Io, "io://stdin", Access::Read),
         (ChannelKind::Io, "io://stdout", Access::Write),
@@ -310,6 +316,7 @@ pub fn bootstrap() -> ChannelRegistry {
         (ChannelKind::Process, "proc://manager", Access::ReadWrite),
         (ChannelKind::Memory, "mem://ram", Access::ReadWrite),
         (ChannelKind::Memory, "mem://mmap", Access::ReadWrite),
+        (ChannelKind::Memory, "lease://channels", Access::ReadWrite),
         (ChannelKind::File, "fs://meta", Access::ReadWrite),
         (ChannelKind::User, "user://db", Access::ReadWrite),
         (ChannelKind::Net, "socket://tcp", Access::ReadWrite),
@@ -357,15 +364,15 @@ mod tests {
     #[test]
     fn bootstrap_opens_all_channels() {
         let reg = bootstrap();
-        assert_eq!(reg.len(), 69);
+        assert_eq!(reg.len(), 76);
         assert_eq!(reg.of_kind(ChannelKind::Net).count(), 5);
         assert_eq!(reg.of_kind(ChannelKind::Will).count(), 3);
         assert_eq!(reg.of_kind(ChannelKind::Context).count(), 2);
-        assert_eq!(reg.of_kind(ChannelKind::Action).count(), 6);
-        assert_eq!(reg.of_kind(ChannelKind::Agent).count(), 2);
+        assert_eq!(reg.of_kind(ChannelKind::Action).count(), 8);
+        assert_eq!(reg.of_kind(ChannelKind::Agent).count(), 3);
         assert_eq!(reg.of_kind(ChannelKind::Gpu).count(), 4);
         assert_eq!(reg.of_kind(ChannelKind::Device).count(), 11);
-        assert_eq!(reg.of_kind(ChannelKind::Memory).count(), 4);
+        assert_eq!(reg.of_kind(ChannelKind::Memory).count(), 5);
         assert_eq!(reg.of_kind(ChannelKind::Process).count(), 3);
         assert_eq!(reg.of_kind(ChannelKind::User).count(), 1);
         assert_eq!(reg.of_kind(ChannelKind::App).count(), 3);

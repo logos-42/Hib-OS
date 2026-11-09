@@ -12,6 +12,7 @@ use crate::ai_token::{AIConsciousness, ComputeGraph, GraphOpType, TokenId};
 use crate::channels::{ChannelKind, ChannelRegistry};
 use crate::desktop::{self, DesktopInfo};
 use crate::gpu::{GpuCapability, GpuCapabilities, IommuFlags};
+use crate::gui;
 use crate::line_editor::{self, Completion, LineEditor, ReadOutcome};
 use crate::modules::{KernelModuleManager, ModuleEntry, ModuleProtocol, Version};
 use crate::scheduler::CpuPriority;
@@ -86,6 +87,7 @@ pub const COMMANDS: &[&str] = &[
     "queue",
     "stats",
     "desktop",
+    "gui",
     "pwd",
     "ls",
     "cd",
@@ -307,6 +309,7 @@ impl Shell {
             "queue" => println!("就绪队列: {} 个任务", self.handler.scheduler.ready_count()),
             "stats" => self.cmd_stats(),
             "desktop" => self.cmd_desktop(&parts),
+            "gui" => self.cmd_gui(&parts),
             "pwd" => println!("{}", self.vfs.cwd_path()),
             "ls" => self.cmd_ls(parts.get(1).copied()),
             "cd" => self.cmd_cd(parts.get(1).copied()),
@@ -672,6 +675,114 @@ impl Shell {
             desktop::refresh_framebuffer(&info);
             print!("{}", desktop::render(&info));
             println!();
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // 命令实现：真 GUI
+    // ------------------------------------------------------------------
+
+    fn cmd_gui(&mut self, parts: &[&str]) {
+        let sub = parts.get(1).copied().unwrap_or("desktop");
+        let rest = parts.get(2..).map(|p| p.join(" ")).unwrap_or_default();
+        gui::ensure_demo();
+        match sub {
+            "status" | "info" => {
+                println!("{}", gui::status());
+            }
+            "desktop" | "preview" => {
+                println!("{}", gui::status());
+                print!("{}", gui::preview(96, 26));
+            }
+            "shot" | "save" => {
+                let path = if rest.is_empty() { "gui-output.bmp".to_string() } else { rest };
+                match gui::screenshot(&path) {
+                    Ok(msg) => println!("{}", msg),
+                    Err(e) => println!("{}", e),
+                }
+            }
+            "run" => match gui::run_native() {
+                Ok(()) => {
+                    println!("真实窗口已关闭");
+                    let cmds = gui::take_commands();
+                    if !cmds.is_empty() {
+                        println!("窗口内输入的命令 ({} 条):", cmds.len());
+                    }
+                    for line in cmds {
+                        println!("[gui] > {}", line);
+                        if !line.trim().is_empty() && !line.trim().starts_with("gui") {
+                            self.dispatch(&line);
+                        }
+                    }
+                }
+                Err(e) => println!("{}", e),
+            },
+            "open" | "term" | "terminal" => {
+                let title = if rest.is_empty() { "TERMINAL".to_string() } else { rest };
+                let id = gui::open_terminal(&title, 420, 280);
+                println!("已打开终端窗口 win#{} ({})", id, title);
+            }
+            "close" => match rest.parse::<u64>() {
+                Ok(id) => println!("{}", if gui::close_window(id) { format!("已关闭 win#{}", id) } else { format!("win#{} 不存在", id) }),
+                Err(_) => println!("用法: gui close <win-id>"),
+            },
+            "focus" => match rest.parse::<u64>() {
+                Ok(id) => println!("{}", if gui::focus_window(id) { format!("已聚焦 win#{}", id) } else { format!("win#{} 不存在", id) }),
+                Err(_) => println!("用法: gui focus <win-id>"),
+            },
+            "move" => {
+                let mut p = rest.split_whitespace();
+                let id = p.next().and_then(|s| s.parse::<u64>().ok());
+                let x = p.next().and_then(|s| s.parse::<i32>().ok());
+                let y = p.next().and_then(|s| s.parse::<i32>().ok());
+                match (id, x, y) {
+                    (Some(id), Some(x), Some(y)) => println!(
+                        "{}",
+                        if gui::move_window(id, x, y) {
+                            format!("win#{} -> ({}, {})", id, x, y)
+                        } else {
+                            format!("win#{} 不存在", id)
+                        }
+                    ),
+                    _ => println!("用法: gui move <win-id> <x> <y>"),
+                }
+            }
+            "click" => {
+                let nums: Vec<i32> = rest.split_whitespace().filter_map(|s| s.parse().ok()).collect();
+                match nums.as_slice() {
+                    [x, y, ..] => {
+                        let eff = gui::click(*x, *y);
+                        println!("点击 ({}, {}) -> {:?}", x, y, eff);
+                    }
+                    _ => println!("用法: gui click <x> <y>"),
+                }
+            }
+            "key" => {
+                let text = rest.replace("\\n", "\n").replace("\\b", "\u{8}");
+                let effects = gui::key_text(&text);
+                for e in &effects {
+                    if let gui::input::Effect::Command { line, window } = e {
+                        println!("[win#{}] 执行命令: {}", window, line);
+                        if !line.trim().is_empty() && !line.trim().starts_with("gui") {
+                            self.dispatch(&line);
+                        }
+                    }
+                }
+                println!("已向焦点窗口输入 {} 字符", text.chars().count());
+            }
+            "text" => {
+                if rest.is_empty() {
+                    println!("用法: gui text <文本...>");
+                } else {
+                    match gui::render_text_bitmap(&rest, "gui-text.bmp") {
+                        Ok(msg) => println!("{}", msg),
+                        Err(e) => println!("{}", e),
+                    }
+                }
+            }
+            _ => println!(
+                "用法: gui [desktop|shot [路径]|run|open <标题>|close <id>|focus <id>|move <id> <x> <y>|click <x> <y>|key <文本>|text <文本>]"
+            ),
         }
     }
 
@@ -1843,6 +1954,7 @@ pub fn usage_line(cmd: &str) -> Option<&'static str> {
         "queue" => "queue",
         "stats" => "stats",
         "desktop" => "desktop [--pixels]",
+        "gui" => "gui [desktop|shot [路径]|run|open <标题>|close <id>|focus <id>|move <id> <x> <y>|click <x> <y>|key <文本>|text <文本>]",
         "pwd" => "pwd",
         "ls" => "ls [路径]",
         "cd" => "cd [路径]",
@@ -1886,6 +1998,7 @@ pub fn describe(cmd: &str) -> Option<&'static str> {
         "queue" => "查看就绪队列长度",
         "stats" => "系统统计 (Token/任务/显存/运行时长)",
         "desktop" => "文本桌面面板; --pixels 输出像素帧缓冲缩略图",
+        "gui" => "真像素 GUI: 窗口合成/键盘鼠标/BMP 导出/真实窗口 (--features gui)",
         "pwd" => "显示当前工作目录",
         "ls" => "列出目录条目 (类型/权限/大小)",
         "cd" => "切换工作目录, 支持 . 与 .. 及相对路径",
@@ -2050,7 +2163,7 @@ mod tests {
     #[test]
     fn channels_registry_and_sense() {
         let mut s = Shell::new();
-        assert_eq!(s.channels.len(), 69);
+        assert_eq!(s.channels.len(), 76);
         assert!(s.dispatch("channels"));
         assert!(s.dispatch("sense file://vfs"));
         assert!(s.dispatch("sense gpu://vram"));

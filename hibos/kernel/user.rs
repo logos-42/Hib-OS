@@ -3,7 +3,10 @@
 //! 不复制 Linux 的 /etc/passwd，而是把「当前以谁的身份行动」建模成
 //! 可感知 (sense) / 可切换 (act) 的通道 `user://db`。
 
+use std::collections::BTreeSet;
 use std::sync::{Mutex, OnceLock};
+
+use crate::caps::ALL_CAPS;
 
 #[derive(Clone, Debug)]
 pub struct User {
@@ -51,9 +54,35 @@ impl UserDb {
 
     pub fn whoami(&self) -> String {
         match self.users.iter().find(|u| u.uid == self.current_uid) {
-            Some(u) => format!("uid={} name={} groups=[{}]", u.uid, u.name, u.groups.join(",")),
+            Some(u) => format!(
+                "uid={} name={} groups=[{}] caps={}",
+                u.uid,
+                u.name,
+                u.groups.join(","),
+                self.current_caps().iter().cloned().collect::<Vec<_>>().join(",")
+            ),
             None => format!("uid={} (unknown)", self.current_uid),
         }
+    }
+
+    /// 给定 uid 能持有的 capability 集合。
+    ///
+    /// root (uid=0) 持有全部能力；其它用户默认只持有 `CAP_SYS_ADMIN`
+    ///（演示环境下可自行提权），其余能力需通过 `sec://caps` 显式授予。
+    /// 这是「root 以能力集合而非 uid=0 全权」的具体体现。
+    pub fn capabilities_of(uid: u32) -> BTreeSet<String> {
+        if uid == 0 {
+            return ALL_CAPS.iter().map(|s| s.to_string()).collect();
+        }
+        match uid {
+            1000 | 1001 => ["CAP_SYS_ADMIN"].iter().map(|s| s.to_string()).collect(),
+            _ => BTreeSet::new(),
+        }
+    }
+
+    /// 当前会话身份持有的 capability 集合。
+    pub fn current_caps(&self) -> BTreeSet<String> {
+        Self::capabilities_of(self.current_uid)
     }
 
     pub fn adduser(&mut self, name: &str) -> Result<u32, String> {
@@ -83,11 +112,14 @@ impl UserDb {
 
     pub fn sudo(&mut self) -> String {
         if self.current_uid == 0 {
-            "已在 root 身份下".to_string()
-        } else {
-            self.current_uid = 0;
-            "已提权到 root (uid=0)".to_string()
+            return "已在 root 身份下".to_string();
         }
+        // root 以能力集合表示：提权需持有 CAP_SYS_ADMIN，而非凭 uid 硬编码。
+        if !self.current_caps().contains("CAP_SYS_ADMIN") {
+            return "缺少 CAP_SYS_ADMIN 能力，无法提权到 root".to_string();
+        }
+        self.current_uid = 0;
+        "已提权到 root (capability 集合: 全部)".to_string()
     }
 }
 

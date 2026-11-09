@@ -27,13 +27,29 @@ impl Power {
         }
         self.state = ns.clone();
         self.history.push(format!("-> {}", ns));
-        Ok(format!("系统姿态: {}", ns))
+        match ns.as_str() {
+            // 真正的睡眠：把所有执行体置为 Suspended，等待表原样保留。
+            // 唤醒后它们回到原来的等待键上，不丢事件。
+            "suspend" => {
+                let n = crate::exec::suspend_all();
+                self.history.push(format!("exec suspended={}", n));
+                Ok(format!("系统姿态: suspend（已挂起 {} 个执行体，等待表保留）", n))
+            }
+            // 从睡眠恢复。
+            "running" => {
+                let n = crate::exec::resume_all();
+                self.history.push(format!("exec resumed={}", n));
+                Ok(format!("系统姿态: running（已恢复 {} 个执行体）", n))
+            }
+            _ => Ok(format!("系统姿态: {}", ns)),
+        }
     }
 
     pub fn wake(&mut self) -> String {
         self.state = "running".to_string();
-        self.history.push("wake -> running".to_string());
-        "已唤醒 -> running".to_string()
+        let n = crate::exec::resume_all();
+        self.history.push(format!("wake -> running (resumed={})", n));
+        format!("已唤醒 -> running（恢复 {} 个执行体）", n)
     }
 }
 
