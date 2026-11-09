@@ -388,6 +388,8 @@ pub fn bootstrap() -> ChannelRegistry {
         (ChannelKind::Action, "sched://memory", Access::ReadWrite),
         (ChannelKind::Action, "sched://governance", Access::ReadWrite),
         (ChannelKind::Action, "sched://domains", Access::Read),
+        // —— 统一灵感核心：五个相位归于一个调度意志 ——
+        (ChannelKind::Action, "sched://inspiration", Access::ReadWrite),
     ];
     for (kind, name, access) in defaults {
         let _ = reg.open(kind, name, access);
@@ -402,11 +404,11 @@ mod tests {
     #[test]
     fn bootstrap_opens_all_channels() {
         let reg = bootstrap();
-        assert_eq!(reg.len(), 106);
+        assert_eq!(reg.len(), 107);
         assert_eq!(reg.of_kind(ChannelKind::Net).count(), 5);
         assert_eq!(reg.of_kind(ChannelKind::Will).count(), 4);
         assert_eq!(reg.of_kind(ChannelKind::Context).count(), 2);
-        assert_eq!(reg.of_kind(ChannelKind::Action).count(), 22);
+        assert_eq!(reg.of_kind(ChannelKind::Action).count(), 23);
         assert_eq!(reg.of_kind(ChannelKind::Agent).count(), 3);
         assert_eq!(reg.of_kind(ChannelKind::Gpu).count(), 6);
         assert_eq!(reg.of_kind(ChannelKind::Device).count(), 14);

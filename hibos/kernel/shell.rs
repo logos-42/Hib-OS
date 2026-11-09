@@ -721,6 +721,26 @@ impl Shell {
                 Ok(msg) => println!("{}", msg),
                 Err(e) => println!("gui wallpaper 失败: {}", e),
             },
+            "app" | "launch" => match gui::open_app(&rest) {
+                Ok(id) => println!("已启动应用 {} -> win#{}", rest, id),
+                Err(e) => println!("{}", e),
+            },
+            "taskbar" => {
+                let mut p = rest.split_whitespace();
+                let xy = (
+                    p.next().and_then(|s| s.parse::<i32>().ok()),
+                    p.next().and_then(|s| s.parse::<i32>().ok()),
+                );
+                match xy {
+                    (Some(x), Some(y)) => println!(
+                        "任务栏点击 ({},{}) -> {:?}",
+                        x,
+                        y,
+                        gui::taskbar_click(x, y)
+                    ),
+                    _ => println!("用法: gui taskbar <x> <y>"),
+                }
+            }
             "open" | "term" | "terminal" => {
                 let title = if rest.is_empty() { "TERMINAL".to_string() } else { rest };
                 let id = gui::open_terminal(&title, 420, 280);
@@ -769,6 +789,7 @@ impl Shell {
                         println!("[win#{}] 执行命令: {}", window, line);
                         if !line.trim().is_empty() && !line.trim().starts_with("gui") {
                             self.dispatch(&line);
+                            gui::app_output(*window, &format!("内核已执行: {}", line));
                         }
                     }
                 }
@@ -2177,7 +2198,7 @@ mod tests {
     #[test]
     fn channels_registry_and_sense() {
         let mut s = Shell::new();
-        assert_eq!(s.channels.len(), 106);
+        assert_eq!(s.channels.len(), 107);
         assert!(s.dispatch("channels"));
         assert!(s.dispatch("sense file://vfs"));
         assert!(s.dispatch("sense gpu://vram"));

@@ -21,6 +21,7 @@
 use std::sync::{Mutex, OnceLock};
 
 use super::bmp;
+use super::png;
 use super::surface::{argb, Surface};
 
 /// 内置壁纸基准尺寸（像素艺术，缩放时保留像素颗粒感）。
@@ -54,8 +55,19 @@ impl Fit {
     }
 }
 
-/// 内置风格名。
-pub const STYLES: &[&str] = &["sunset", "aurora", "circuit", "nebula", "grid", "solid"];
+/// 内置风格名（后两个直接读本机 `.wiki` 里的真实壁纸图）。
+pub const STYLES: &[&str] = &[
+    "sunset", "aurora", "circuit", "nebula", "grid", "solid", "wiki1", "wiki2",
+];
+
+/// 本机 wiki 里的两张壁纸图（PNG；`壁纸2.jpg` 已转换为同名 PNG）。
+pub const WIKI_IMAGES: &[(&str, &str)] =
+    &[("wiki1", "壁纸.png"), ("wiki2", "壁纸2.png")];
+
+/// 取 wiki 壁纸的绝对路径（编译期固定，避免依赖运行时工作目录）。
+fn wiki_path(file: &str) -> String {
+    format!("{}/.wiki/{}", env!("CARGO_MANIFEST_DIR"), file)
+}
 
 /// 全局壁纸库。
 pub struct WallpaperBank {
@@ -80,7 +92,7 @@ impl WallpaperBank {
 
     pub fn status(&self) -> String {
         format!(
-            "wallpaper={} fit={} source={}x{} background=#{:06x} changes={}\nstyles: {}\n用法: set <风格> | load <BMP> | fit <stretch|tile|center> | save <BMP>",
+            "wallpaper={} fit={} source={}x{} background=#{:06x} changes={}\nstyles: {}\n用法: set <风格> | load <PNG|BMP> | wiki [1|2] | fit <stretch|tile|center> | save <BMP>",
             self.name,
             self.fit.name(),
             self.base.width(),
@@ -91,8 +103,11 @@ impl WallpaperBank {
         )
     }
 
-    /// 切换内置风格。
+    /// 切换内置风格；`wiki1`/`wiki2` 直接加载本机真实图片。
     pub fn set_style(&mut self, name: &str) -> Result<String, String> {
+        if let Some((_, file)) = WIKI_IMAGES.iter().find(|(n, _)| *n == name) {
+            return self.load_image(&wiki_path(file));
+        }
         if !STYLES.contains(&name) {
             return Err(format!(
                 "未知壁纸 {} (可用: {})",
@@ -106,15 +121,41 @@ impl WallpaperBank {
         Ok(format!("像素壁纸 -> {} ({}x{} 基准)", name, BASE_W, BASE_H))
     }
 
-    /// 从 BMP 文件加载图片当壁纸。
-    pub fn load_bmp(&mut self, path: &str) -> Result<String, String> {
-        let bytes = std::fs::read(path).map_err(|e| format!("读取壁纸失败: {}", e))?;
-        let img = bmp::decode(&bytes)?;
+    /// 按扩展名加载 PNG / BMP 图片当壁纸。
+    pub fn load_image(&mut self, path: &str) -> Result<String, String> {
+        let ext = path
+            .rsplit('.')
+            .next()
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        let img = match ext.as_str() {
+            "png" => png::load(path)?,
+            "bmp" => bmp::load(path)?,
+            "jpg" | "jpeg" => {
+                return Err("JPEG 暂不直接解码，请先用 `act gui://wallpaper wiki` 使用已转换的 PNG 版本".to_string())
+            }
+            _ => return Err(format!("不支持的图片格式 .{} (支持 png/bmp)", ext)),
+        };
         let (w, h) = (img.width(), img.height());
+        if w == 0 || h == 0 {
+            return Err("图片尺寸无效".to_string());
+        }
         self.base = img;
         self.name = path.to_string();
         self.changes += 1;
         Ok(format!("已加载图片壁纸 {} ({}x{})", path, w, h))
+    }
+
+    /// 列出本机 wiki 壁纸图。
+    pub fn wiki_list() -> String {
+        WIKI_IMAGES
+            .iter()
+            .map(|(n, f)| {
+                let p = wiki_path(f);
+                format!("  {} -> {} ({})", n, f, if std::path::Path::new(&p).exists() { "可用" } else { "缺失" })
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
     }
 
     /// 导出当前壁纸源图为 BMP。
@@ -213,9 +254,21 @@ pub fn act(payload: &str) -> Result<String, String> {
         }
         "load" => {
             if rest.is_empty() {
-                return Err("用法: load <BMP路径>".to_string());
+                return Err("用法: load <PNG|BMP路径>".to_string());
             }
-            bank().lock().unwrap().load_bmp(rest)
+            bank().lock().unwrap().load_image(rest)
+        }
+        "wiki" => {
+            if rest.is_empty() {
+                Ok(format!("本机 wiki 壁纸图:\n{}", WallpaperBank::wiki_list()))
+            } else {
+                let name = match rest {
+                    "1" | "wiki1" | "壁纸" => "wiki1",
+                    "2" | "wiki2" | "壁纸2" => "wiki2",
+                    other => other,
+                };
+                bank().lock().unwrap().set_style(name)
+            }
         }
         "fit" => {
             let f = Fit::parse(rest).ok_or_else(|| "用法: fit <stretch|tile|center>".to_string())?;
@@ -324,6 +377,9 @@ mod tests {
     #[test]
     fn every_style_has_visible_variation() {
         for name in STYLES {
+            if *name == "wiki1" || *name == "wiki2" {
+                continue; // 这两个是本机真实图片，不走程序化生成
+            }
             let s = make_style(name, 64, 40);
             let mut colors = std::collections::BTreeSet::new();
             for y in 0..40 {
@@ -352,7 +408,7 @@ mod tests {
         b.set_style("grid").unwrap();
         let p = std::env::temp_dir().join("hibos_wallpaper_test.bmp");
         b.save_bmp(p.to_str().unwrap()).unwrap();
-        let r = b.load_bmp(p.to_str().unwrap()).unwrap();
+        let r = b.load_image(p.to_str().unwrap()).unwrap();
         assert!(r.contains("图片壁纸"), "{}", r);
         assert_eq!(b.base.width(), BASE_W);
         let _ = std::fs::remove_file(&p);

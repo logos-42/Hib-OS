@@ -292,6 +292,7 @@ pub fn probe(name: &str) -> Option<String> {
         "sched://reflex" | "sched://perception" | "sched://deliberation" | "sched://memory" | "sched://governance" | "sched://domains" => {
             Some(crate::scheduler_domains::status_line())
         }
+        "sched://inspiration" => Some(crate::inspiration::core().lock().unwrap().status()),
         _ => None,
     }
 }
@@ -754,6 +755,7 @@ fn act_raw(name: &str, payload: &str) -> Option<Result<String, String>> {
         "sched://reflex" | "sched://perception" | "sched://deliberation" | "sched://memory" | "sched://governance" | "sched://domains" => {
             Some(act_sched(payload))
         }
+        "sched://inspiration" => Some(crate::inspiration::act(payload)),
         _ => None,
     }
 }

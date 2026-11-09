@@ -144,6 +144,10 @@ pub fn dispatch(comp: &mut Compositor, ev: &Event) -> Vec<Effect> {
             if *button != MouseButton::Left {
                 return vec![Effect::Redraw];
             }
+            // 任务栏优先于窗口：点击会真正启动应用 / 切换窗口状态。
+            if let Some(tb) = comp.taskbar_hit(*x, *y) {
+                return comp.handle_taskbar(tb);
+            }
             let Some((id, hit)) = comp.hit_test(*x, *y) else {
                 // 点空白：取消焦点（真实桌面行为）
                 return vec![Effect::Redraw];

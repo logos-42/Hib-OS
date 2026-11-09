@@ -29,6 +29,7 @@ pub mod gpu;
 pub mod gui;
 pub mod hibernate;
 pub mod init;
+pub mod inspiration;
 pub mod ipc;
 pub mod judgment;
 pub mod lease;

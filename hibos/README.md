@@ -22,7 +22,9 @@ GPU-Centric 宏内核原型：把系统资源（文件、显存、设备、网�
 | 真像素 GUI | 32bpp ARGB 像素栈 + winit/softbuffer 真实窗口 | [docs/12-真像素GUI.md](./docs/12-真像素GUI.md) |
 | 外部世界 | 网关与浏览器 | [docs/13-外部世界.md](./docs/13-外部世界.md) |
 | 测试 | 单元测试基线 | [docs/14-测试.md](./docs/14-测试.md) |
-| 设计说明 | 三铁律、五调度域、root capability、并发原语 | [docs/15-设计说明.md](./docs/15-设计说明.md) |
+| 设计说明 | 三铁律、一个灵感核心 + 五相位、root capability、并发原语 | [docs/15-设计说明.md](./docs/15-设计说明.md) |
+| 像素壁纸与桌面应用 | PNG 解码、本机 wiki 壁纸、真实任务栏、窗口内运行应用 | [docs/16-像素壁纸与桌面应用.md](./docs/16-像素壁纸与桌面应用.md) |
+| 灵感调度核心 | 五个调度相位收拢为宏内核的一个调度意志 | [docs/17-灵感调度核心.md](./docs/17-灵感调度核心.md) |
 | 架构总览 | 完整架构说明（独立文件） | [ARCHITECTURE.md](./ARCHITECTURE.md) |
 
 ---

@@ -83,10 +83,11 @@ impl DesktopShell {
         if !self.launcher.iter().any(|a| a == app) {
             self.launcher.push(app.to_string());
         }
-        let id = if app == "terminal" {
-            gui::open_terminal(app, 480, 260)
-        } else {
-            gui::open_window(app, 360, 220)
+        // 优先启动「窗口内运行的应用」；未知名字退回普通像素窗口。
+        let id = match gui::open_app(app) {
+            Ok(id) => id,
+            Err(_) if app == "terminal" => gui::open_terminal(app, 480, 260),
+            Err(_) => gui::open_window(app, 360, 220),
         };
         Ok(format!("已启动 {} -> win#{}", app, id))
     }

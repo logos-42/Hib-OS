@@ -158,6 +158,37 @@ pub fn status_line() -> String {
     parts.join(" | ")
 }
 
+/// 全部域的就绪任务总数。
+pub fn total_ready() -> usize {
+    let g = domains().lock().unwrap();
+    g.map.values().map(|s| s.ready_count()).sum()
+}
+
+/// **宏内核单一决策点**：跨所有域统一仲裁出下一个要运行的 token。
+///
+/// 五域并不是五个互不相干的内核，而是同一个调度意志的五个相位。
+/// 这里按「域默认优先级 → 就绪数」排序，只做出一个选择。
+pub fn pick_next_unified() -> Option<(SchedDomain, TokenId)> {
+    let mut g = domains().lock().unwrap();
+    let mut order: Vec<SchedDomain> = g.map.keys().copied().collect();
+    order.sort_by(|a, b| {
+        b.default_priority()
+            .rank()
+            .cmp(&a.default_priority().rank())
+            .then(g.map[b].ready_count().cmp(&g.map[a].ready_count()))
+    });
+    for d in order {
+        let s = g.map.get_mut(&d).unwrap();
+        if s.ready_count() == 0 {
+            continue;
+        }
+        if let Some(t) = s.pick_next() {
+            return Some((d, t));
+        }
+    }
+    None
+}
+
 /// 解析域名字符串。
 pub fn parse_domain(s: &str) -> Result<SchedDomain, String> {
     match s {

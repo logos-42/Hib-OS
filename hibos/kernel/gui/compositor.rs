@@ -11,7 +11,10 @@
 //! * `hit_test` 自上而下命中测试
 //! * `drag` 标题栏拖动 / 右下角缩放的状态机
 
+use super::apps::{AppKind, AppState};
+use super::input::Effect;
 use super::surface::{argb, palette, Rect, Surface};
+use super::taskbar::{Taskbar, TaskbarHit};
 use super::window::{Hit, Window, WindowId};
 use crate::monitor::get_time_ns;
 
@@ -53,6 +56,8 @@ pub struct Compositor {
     /// 最近一次合成的窗口数量 / 脏标记（可观测性）。
     pub frames: u64,
     pub last_compose_ns: u64,
+    /// 底部真实任务栏。
+    pub taskbar: Taskbar,
 }
 
 impl Compositor {
@@ -70,6 +75,7 @@ impl Compositor {
             frame: Surface::new(width, height),
             frames: 0,
             last_compose_ns: 0,
+            taskbar: Taskbar::new(),
         }
     }
 
@@ -216,6 +222,52 @@ impl Compositor {
         None
     }
 
+    /// 打开一个「窗口内运行的应用」。
+    pub fn open_app(&mut self, kind: AppKind) -> WindowId {
+        let id = self.open(kind.title(), 420, 260, kind.accent());
+        if let Some(w) = self.window_mut(id) {
+            w.app = Some(AppState::new(kind));
+        }
+        id
+    }
+
+    /// 任务栏命中测试（输入层优先调用）。
+    pub fn taskbar_hit(&self, x: i32, y: i32) -> Option<TaskbarHit> {
+        self.taskbar
+            .hit(self.width, self.height, &self.windows, x, y)
+    }
+
+    /// 处理任务栏点击：启动器开合、菜单启动应用、窗口按钮聚焦/最小化/还原。
+    pub fn handle_taskbar(&mut self, hit: TaskbarHit) -> Vec<Effect> {
+        match hit {
+            TaskbarHit::Launcher => {
+                self.taskbar.toggle_menu();
+                vec![Effect::Redraw]
+            }
+            TaskbarHit::Menu(i) => {
+                self.taskbar.menu_open = false;
+                match Taskbar::app_at(i) {
+                    Some(kind) => {
+                        let id = self.open_app(kind);
+                        vec![Effect::Focused(Some(id)), Effect::Redraw]
+                    }
+                    None => vec![Effect::Redraw],
+                }
+            }
+            TaskbarHit::Window(id) => {
+                let is_focus = self.focused == Some(id);
+                let minimized = self.window(id).map(|w| w.minimized).unwrap_or(false);
+                if let Some(w) = self.window_mut(id) {
+                    w.minimized = is_focus && !minimized;
+                }
+                if !is_focus || minimized {
+                    self.focus(id);
+                }
+                vec![Effect::Focused(self.focused), Effect::Redraw]
+            }
+        }
+    }
+
     /// 合成一帧，返回像素缓冲。
     pub fn compose(&mut self) -> &Surface {
         let began = get_time_ns();
@@ -233,11 +285,22 @@ impl Compositor {
 
         // 先画所有非焦点窗口，再画焦点窗口。
         let mut frame = std::mem::replace(&mut self.frame, Surface::new(1, 1));
+        // 应用每帧重绘自己的客户端表面（监视器/文件管理器因此是"活的"）。
+        for w in self.windows.iter_mut() {
+            if let Some(app) = w.app.as_mut() {
+                app.paint(&mut w.client);
+            }
+        }
         for idx in order {
             let is_focused = focused == Some(self.windows[idx].id);
             self.windows[idx].render(&mut frame, is_focused);
         }
         draw_cursor(&mut frame, self.cursor.0, self.cursor.1);
+        // 任务栏在最上层，且能反映当前窗口与壁纸状态。
+        let wp = super::wallpaper::bank().lock().unwrap().name.clone();
+        let bar_status = format!("win={} wp={}", self.windows.len(), wp);
+        self.taskbar
+            .draw(&mut frame, &self.windows, focused, &bar_status);
         self.frame = frame;
         self.frames += 1;
         self.last_compose_ns = get_time_ns().saturating_sub(began);

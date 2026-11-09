@@ -9,6 +9,7 @@
 //! * `TerminalModel` —— 内置终端（可读写的行缓冲，验证键盘输入闭环）。
 //! * 任意 `Surface` —— 应用可直接往 `client` 上画像素。
 
+use super::apps::AppState;
 use super::surface::{argb, palette, Rect, Surface};
 use crate::gpu::framebuffer::{ADVANCE, LINE_HEIGHT};
 
@@ -101,6 +102,8 @@ pub struct Window {
     pub client: Surface,
     /// 内置终端模型；为 None 时表示纯像素窗口。
     pub terminal: Option<TerminalModel>,
+    /// 窗口内运行的应用；存在时优先接管键盘与客户端绘制。
+    pub app: Option<AppState>,
     /// 文本缩放。
     pub scale: u32,
     /// 标题栏颜色（不同应用不同色带）。
@@ -127,6 +130,7 @@ impl Window {
             resizable: true,
             client: Surface::filled(cw, chh, palette::BASE),
             terminal: None,
+            app: None,
             scale: 2,
             accent,
             content_epoch: 1,
@@ -238,21 +242,31 @@ impl Window {
 
     /// 键盘输入：字符 / 退格 / 回车。
     pub fn type_char(&mut self, ch: char) {
-        if let Some(t) = self.terminal.as_mut() {
+        if let Some(app) = self.app.as_mut() {
+            app.on_char(ch);
+            self.content_epoch += 1;
+        } else if let Some(t) = self.terminal.as_mut() {
             t.type_char(ch);
             self.repaint();
         }
     }
 
     pub fn backspace(&mut self) {
-        if let Some(t) = self.terminal.as_mut() {
+        if let Some(app) = self.app.as_mut() {
+            app.on_backspace();
+            self.content_epoch += 1;
+        } else if let Some(t) = self.terminal.as_mut() {
             t.backspace();
             self.repaint();
         }
     }
 
     pub fn enter(&mut self) -> Option<String> {
-        if let Some(t) = self.terminal.as_mut() {
+        if let Some(app) = self.app.as_mut() {
+            let cmd = app.on_enter();
+            self.content_epoch += 1;
+            cmd
+        } else if let Some(t) = self.terminal.as_mut() {
             let cmd = t.input.trim().to_string();
             t.enter();
             self.repaint();
@@ -263,7 +277,10 @@ impl Window {
     }
 
     pub fn scroll_by(&mut self, delta: i32) {
-        if let Some(t) = self.terminal.as_mut() {
+        if let Some(app) = self.app.as_mut() {
+            app.scroll_by(delta);
+            self.content_epoch += 1;
+        } else if let Some(t) = self.terminal.as_mut() {
             let n = t.lines.len();
             let cur = t.scroll.min(n);
             t.scroll = (cur as i32 + delta).clamp(0, n as i32) as usize;

@@ -6,6 +6,8 @@
 //! 支持：8bit 灰度 / RGB / 调色板 / 灰度+α / RGBA，非隔行（Adam7 会明确报错）。
 //! 支持 DEFLATE 的 stored / fixed-Huffman / dynamic-Huffman 三种块。
 
+use std::collections::HashMap;
+
 use super::surface::{argb, Surface};
 
 const PNG_SIG: &[u8; 8] = b"\x89PNG\r\n\x1a\n";
@@ -196,27 +198,28 @@ impl<'a> BitReader<'a> {
     }
 }
 
-/// 规范 Huffman 表：存 (反转后的码, 码长, 符号)。
+/// 规范 Huffman 表：(码长, 反转后的码) -> 符号，哈希查找避免大图逐位线性扫描。
 struct Huffman {
-    table: Vec<(u16, u8, u16)>,
+    map: HashMap<(u8, u16), u16>,
 }
 
 impl Huffman {
     fn build(lengths: &[u8]) -> Result<Self, String> {
-        let mut count = [0u16; 16];
+        let mut count = [0u32; 16];
         for &l in lengths {
             if l > 15 {
                 return Err("Huffman 码长超过 15".to_string());
             }
             count[l as usize] += 1;
         }
-        let mut next = [0u16; 16];
-        let mut code = 0u16;
+        // u32 中间量，避免 u16 在构造规范码时溢出
+        let mut next = [0u32; 16];
+        let mut code = 0u32;
         for len in 1..16 {
             code = (code + count[len - 1]) << 1;
             next[len] = code;
         }
-        let mut table = Vec::new();
+        let mut map = HashMap::new();
         for (sym, &len) in lengths.iter().enumerate() {
             if len == 0 {
                 continue;
@@ -226,18 +229,19 @@ impl Huffman {
             // 位逆序：DEFLATE 按 LSB-first 读码
             let mut rev = 0u16;
             for i in 0..len {
-                rev |= ((c >> i) & 1) << (len - 1 - i);
+                let bit = (c >> i) & 1;
+                rev |= (bit as u16) << (len - 1 - i);
             }
-            table.push((rev, len, sym as u16));
+            map.insert((len, rev), sym as u16);
         }
-        Ok(Self { table })
+        Ok(Self { map })
     }
 
     fn decode(&self, br: &mut BitReader<'_>) -> Result<u16, String> {
         let mut code = 0u16;
         for len in 1..=15u8 {
             code |= (br.bit()? as u16) << (len - 1);
-            if let Some((_, _, sym)) = self.table.iter().find(|(c, l, _)| *l == len && *c == code) {
+            if let Some(sym) = self.map.get(&(len, code)) {
                 return Ok(*sym);
             }
         }
@@ -473,6 +477,7 @@ mod tests {
         // 这里验证 stored 块与 LZ77 辅助函数的边界行为。
         let z = [0x78, 0x01, 0x01, 3, 0, 0xfc, 0xff, b'a', b'b', b'c', 0, 0, 0, 0];
         assert_eq!(inflate_zlib(&z).unwrap(), b"abc");
-        assert_eq!(paeth(10, 20, 15), 10);
+        // p=15, |p-a|=5, |p-b|=5, |p-c|=0 -> 选 c
+        assert_eq!(paeth(10, 20, 15), 15);
     }
 }

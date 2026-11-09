@@ -13,10 +13,13 @@
 //! 3. 没有「预览专用代码」：终端里看到的 ANSI 预览和导出的 BMP、
 //!    以及 `gui run` 打开的真实窗口，用的是同一份像素。
 
+pub mod apps;
 pub mod bmp;
 pub mod compositor;
 pub mod input;
+pub mod png;
 pub mod shell;
+pub mod taskbar;
 pub mod surface;
 pub mod wallpaper;
 pub mod window;
@@ -392,6 +395,35 @@ fn sample(s: &Surface, cx: usize, cy: usize, cols: usize, px_rows: usize) -> u32
     let x = (cx * w / cols).min(w.saturating_sub(1));
     let y = (cy * h / px_rows.max(1)).min(h.saturating_sub(1));
     s.get(x as i32, y as i32).unwrap_or(0)
+}
+
+/// 启动一个「窗口内运行的应用」，返回窗口 id。
+pub fn open_app(name: &str) -> Result<u64, String> {
+    let kind = apps::AppKind::parse(name).ok_or_else(|| {
+        format!("未知应用 {} (可用: {})", name, apps::AppKind::list())
+    })?;
+    Ok(desktop().lock().unwrap().open_app(kind))
+}
+
+/// 把内核执行结果回显到应用窗口（终端应用会显示）。
+pub fn app_output(id: u64, text: &str) {
+    if let Some(w) = desktop().lock().unwrap().window_mut(id) {
+        if let Some(app) = w.app.as_mut() {
+            app.output(text);
+        }
+    }
+}
+
+/// 模拟点击任务栏（键盘/脚本也能走同一套窗口管理逻辑）。
+pub fn taskbar_click(x: i32, y: i32) -> Vec<input::Effect> {
+    let hit = {
+        let d = desktop().lock().unwrap();
+        d.taskbar_hit(x, y)
+    };
+    match hit {
+        Some(h) => desktop().lock().unwrap().handle_taskbar(h),
+        None => Vec::new(),
+    }
 }
 
 /// 桌面摘要。
