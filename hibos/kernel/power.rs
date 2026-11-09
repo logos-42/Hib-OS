@@ -2,6 +2,8 @@
 
 use std::sync::{Mutex, OnceLock};
 
+use crate::sense::wake_source;
+
 pub struct Power {
     pub state: String,
     pub history: Vec<String>,
@@ -48,7 +50,14 @@ impl Power {
     pub fn wake(&mut self) -> String {
         self.state = "running".to_string();
         let n = crate::exec::resume_all();
-        self.history.push(format!("wake -> running (resumed={})", n));
+        // 如果设置了唤醒源通道，向其等待者发 signal —— 实现「特定事件唤醒系统」。
+        if let Some(ch) = wake_source() {
+            let woke = crate::exec::signal(&ch);
+            self.history
+                .push(format!("wake -> running (resumed={}, signaled wake-source={}={})", n, ch, woke));
+        } else {
+            self.history.push(format!("wake -> running (resumed={})", n));
+        }
         format!("已唤醒 -> running（恢复 {} 个执行体）", n)
     }
 }

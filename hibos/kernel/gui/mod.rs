@@ -16,6 +16,7 @@
 pub mod bmp;
 pub mod compositor;
 pub mod input;
+pub mod shell;
 pub mod surface;
 pub mod window;
 

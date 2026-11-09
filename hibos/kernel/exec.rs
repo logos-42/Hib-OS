@@ -22,7 +22,7 @@ use std::sync::{Condvar, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use crate::monitor::get_time_ns;
-use crate::scheduler::CpuPriority;
+use crate::scheduler::{self, CpuPriority};
 
 /// 执行体标识。
 pub type ExecId = u64;
@@ -470,6 +470,8 @@ pub fn signal(key: &str) -> usize {
     }
     drop(g);
     ex.cv.notify_all();
+    // 感知驱动抢占：通道事件同时唤醒调度器中等待该键的令牌。
+    let _ = scheduler::wake_key_global(key);
     woke
 }
 

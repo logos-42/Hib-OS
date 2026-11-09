@@ -140,6 +140,9 @@ pub struct VramManager {
     encryption_key: Option<[u8; 32]>,
     compression_stats: CompressionStats,
     shared_partitions: BTreeMap<VramPartitionId, HashSet<VramPartitionId>>,
+    /// GPU 写租约：分区 ID -> 持有写租约的 exec-id（单写者，与 lease.rs 语义一致）。
+    gpu_write_leases: BTreeMap<VramPartitionId, u64>,
+    gpu_lease_epochs: BTreeMap<VramPartitionId, u64>,
 }
 
 impl VramManager {
@@ -155,6 +158,8 @@ impl VramManager {
             encryption_key: None,
             compression_stats: CompressionStats::default(),
             shared_partitions: BTreeMap::new(),
+            gpu_write_leases: BTreeMap::new(),
+            gpu_lease_epochs: BTreeMap::new(),
         }
     }
 
@@ -254,6 +259,64 @@ impl VramManager {
     /// 是否还有足够空间。
     pub fn check_space(&self, required: u64) -> bool {
         self.available() >= required
+    }
+
+    /// 获取某个分区的 GPU 写租约（单写者）。
+    pub fn acquire_gpu_lease(&mut self, partition_id: VramPartitionId, owner: u64) -> Result<u64, VramError> {
+        let partition = self.partitions.get(&partition_id).ok_or(VramError::NotFound)?;
+        let _ = partition; // 确保分区存在
+        if let Some(&current_holder) = self.gpu_write_leases.get(&partition_id) {
+            if current_holder == owner {
+                // 同一 owner 可重入，返回当前 epoch。
+                return Ok(*self.gpu_lease_epochs.get(&partition_id).unwrap_or(&0));
+            }
+            return Err(VramError::AccessViolation);
+        }
+        let epoch = self.gpu_lease_epochs.entry(partition_id).or_insert(0);
+        *epoch += 1;
+        self.gpu_write_leases.insert(partition_id, owner);
+        Ok(*epoch)
+    }
+
+    /// 释放某个分区的 GPU 写租约。
+    pub fn release_gpu_lease(&mut self, partition_id: VramPartitionId, owner: u64) -> bool {
+        if let Some(&current_holder) = self.gpu_write_leases.get(&partition_id) {
+            if current_holder == owner {
+                self.gpu_write_leases.remove(&partition_id);
+                return true;
+            }
+        }
+        false
+    }
+
+    /// 查询某个分区当前的 GPU 写租约持有者与 epoch。
+    pub fn query_gpu_lease(&self, partition_id: VramPartitionId) -> Option<(u64, u64)> {
+        self.gpu_write_leases.get(&partition_id).map(|&h| (h, *self.gpu_lease_epochs.get(&partition_id).unwrap_or(&0)))
+    }
+
+    /// 向某个分区提交帧数据（要求持有该分区的写租约）。
+    pub fn commit_gpu(
+        &mut self,
+        partition_id: VramPartitionId,
+        owner: u64,
+        expected_epoch: u64,
+        data: &[u8],
+    ) -> Result<u64, VramError> {
+        let _partition = self.partitions.get(&partition_id).ok_or(VramError::NotFound)?;
+        // 租约检查：只有持租者才能提交。
+        match self.gpu_write_leases.get(&partition_id) {
+            Some(&h) if h == owner => {}
+            _ => return Err(VramError::AccessViolation),
+        }
+        // Epoch 检查（乐观 CAS）。
+        let current_epoch = *self.gpu_lease_epochs.get(&partition_id).unwrap_or(&0);
+        if current_epoch != expected_epoch {
+            return Err(VramError::AccessViolation); // 简化：epoch 不符视为冲突
+        }
+        let new_epoch = current_epoch + 1;
+        self.gpu_lease_epochs.insert(partition_id, new_epoch);
+        let _ = self.write_partition(partition_id, data);
+        Ok(new_epoch)
     }
 
     /// 读取分区内容 (零填充占位)。

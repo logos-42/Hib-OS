@@ -35,7 +35,7 @@ Hib OS 不做传统 SMP，而是以**多调度域**形态存在多个内核，�
 
 ## 四、通道所有权
 
-通道注册表（`kernel/channels.rs`）在 `bootstrap()` 中一次性注册全部 76 个通道，每条带 `ChannelKind` 与 `Access`（Read/Write/ReadWrite）。通道归属分类：
+通道注册表（`kernel/channels.rs`）在 `bootstrap()` 中一次性注册全部 91 个通道，每条带 `ChannelKind` 与 `Access`（Read/Write/ReadWrite）。通道归属分类：
 
 | 类别 | 代表通道 | 所有者 |
 |---|---|---|
@@ -91,7 +91,39 @@ Hib OS **不沿用 `uid=0` 全权 root**。root 被重新定义为**capability �
 | `lease` | `Snapshot`/`Epoch`/`Lease` | 单写者租约 + 乐观 CAS 提交 + `wait_next` 事件驱动 |
 | `agent` | `agent://orchestrator` | 真线程子体 + 邮箱 + 任务 DSL + 认知屏障；禁止递归 `agent://` |
 
-## 九、测试基线
+## 九、并发原语（新增模块）
 
-- `cargo test`：248 个测试全部通过。
-- `cargo test --features gui`：252 个测试全部通过（含 GUI 逻辑层 40 个 + 后端缩放等）。
+| 模块 | 原语 | 特征 |
+|---|---|---|
+| `exec` | 真 `std::thread` 执行体 | `wait_table` 边沿触发闩锁 `signal` / 电平触发 `wake`；`suspend`/`resume`/`join` |
+| `sync` | `Semaphore` / `Barrier` / `PriorityMutex` / `RwSync` | 真阻塞 FIFO+超时；epoch 认知屏障；`ThreadId` owner + 优先级继承 |
+| `lease` | `Snapshot`/`Epoch`/`Lease` | 单写者租约 + 乐观 CAS 提交 + `wait_next` 事件驱动 |
+| `agent` | `agent://orchestrator` | 真线程子体 + 邮箱 + 任务 DSL + 认知屏障；禁止递归 `agent://` |
+| `mutex2` | `NamedMutex` / `sync://mutex/<名>` | **跨进程/域可见的命名互斥锁**，FIFO 等待，持租者标识 |
+| `proc2` | `Proc` / `proc://spawn|kill|list` | **子意识主体容器**：独立 `wait_table` 副本 + 独立租约集，优雅弹出时释放全部租约 |
+| `irq` | `IrqBinding` / `irq://<设备>` | **中断通道**：设备事件投递为 `signal`，绑定高优先级处理器 exec-id |
+| `mm` | `PageFrame` / `mem://fault` | **页故障模拟**：缺页 → 阻塞 → 分配页框 → 唤醒；OOM = 租约冲突 |
+| `file_channel` | `FileNode` / `file://<path>` | **文件通道化**：每个文件 = 通道，`sense` = 读，`act` = 写，元带 last_writer/epoch |
+| `loader` | `ImageMeta` / `loader://<镜像>` | **意识镜像加载器**：echo / sense-loop / act-loop / idle |
+
+## 十、GPU 硬件保护（写租约隔离）
+
+- `gpu://vram/<分区>` 可通过 `acquire`/`release`/`query`/`commit` 操作，实现**单写者写租约**
+- `commit` 时检查租约持有者 + 期望 epoch（乐观 CAS），不匹配则 `AccessViolation`
+- `VramManager` 维护 `gpu_write_leases`（分区 ID → exec-id）与 `gpu_lease_epochs`
+- `force`（治理域/root 路径）可绕过租约但推进 epoch
+
+## 十一、调度器感知驱动抢占
+
+- `exec::signal(key)` 同时调用 `scheduler::wake_key_global(key)`，使等待该通道的调度令牌进入就绪队列
+- 通道事件即调度事件，实现「感知驱动抢占」
+
+## 十二、电源唤醒源
+
+- `power://wake-source <通道>` 设置唤醒源
+- `power://state wake` / `wake()` 恢复全部执行体后，向唤醒源通道发 `signal`
+
+## 十三、测试基线
+
+- `cargo test`：270 个测试全部通过。
+- `cargo test --features gui`：272 个测试全部通过（含 GUI 逻辑层 40 个 + 后端缩放等）。

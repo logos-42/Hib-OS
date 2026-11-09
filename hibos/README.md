@@ -34,7 +34,7 @@ cargo run
 | `sense <通道>` | 读取通道的实时快照 | 可读 (r) |
 | `act <通道> [负载...]` | 向通道写入或触发一次操作 | 可写 (w) |
 
-`channels` 命令列出全部 76 个通道、类别、读写权限以及感知/行动计数。
+`channels` 命令列出全部 91 个通道、类别、读写权限以及感知/行动计数。
 
 ## 系统模块速查
 
@@ -232,6 +232,67 @@ reason: 信念置信 50% ×0.6 + 主导动机 safety(95) ×0.4 = 68
 ```
 
 三个通道在 `/sys/judgment` 里也有一份快照（挂载物化时写入）。
+
+## 子意识主体 / 进程容器
+
+| 通道 | 示例 | 说明 |
+|---|---|---|
+| `proc://spawn` | `act proc://spawn echo` | 派生一个子意识主体（独立 wait_table + 租约集） |
+| `proc://kill` | `act proc://kill 3` | 优雅弹出：释放全部租约、推进通道 epoch、清空等待表 |
+| `proc://list` | `sense proc://list` | 列出所有进程及其状态 |
+| `proc://status` | `sense proc://status` | 查询指定进程的详细状态 |
+| `proc://wait_table` | `sense proc://wait_table` | 查看指定进程的本地等待表 |
+
+## 命名互斥锁（跨进程/域可见）
+
+| 通道 | 示例 | 说明 |
+|---|---|---|
+| `sync://mutex` | `act sync://mutex lock my-mutex 1` | 加锁（FIFO 等待，单写者，可重入） |
+| `sync://mutex` | `act sync://mutex unlock my-mutex 1` | 解锁，唤醒下一个等待者 |
+| `sync://mutex` | `act sync://mutex try my-mutex 1` | 非阻塞试加锁 |
+| `sync://mutex` | `sense sync://mutex` | 列出所有命名互斥锁状态 |
+
+## 中断通道
+
+| 通道 | 示例 | 说明 |
+|---|---|---|
+| `irq://timer` | `act irq://timer bind 1` | 绑定中断处理器 exec-id |
+| `irq://timer` | `act irq://timer fire` | 投递中断，向等待该通道的执行体发 signal |
+| `irq://keyboard` | 同上 | 键盘中断通道 |
+| `irq://gpu` | 同上 | GPU 中断通道 |
+
+## 内存页故障
+
+| 通道 | 示例 | 说明 |
+|---|---|---|
+| `mem://fault` | `act mem://fault alloc 4096` | 模拟缺页中断，分配物理页框 |
+| `mem://fault` | `act mem://fault free <地址>` | 释放页框 |
+| `mem://fault` | `sense mem://fault` | 页故障 / 分配 / 释放 / OOM 统计 |
+
+## 电源唤醒源
+
+| 通道 | 示例 | 说明 |
+|---|---|---|
+| `power://wake-source` | `act power://wake-source irq://timer` | 设置唤醒源；`power://state wake` 时向该通道发 signal |
+| `power://wake-source` | `sense power://wake-source` | 查询当前唤醒源 |
+
+## 意识镜像加载器
+
+| 通道 | 示例 | 说明 |
+|---|---|---|
+| `loader://echo` | `act loader://echo` | 加载回声镜像（等待外部 act 唤醒后回显） |
+| `loader://sense-loop` | `act loader://sense-loop` | 加载持续感知 gpu://vram 的镜像 |
+| `loader://act-loop` | `act loader://act-loop` | 加载持续向 lease://channels 提交的镜像 |
+| `loader://idle` | `act loader://idle` | 加载空闲镜像（仅 checkpoint，不占 CPU） |
+
+## GPU 写租约隔离（硬件保护）
+
+| 通道 | 示例 | 说明 |
+|---|---|---|
+| `gpu://vram` | `act gpu://vram acquire 1 42` | 对显存分区 1 获取写租约（owner=exec 42） |
+| `gpu://vram` | `act gpu://vram release 1 42` | 释放分区 1 的写租约 |
+| `gpu://vram` | `act gpu://vram query 1` | 查询分区 1 的租约持有者与 epoch |
+| `gpu://vram` | `act gpu://vram commit 1 42 0 <数据>` | 持租者提交帧（乐观 CAS epoch，失败则冲突） |
 
 ## 外部世界：网关与浏览器
 

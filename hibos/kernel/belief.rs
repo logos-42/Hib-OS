@@ -25,12 +25,13 @@ pub struct Belief {
 }
 
 /// 信念集合。
+#[derive(Clone, Debug)]
 pub struct Beliefs {
     pub list: Vec<Belief>,
 }
 
 impl Beliefs {
-    fn new() -> Self {
+    pub fn new() -> Self {
         let b = |p: &str, c: u8| Belief {
             proposition: p.to_string(),
             confidence: c,

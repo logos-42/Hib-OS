@@ -18,8 +18,8 @@
 
 use std::sync::{Mutex, OnceLock};
 
-use crate::belief::beliefs;
-use crate::motive::motives;
+use crate::belief::{beliefs, Beliefs};
+use crate::motive::{motives, Motives};
 
 /// 一次裁决记录。
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -40,7 +40,7 @@ pub struct Judgment {
 }
 
 impl Judgment {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             history: Vec::new(),
             commits: 0,
@@ -73,26 +73,37 @@ impl Judgment {
         )
     }
 
-    /// 裁决一条命题；`None` 表示自动挑最弱信念。
+    /// 默认视图裁决（root Cell）：读取全局动机与信念。
     pub fn judge(&mut self, proposition: Option<&str>) -> Result<String, String> {
+        let mot = motives().lock().unwrap();
+        let bel = beliefs().lock().unwrap();
+        self.judge_with(&mot, &bel, proposition)
+    }
+
+    /// 用**指定的**动机 / 信念视图裁决。
+    ///
+    /// 这是 per-Cell 判断力的关键：子意识主体用自己的世界观判断，
+    /// 不会读到父体或其它子体的信念。
+    pub fn judge_with(
+        &mut self,
+        mot: &Motives,
+        bel: &Beliefs,
+        proposition: Option<&str>,
+    ) -> Result<String, String> {
         let (prop, conf, known) = match proposition.map(str::trim).filter(|p| !p.is_empty()) {
             Some(p) => {
-                let c = beliefs().lock().unwrap().confidence(p);
+                let c = bel.confidence(p);
                 (p.to_string(), c.unwrap_or(50), c.is_some())
             }
-            None => match beliefs().lock().unwrap().weakest() {
-                Some((p, c)) => (p, c, true),
+            None => match bel.weakest() {
+                Some((p, c)) => (p.to_string(), c, true),
                 None => {
                     return Err("没有可用信念，先走 act belief://self believe <命题> <置信度>".to_string());
                 }
             },
         };
 
-        let (mname, mlevel) = motives()
-            .lock()
-            .unwrap()
-            .dominant()
-            .ok_or_else(|| "没有可用动机".to_string())?;
+        let (mname, mlevel) = mot.dominant().ok_or_else(|| "没有可用动机".to_string())?;
 
         let (score, verdict) = evaluate(conf, mlevel);
         let mut reason = format!(

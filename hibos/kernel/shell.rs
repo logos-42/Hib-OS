@@ -825,11 +825,9 @@ impl Shell {
                 return;
             }
         };
-        let text = match crate::sense::probe(name) {
-            Some(t) => t,
-            None => self.sense_via_shell(kind, name),
-        };
-        println!("sense {} [{}] → {}", name, kind.name(), text);
+        let (probed, epoch) = crate::sense::probe_epoch(name);
+        let text = probed.unwrap_or_else(|| self.sense_via_shell(kind, name));
+        println!("sense {} [{}] epoch={} → {}", name, kind.name(), epoch, text);
     }
 
     fn sense_via_shell(&self, kind: ChannelKind, name: &str) -> String {
@@ -2163,7 +2161,7 @@ mod tests {
     #[test]
     fn channels_registry_and_sense() {
         let mut s = Shell::new();
-        assert_eq!(s.channels.len(), 76);
+        assert_eq!(s.channels.len(), 99);
         assert!(s.dispatch("channels"));
         assert!(s.dispatch("sense file://vfs"));
         assert!(s.dispatch("sense gpu://vram"));
@@ -2180,6 +2178,24 @@ mod tests {
         assert!(s.dispatch("sense motive://self"));
         assert!(s.dispatch("sense belief://self"));
         assert!(s.dispatch("sense judgment://self"));
+        // 子意识主体 / 进程容器
+        assert!(s.dispatch("sense proc://list"));
+        assert!(s.dispatch("sense proc://status"));
+        // 命名互斥锁
+        assert!(s.dispatch("sense sync://mutex"));
+        // 中断通道
+        assert!(s.dispatch("sense irq://timer"));
+        assert!(s.dispatch("sense irq://keyboard"));
+        assert!(s.dispatch("sense irq://gpu"));
+        // 内存页故障
+        assert!(s.dispatch("sense mem://fault"));
+        // 电源唤醒源
+        assert!(s.dispatch("sense power://wake-source"));
+        // 意识镜像加载器
+        assert!(s.dispatch("sense loader://echo"));
+        assert!(s.dispatch("sense loader://sense-loop"));
+        assert!(s.dispatch("sense loader://act-loop"));
+        assert!(s.dispatch("sense loader://idle"));
         // 只写通道不可感知 / 不存在通道
         assert!(s.dispatch("sense action://syscall"));
         assert!(s.dispatch("sense nope://none"));
@@ -2206,6 +2222,23 @@ mod tests {
 
         assert!(s.dispatch("act text://log kernel-note"));
         assert!(s.vfs.cat("/var/log/kernel.log").unwrap().contains("kernel-note"));
+
+        // 子意识主体 / 进程容器
+        assert!(s.dispatch("act proc://spawn echo"));
+        assert!(s.dispatch("act proc://list"));
+        // 命名互斥锁
+        assert!(s.dispatch("act sync://mutex lock my-mutex 1"));
+        assert!(s.dispatch("act sync://mutex unlock my-mutex 1"));
+        // 中断通道
+        assert!(s.dispatch("act irq://timer bind 1"));
+        assert!(s.dispatch("act irq://timer fire"));
+        // 内存页故障
+        assert!(s.dispatch("act mem://fault alloc 4096"));
+        assert!(s.dispatch("act mem://fault stats"));
+        // 电源唤醒源
+        assert!(s.dispatch("act power://wake-source irq://timer"));
+        // 意识镜像加载器
+        assert!(s.dispatch("act loader://sense-loop"));
 
         assert!(s.channels.total_acts() >= 6);
     }

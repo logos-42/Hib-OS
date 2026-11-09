@@ -358,6 +358,14 @@ pub fn wait_next(channel: &str, timeout: Option<Duration>) -> Option<Arc<Snapsho
     }
 }
 
+/// 记录一次「因 epoch 过期被拒绝」的写入，供 `sense lease://channels` 观测。
+pub fn note_stale(channel: &str) {
+    let s = slot(channel);
+    let mut g = s.state.lock().unwrap();
+    g.stale_rejects += 1;
+    g.conflicts += 1;
+}
+
 /// 汇总状态（供 `sense lease://channels`）。
 pub fn status() -> String {
     let snapshot_map: Vec<Arc<Slot>> = {

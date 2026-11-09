@@ -41,7 +41,7 @@ pub struct Motives {
 }
 
 impl Motives {
-    fn new() -> Self {
+    pub fn new() -> Self {
         let m = |name: &str, level: u8| Motive {
             name: name.to_string(),
             level,

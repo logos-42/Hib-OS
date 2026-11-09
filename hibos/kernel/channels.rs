@@ -350,6 +350,36 @@ pub fn bootstrap() -> ChannelRegistry {
         (ChannelKind::Will, "motive://self", Access::ReadWrite),
         (ChannelKind::Will, "belief://self", Access::ReadWrite),
         (ChannelKind::Will, "judgment://self", Access::ReadWrite),
+        // —— 子意识主体 / 进程容器 ——
+        (ChannelKind::Process, "proc://spawn", Access::Write),
+        (ChannelKind::Process, "proc://kill", Access::Write),
+        (ChannelKind::Process, "proc://list", Access::Read),
+        (ChannelKind::Process, "proc://wait_table", Access::Read),
+        (ChannelKind::Process, "proc://status", Access::Read),
+        // —— 命名互斥锁（跨进程/域可见）：sync://mutex/<名> ——
+        (ChannelKind::Action, "sync://mutex", Access::ReadWrite),
+        // —— 中断通道：irq://<设备> ——
+        (ChannelKind::Device, "irq://timer", Access::ReadWrite),
+        (ChannelKind::Device, "irq://keyboard", Access::ReadWrite),
+        (ChannelKind::Device, "irq://gpu", Access::ReadWrite),
+        // —— 内存页故障：mem://fault ——
+        (ChannelKind::Memory, "mem://fault", Access::ReadWrite),
+        // —— 电源唤醒源：power://wake-source ——
+        (ChannelKind::Action, "power://wake-source", Access::ReadWrite),
+        // —— 意识镜像加载器：loader://<镜像> ——
+        (ChannelKind::Action, "loader://echo", Access::Write),
+        (ChannelKind::Action, "loader://sense-loop", Access::Write),
+        (ChannelKind::Action, "loader://act-loop", Access::Write),
+        (ChannelKind::Action, "loader://idle", Access::Write),
+        // —— 一致性 / 子意识 / 多域 / 保护 / 身份空间 / 桌面外壳 ——
+        (ChannelKind::Will, "cell://self", Access::ReadWrite),
+        (ChannelKind::Action, "power://hibernate", Access::ReadWrite),
+        (ChannelKind::Action, "domain://table", Access::ReadWrite),
+        (ChannelKind::Gpu, "gpu://domains", Access::ReadWrite),
+        (ChannelKind::Gpu, "gpu://faults", Access::Read),
+        (ChannelKind::Interface, "sec://acl", Access::ReadWrite),
+        (ChannelKind::User, "realm://current", Access::Read),
+        (ChannelKind::Desktop, "gui://shell", Access::ReadWrite),
     ];
     for (kind, name, access) in defaults {
         let _ = reg.open(kind, name, access);
@@ -364,17 +394,17 @@ mod tests {
     #[test]
     fn bootstrap_opens_all_channels() {
         let reg = bootstrap();
-        assert_eq!(reg.len(), 76);
+        assert_eq!(reg.len(), 99);
         assert_eq!(reg.of_kind(ChannelKind::Net).count(), 5);
-        assert_eq!(reg.of_kind(ChannelKind::Will).count(), 3);
+        assert_eq!(reg.of_kind(ChannelKind::Will).count(), 4);
         assert_eq!(reg.of_kind(ChannelKind::Context).count(), 2);
-        assert_eq!(reg.of_kind(ChannelKind::Action).count(), 8);
+        assert_eq!(reg.of_kind(ChannelKind::Action).count(), 16);
         assert_eq!(reg.of_kind(ChannelKind::Agent).count(), 3);
-        assert_eq!(reg.of_kind(ChannelKind::Gpu).count(), 4);
-        assert_eq!(reg.of_kind(ChannelKind::Device).count(), 11);
-        assert_eq!(reg.of_kind(ChannelKind::Memory).count(), 5);
-        assert_eq!(reg.of_kind(ChannelKind::Process).count(), 3);
-        assert_eq!(reg.of_kind(ChannelKind::User).count(), 1);
+        assert_eq!(reg.of_kind(ChannelKind::Gpu).count(), 6);
+        assert_eq!(reg.of_kind(ChannelKind::Device).count(), 14);
+        assert_eq!(reg.of_kind(ChannelKind::Memory).count(), 6);
+        assert_eq!(reg.of_kind(ChannelKind::Process).count(), 8);
+        assert_eq!(reg.of_kind(ChannelKind::User).count(), 2);
         assert_eq!(reg.of_kind(ChannelKind::App).count(), 3);
         assert_eq!(reg.of_kind(ChannelKind::Browser).count(), 1);
         assert_eq!(reg.of_kind(ChannelKind::Driver).count(), 2);

@@ -15,6 +15,7 @@
 //!    与 `exec` 的事件等待表联动 —— 就绪/等待是同一套事件机制的两个视图。
 
 use std::collections::BTreeMap;
+use std::sync::{Mutex, OnceLock};
 
 use crate::ai_token::{AIConsciousness, ConceptId, SchedulePolicy, TokenId};
 use crate::monitor::get_time_ns;
@@ -417,6 +418,28 @@ impl GpuScheduler {
 /// 初始化调度器子系统 (极简启动，不在终端打印)。
 pub fn init() {
     // 调度器已就绪；启动阶段保持静默。
+}
+
+/// 全局调度器引用（供 exec::signal / lease::commit 跨模块唤醒调度令牌）。
+static GLOBAL_SCHEDULER: OnceLock<Mutex<Option<GpuScheduler>>> = OnceLock::new();
+
+fn global_scheduler() -> &'static Mutex<Option<GpuScheduler>> {
+    GLOBAL_SCHEDULER.get_or_init(|| Mutex::new(None))
+}
+
+/// 设置全局调度器（由内核启动时调用）。
+pub fn set_global_scheduler(s: GpuScheduler) {
+    *global_scheduler().lock().unwrap() = Some(s);
+}
+
+/// 向全局调度器中等待某通道的令牌发 wake（感知驱动抢占）。
+pub fn wake_key_global(channel_key: &str) -> usize {
+    let mut g = global_scheduler().lock().unwrap();
+    if let Some(s) = g.as_mut() {
+        s.wake_key(channel_key)
+    } else {
+        0
+    }
 }
 
 #[cfg(test)]
