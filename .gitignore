@@ -1,0 +1,11 @@
+# 生成的测试产物
+gui-output.bmp
+gui-output.png
+gui-text.bmp
+
+# 构建产物
+target/
+
+# 操作系统文件
+.DS_Store
+Thumbs.db
