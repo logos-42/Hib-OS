@@ -15,6 +15,12 @@ Hib OS 不再只有终端 ASCII 假桌面，而是一套真正的像素 GUI 栈�
 
 ## 快速上手
 
+> `gui` 是**可选 feature**，默认构建（`cargo run`）不含真实窗口后端。此时输入 `gui run`
+> 会提示"真实窗口后端未编译"——这不是 GUI 失败，只是没编译进去。
+> 也可以不开 shell 直接启动：`cargo run --features gui -- gui run`。
+> 注意每次运行无 feature 的 `cargo run` / `cargo test` 都会覆盖 `target/debug/hibos.exe`，
+> 之后要重新 `cargo build --features gui`。
+
 ```sh
 cargo build --features gui
 cargo run --features gui -- --shell
