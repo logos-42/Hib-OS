@@ -51,6 +51,7 @@ pub mod protection;
 pub mod realm;
 pub mod scheduler;
 pub mod scheduler_domains;
+pub mod fiber;
 pub mod sense;
 pub mod socket;
 pub mod sync;
@@ -82,6 +83,12 @@ fn main() {
     match args.first().map(String::as_str) {
         Some("--demo") => kernel_main(),
         Some("--shell") => shell::Shell::new().run(),
+        // 支持 `cargo run --features gui -- gui run` 直接打开真实窗口。
+        Some("gui") => {
+            let line = args.join(" ");
+            let mut sh = shell::Shell::new();
+            sh.dispatch(&line);
+        }
         Some("--help") | Some("-h") => print_usage(),
         Some(other) => {
             eprintln!("未知参数: {} (使用 --help 查看用法)", other);

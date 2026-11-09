@@ -458,7 +458,11 @@ pub fn run_native() -> Result<(), String> {
     }
     #[cfg(not(feature = "gui"))]
     {
-        Err("真实窗口后端未编译。请用 `cargo run --features gui -- gui run` 启动。".to_string())
+        Err(
+            "真实窗口后端未编译。请用 `cargo run --features gui -- gui run`，\n\
+             或 `cargo run --features gui -- --shell` 进入 shell 后输入 `gui run` 启动。"
+                .to_string(),
+        )
     }
 }
 
