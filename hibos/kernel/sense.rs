@@ -44,7 +44,6 @@ use crate::judgment::judgment;
 use crate::lease;
 use crate::limits::limits;
 use crate::mem::mem;
-use crate::mm;
 use crate::motive::motives;
 use crate::mount::mounts;
 use crate::mutex2;
@@ -282,7 +281,7 @@ pub fn probe(name: &str) -> Option<String> {
             Some(format!("irq 待投递，未注册处理器"))
         }
         // —— 内存页故障 ——
-        "mem://fault" => Some(mm::stats()),
+        "mem://fault" => Some(crate::mm::fault::stats()),
         // —— 电源唤醒源 ——
         "power://wake-source" => Some(power_wake_source_status()),
         // —— 意识镜像加载器 ——
@@ -2067,7 +2066,7 @@ fn act_mem_fault(payload: &str) -> Result<String, String> {
             let _ = mem().lock().unwrap().free(addr);
             Ok(format!("已释放页 {} ", addr))
         }
-        "stats" | "" => Ok(mm::stats()),
+        "stats" | "" => Ok(crate::mm::fault::stats()),
         _ => Err("用法: act mem://fault alloc|free|stats [字节|地址]".to_string()),
     }
 }
