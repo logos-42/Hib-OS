@@ -113,6 +113,8 @@ pub enum ChannelKind {
     DriverAi,
     /// AI 原生：智能命令行层（shell_ai://*）
     ShellAi,
+    /// AI 原生：智能图形界面层（gui_ai://*）
+    GuiAi,
 }
 
 impl ChannelKind {
@@ -168,6 +170,7 @@ impl ChannelKind {
             ChannelKind::NetAi => "net_ai",
             ChannelKind::DriverAi => "driver_ai",
             ChannelKind::ShellAi => "shell_ai",
+            ChannelKind::GuiAi => "gui_ai",
         }
     }
 }
@@ -611,6 +614,18 @@ pub fn bootstrap() -> ChannelRegistry {
         (ChannelKind::ShellAi, "shell_ai://pipeline", Access::Write),
         (ChannelKind::ShellAi, "shell_ai://pipeline-add", Access::Write),
         (ChannelKind::ShellAi, "shell_ai://history", Access::Read),
+        // —— AI 原生智能图形界面通道 ——
+        (ChannelKind::GuiAi, "gui_ai://create-window", Access::Write),
+        (ChannelKind::GuiAi, "gui_ai://close-window", Access::Write),
+        (ChannelKind::GuiAi, "gui_ai://focus-window", Access::Write),
+        (ChannelKind::GuiAi, "gui_ai://add-widget", Access::Write),
+        (ChannelKind::GuiAi, "gui_ai://add-layer", Access::Write),
+        (ChannelKind::GuiAi, "gui_ai://compose", Access::Write),
+        (ChannelKind::GuiAi, "gui_ai://inject-event", Access::Write),
+        (ChannelKind::GuiAi, "gui_ai://poll-event", Access::Read),
+        (ChannelKind::GuiAi, "gui_ai://set-theme", Access::Write),
+        (ChannelKind::GuiAi, "gui_ai://enable-modality", Access::Write),
+        (ChannelKind::GuiAi, "gui_ai://set-layout", Access::Write),
     ];
     for (kind, name, access) in defaults {
         let _ = reg.open(kind, name, access);
@@ -625,7 +640,7 @@ mod tests {
     #[test]
     fn bootstrap_opens_all_channels() {
         let reg = bootstrap();
-        assert_eq!(reg.len(), 235);
+        assert_eq!(reg.len(), 247);
         assert_eq!(reg.of_kind(ChannelKind::Net).count(), 5);
         assert_eq!(reg.of_kind(ChannelKind::Will).count(), 4);
         assert_eq!(reg.of_kind(ChannelKind::Context).count(), 2);
@@ -664,6 +679,7 @@ mod tests {
         assert_eq!(reg.of_kind(ChannelKind::NetAi).count(), 11);
         assert_eq!(reg.of_kind(ChannelKind::DriverAi).count(), 12);
         assert_eq!(reg.of_kind(ChannelKind::ShellAi).count(), 13);
+        assert_eq!(reg.of_kind(ChannelKind::GuiAi).count(), 11);
         assert!(reg.find("file://vfs").is_some());
         assert!(reg.find("desktop://screen").is_some());
         assert!(reg.find("trace://exec").is_some());
@@ -697,6 +713,8 @@ mod tests {
         assert!(reg.find("driver_ai://hotplug-poll").is_some());
         assert!(reg.find("shell_ai://parse").is_some());
         assert!(reg.find("shell_ai://history").is_some());
+        assert!(reg.find("gui_ai://create-window").is_some());
+        assert!(reg.find("gui_ai://inject-event").is_some());
     }
 
     #[test]

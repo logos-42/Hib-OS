@@ -35,6 +35,7 @@ use crate::ai_os::vfs_ai;
 use crate::ai_os::net_ai;
 use crate::ai_os::driver_ai;
 use crate::ai_os::shell_ai;
+use crate::ai_os::gui_ai;
 use crate::ai_os::{status as ai_os_status};
 use crate::agent;
 use crate::belief::beliefs;
@@ -956,9 +957,13 @@ fn act_raw(name: &str, payload: &str) -> Option<Result<String, String>> {
         "shell_ai://parse" | "shell_ai://execute" | "shell_ai://execute-nl" | "shell_ai://complete" | "shell_ai://alias" | "shell_ai://resolve-alias" | "shell_ai://cd" | "shell_ai://pwd" | "shell_ai://env" | "shell_ai://set-env" | "shell_ai://pipeline" | "shell_ai://pipeline-add" | "shell_ai://history" => {
             Some(crate::ai_os::shell_ai::shell_ai_act_dispatch(payload))
         }
-        // —— AI 原生智能命令行通道 ——
-        "shell_ai://parse" | "shell_ai://execute" | "shell_ai://execute-nl" | "shell_ai://complete" | "shell_ai://alias" | "shell_ai://resolve-alias" | "shell_ai://cd" | "shell_ai://pwd" | "shell_ai://env" | "shell_ai://set-env" | "shell_ai://pipeline" | "shell_ai://pipeline-add" | "shell_ai://history" => {
-            Some(crate::ai_os::shell_ai::shell_ai_act_dispatch(payload))
+        // —— AI 原生智能图形界面通道 ——
+        "gui_ai://create-window" | "gui_ai://close-window" | "gui_ai://focus-window" | "gui_ai://add-widget" | "gui_ai://add-layer" | "gui_ai://compose" | "gui_ai://inject-event" | "gui_ai://poll-event" | "gui_ai://set-theme" | "gui_ai://enable-modality" | "gui_ai://set-layout" => {
+            Some(crate::ai_os::gui_ai::gui_ai_act_dispatch(payload))
+        }
+        // —— AI 原生智能图形界面通道 ——
+        "gui_ai://create-window" | "gui_ai://close-window" | "gui_ai://focus-window" | "gui_ai://add-widget" | "gui_ai://add-layer" | "gui_ai://compose" | "gui_ai://inject-event" | "gui_ai://poll-event" | "gui_ai://set-theme" | "gui_ai://enable-modality" | "gui_ai://set-layout" => {
+            Some(crate::ai_os::gui_ai::gui_ai_act_dispatch(payload))
         }
         _ => None,
     }
