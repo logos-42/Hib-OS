@@ -192,7 +192,7 @@ impl QualiaFactory {
     }
 
     pub fn create_semantic(&mut self, concept: &str) -> Quale {
-        let hash = concept.bytes().fold(0u64, |acc, &b| acc * 31 + b as u64);
+        let hash = concept.bytes().fold(0u64, |acc, b| acc * 31 + b as u64);
         let dims: Vec<f32> = (0..64)
             .map(|i| {
                 let bit = (hash >> i) & 1;

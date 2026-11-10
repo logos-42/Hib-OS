@@ -31,6 +31,7 @@ use crate::ai_os::social;
 use crate::ai_os::ethics;
 use crate::ai_os::evolution;
 use crate::ai_os::dream;
+use crate::ai_os::vfs_ai;
 use crate::ai_os::{status as ai_os_status};
 use crate::agent;
 use crate::belief::beliefs;
@@ -935,6 +936,14 @@ fn act_raw(name: &str, payload: &str) -> Option<Result<String, String>> {
         }
         "dream://cycle" | "dream://stage" | "dream://replay" | "dream://synthesize" | "dream://associate" | "dream://insight" => {
             Some(crate::ai_os::dream::dream_act_dispatch(payload))
+        }
+        // —— AI 原生语义文件系统通道 ——
+        "vfs_ai://mkdir" | "vfs_ai://create" | "vfs_ai://write" | "vfs_ai://read" | "vfs_ai://delete" | "vfs_ai://lookup" | "vfs_ai://tag" | "vfs_ai://semantic-vector" | "vfs_ai://semantic-search" | "vfs_ai://watch" | "vfs_ai://poll" => {
+            Some(crate::ai_os::vfs_ai::vfs_ai_act_dispatch(payload))
+        }
+        // —— AI 原生语义文件系统通道 ——
+        "vfs_ai://mkdir" | "vfs_ai://create" | "vfs_ai://write" | "vfs_ai://read" | "vfs_ai://delete" | "vfs_ai://lookup" | "vfs_ai://tag" | "vfs_ai://semantic-vector" | "vfs_ai://semantic-search" | "vfs_ai://watch" | "vfs_ai://poll" => {
+            Some(crate::ai_os::vfs_ai::vfs_ai_act_dispatch(payload))
         }
         _ => None,
     }

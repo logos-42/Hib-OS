@@ -45,7 +45,7 @@ impl SemanticVector {
     }
 
     pub fn from_hash(id: u64, text: &str, dim: usize) -> Self {
-        let hash = text.bytes().iter().fold(0u64, |acc, &b| acc.wrapping_mul(31).wrapping_add(b as u64));
+        let hash = text.bytes().fold(0u64, |acc, b| acc.wrapping_mul(31).wrapping_add(b as u64));
         let dims: Vec<f32> = (0..dim)
             .map(|i| {
                 let bit = (hash.wrapping_shl(i as u32) >> 63) & 1;

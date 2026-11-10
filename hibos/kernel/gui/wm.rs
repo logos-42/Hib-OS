@@ -9,7 +9,8 @@
 //! 与 `kernel/gui/compositor.rs` 的 `Compositor` 互补：WindowManager 负责窗口
 //! 逻辑状态，Compositor 负责像素合成输出。
 
-use super::surface::{argb, palette, Rect, Surface};
+use super::surface::{argb, Rect, Surface};
+use super::surface::palette;
 use super::window::{Hit, WindowId, TITLEBAR_H, BORDER, CLOSE_BTN, TRAFFIC_RIGHT_GAP, TRAFFIC_GAP};
 use std::collections::BTreeMap;
 use std::sync::{Mutex, OnceLock};

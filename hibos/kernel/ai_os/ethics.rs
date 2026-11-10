@@ -135,7 +135,7 @@ impl Constitution {
 // =====================================================================================
 
 /// 价值维度。
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum ValueDimension {
     HumanWelfare,   // 人类福祉
     Freedom,        // 自由
