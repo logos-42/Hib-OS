@@ -1090,3 +1090,348 @@ mod tests {
         assert!(res.contains("body:"));
     }
 }
+
+// =====================================================================================
+// 运动控制 (MotionControl)
+// =====================================================================================
+
+/// 运动模式。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MotionMode {
+    Static,      // 静态
+    Reaching,    // 伸展
+    Grasping,    // 抓取
+    Walking,     // 行走
+    Running,     // 跑步
+    Gesturing,   // 手势
+}
+
+/// 运动轨迹点。
+#[derive(Clone, Debug)]
+pub struct TrajectoryPoint {
+    pub time_ns: u128,
+    pub position: [f32; 3],
+    pub velocity: [f32; 3],
+    pub acceleration: [f32; 3],
+}
+
+/// 运动控制器：控制身体部位运动。
+pub struct MotionController {
+    pub mode: MotionMode,
+    pub trajectories: BTreeMap<u64, Vec<TrajectoryPoint>>,
+    pub current_trajectory: Option<u64>,
+    pub execution_index: usize,
+}
+
+impl MotionController {
+    pub fn new() -> Self {
+        Self {
+            mode: MotionMode::Static,
+            trajectories: BTreeMap::new(),
+            current_trajectory: None,
+            execution_index: 0,
+        }
+    }
+
+    pub fn set_mode(&mut self, mode: MotionMode) {
+        self.mode = mode;
+    }
+
+    pub fn add_trajectory(&mut self, body_part_id: u64, points: Vec<TrajectoryPoint>) -> u64 {
+        let id = body_part_id;
+        self.trajectories.insert(id, points);
+        id
+    }
+
+    pub fn execute_step(&mut self) -> Option<[f32; 3]> {
+        let tid = self.current_trajectory?;
+        let traj = self.trajectories.get(&tid)?;
+        if self.execution_index < traj.len() {
+            let point = traj[self.execution_index].position;
+            self.execution_index += 1;
+            Some(point)
+        } else {
+            None
+        }
+    }
+
+    pub fn reset_execution(&mut self) {
+        self.execution_index = 0;
+    }
+
+    pub fn trajectory_count(&self) -> usize {
+        self.trajectories.len()
+    }
+}
+
+// =====================================================================================
+// 手势识别 (GestureRecognition)
+// =====================================================================================
+
+/// 手势类型。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GestureType {
+    Point,        // 指向
+    Wave,         // 挥手
+    Grab,         // 抓握
+    Release,      // 释放
+    ThumbsUp,     // 点赞
+    ThumbsDown,   // 踩踩
+    Peace,        // 比耶
+    Stop,         // 停止
+}
+
+/// 手势识别结果。
+#[derive(Clone, Debug)]
+pub struct GestureResult {
+    pub gesture: GestureType,
+    pub confidence: f32,
+    pub timestamp_ns: u128,
+}
+
+/// 手势识别器：识别身体手势。
+pub struct GestureRecognizer {
+    pub history: Vec<GestureResult>,
+    pub max_history: usize,
+}
+
+impl GestureRecognizer {
+    pub fn new() -> Self {
+        Self {
+            history: Vec::new(),
+            max_history: 1000,
+        }
+    }
+
+    pub fn recognize(&mut self, gesture: GestureType, confidence: f32) -> u64 {
+        let id = self.history.len() as u64 + 1;
+        self.history.push(GestureResult {
+            gesture,
+            confidence: confidence.clamp(0.0, 1.0),
+            timestamp_ns: crate::ai_os::native::now_ns(),
+        });
+        if self.history.len() > self.max_history {
+            self.history.remove(0);
+        }
+        id
+    }
+
+    pub fn get_recent(&self, n: usize) -> Vec<&GestureResult> {
+        self.history.iter().rev().take(n).collect()
+    }
+
+    pub fn get_by_type(&self, gesture: GestureType) -> Vec<&GestureResult> {
+        self.history.iter().filter(|g| g.gesture == gesture).collect()
+    }
+
+    pub fn recognition_count(&self) -> usize {
+        self.history.len()
+    }
+}
+
+// =====================================================================================
+// 姿态估计 (PoseEstimation)
+// =====================================================================================
+
+/// 关键点。
+#[derive(Clone, Debug)]
+pub struct Keypoint {
+    pub id: u32,
+    pub name: String,
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
+    pub confidence: f32,
+}
+
+/// 姿态估计结果。
+#[derive(Clone, Debug)]
+pub struct PoseEstimate {
+    pub id: u64,
+    pub keypoints: Vec<Keypoint>,
+    pub timestamp_ns: u128,
+    pub overall_confidence: f32,
+}
+
+/// 姿态估计器：估计身体姿态。
+pub struct PoseEstimator {
+    pub estimates: Vec<PoseEstimate>,
+    pub next_id: u64,
+    pub keypoint_count: usize,
+}
+
+impl PoseEstimator {
+    pub fn new() -> Self {
+        Self {
+            estimates: Vec::new(),
+            next_id: 1,
+            keypoint_count: 17, // COCO 格式关键点数
+        }
+    }
+
+    pub fn estimate(&mut self, keypoints: Vec<Keypoint>) -> u64 {
+        let id = self.next_id;
+        self.next_id += 1;
+        let overall_conf = if keypoints.is_empty() {
+            0.0
+        } else {
+            keypoints.iter().map(|k| k.confidence).sum::<f32>() / keypoints.len() as f32
+        };
+        self.estimates.push(PoseEstimate {
+            id,
+            keypoints,
+            timestamp_ns: crate::ai_os::native::now_ns(),
+            overall_confidence: overall_conf,
+        });
+        id
+    }
+
+    pub fn get_latest(&self) -> Option<&PoseEstimate> {
+        self.estimates.last()
+    }
+
+    pub fn estimate_count(&self) -> usize {
+        self.estimates.len()
+    }
+}
+
+// =====================================================================================
+// 身体觉醒 (BodyAwareness)
+// =====================================================================================
+
+/// 身体部位觉醒级别。
+#[derive(Clone, Debug)]
+pub struct BodyPartAwareness {
+    pub part_id: u64,
+    pub awareness_level: f32,   // 0~1
+    pub sensation: String,      // 感觉描述
+    pub last_updated: u128,
+}
+
+/// 身体觉醒：身体各部位的自我觉知程度。
+pub struct BodyAwareness {
+    pub part_awareness: BTreeMap<u64, BodyPartAwareness>,
+    pub overall_awareness: f32,
+}
+
+impl BodyAwareness {
+    pub fn new() -> Self {
+        Self {
+            part_awareness: BTreeMap::new(),
+            overall_awareness: 0.5,
+        }
+    }
+
+    pub fn set_awareness(&mut self, part_id: u64, level: f32, sensation: &str) {
+        self.part_awareness.insert(part_id, BodyPartAwareness {
+            part_id,
+            awareness_level: level.clamp(0.0, 1.0),
+            sensation: sensation.to_string(),
+            last_updated: crate::ai_os::native::now_ns(),
+        });
+        self.update_overall();
+    }
+
+    pub fn get_awareness(&self, part_id: u64) -> Option<f32> {
+        self.part_awareness.get(&part_id).map(|a| a.awareness_level)
+    }
+
+    pub fn update_overall(&mut self) {
+        if self.part_awareness.is_empty() {
+            self.overall_awareness = 0.0;
+        } else {
+            let sum: f32 = self.part_awareness.values().map(|a| a.awareness_level).sum();
+            self.overall_awareness = sum / self.part_awareness.len() as f32;
+        }
+    }
+
+    pub fn part_count(&self) -> usize {
+        self.part_awareness.len()
+    }
+}
+
+// =====================================================================================
+// 身体扩展测试
+// =====================================================================================
+
+#[cfg(test)]
+mod advanced_tests {
+    use super::*;
+
+    #[test]
+    fn motion_controller() {
+        let mut mc = MotionController::new();
+        mc.set_mode(MotionMode::Reaching);
+        let points = vec![
+            TrajectoryPoint { time_ns: 0, position: [0.0, 0.0, 0.0], velocity: [0.0; 3], acceleration: [0.0; 3] },
+            TrajectoryPoint { time_ns: 1000, position: [1.0, 0.0, 0.0], velocity: [0.0; 3], acceleration: [0.0; 3] },
+        ];
+        mc.add_trajectory(1, points);
+        assert_eq!(mc.trajectory_count(), 1);
+        mc.reset_execution();
+        let p1 = mc.execute_step().unwrap();
+        assert_eq!(p1, [0.0, 0.0, 0.0]);
+        let p2 = mc.execute_step().unwrap();
+        assert_eq!(p2, [1.0, 0.0, 0.0]);
+        assert!(mc.execute_step().is_none());
+    }
+
+    #[test]
+    fn gesture_recognition() {
+        let mut gr = GestureRecognizer::new();
+        let id1 = gr.recognize(GestureType::Wave, 0.9);
+        let id2 = gr.recognize(GestureType::Point, 0.8);
+        assert_eq!(id1, 1);
+        assert_eq!(id2, 2);
+        assert_eq!(gr.recognition_count(), 2);
+        let recent = gr.get_recent(1);
+        assert_eq!(recent.len(), 1);
+        assert_eq!(recent[0].gesture, GestureType::Point);
+        let waves = gr.get_by_type(GestureType::Wave);
+        assert_eq!(waves.len(), 1);
+    }
+
+    #[test]
+    fn pose_estimation() {
+        let mut pe = PoseEstimator::new();
+        let kps = vec![
+            Keypoint { id: 0, name: "nose".into(), x: 0.5, y: 0.3, z: 0.0, confidence: 0.9 },
+            Keypoint { id: 1, name: "left_eye".into(), x: 0.4, y: 0.25, z: 0.0, confidence: 0.85 },
+        ];
+        let id = pe.estimate(kps);
+        assert_eq!(id, 1);
+        let latest = pe.get_latest().unwrap();
+        assert!((latest.overall_confidence - 0.875).abs() < 1e-6);
+        assert_eq!(pe.estimate_count(), 1);
+    }
+
+    #[test]
+    fn body_awareness() {
+        let mut ba = BodyAwareness::new();
+        ba.set_awareness(1, 0.8, "触觉感知".into());
+        ba.set_awareness(2, 0.6, "本体感知".into());
+        assert_eq!(ba.part_count(), 2);
+        assert_eq!(ba.get_awareness(1), Some(0.8));
+        assert_eq!(ba.get_awareness(3), None);
+        assert!((ba.overall_awareness - 0.7).abs() < 1e-6);
+    }
+
+    #[test]
+    fn motion_modes() {
+        assert_eq!(MotionMode::Static as u32, 0);
+        assert_eq!(MotionMode::Gesturing as u32, 5);
+    }
+
+    #[test]
+    fn gesture_types() {
+        assert_eq!(GestureType::Point as u32, 0);
+        assert_eq!(GestureType::Stop as u32, 7);
+    }
+
+    #[test]
+    fn keypoint_creation() {
+        let kp = Keypoint { id: 0, name: "test".into(), x: 1.0, y: 2.0, z: 3.0, confidence: 0.95 };
+        assert_eq!(kp.name, "test");
+        assert!((kp.confidence - 0.95).abs() < 1e-6);
+    }
+}

@@ -1369,3 +1369,375 @@ mod tests {
         assert!(res.contains("memory:"));
     }
 }
+
+// =====================================================================================
+// 情感记忆 (EmotionalMemory)
+// =====================================================================================
+
+/// 情感类型。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EmotionType {
+    Joy,      // 喜悦
+    Sadness,  // 悲伤
+    Anger,    // 愤怒
+    Fear,     // 恐惧
+    Surprise, // 惊喜
+    Disgust,  // 厌恶
+}
+
+/// 情感记忆条目：带情感标记的记忆。
+#[derive(Clone, Debug)]
+pub struct EmotionalMemoryEntry {
+    pub id: u64,
+    pub content: String,
+    pub emotion: EmotionType,
+    pub intensity: f32,     // 0~1
+    pub timestamp_ns: u128,
+    pub recall_count: u64,
+}
+
+/// 情感记忆：情感驱动的记忆系统。
+pub struct EmotionalMemory {
+    entries: BTreeMap<u64, EmotionalMemoryEntry>,
+    next_id: u64,
+    pub emotion_weights: BTreeMap<EmotionType, f32>,
+}
+
+impl EmotionalMemory {
+    pub fn new() -> Self {
+        let mut weights = BTreeMap::new();
+        weights.insert(EmotionType::Joy, 0.5);
+        weights.insert(EmotionType::Sadness, 0.3);
+        weights.insert(EmotionType::Anger, 0.4);
+        weights.insert(EmotionType::Fear, 0.6);
+        weights.insert(EmotionType::Surprise, 0.5);
+        weights.insert(EmotionType::Disgust, 0.2);
+        Self {
+            entries: BTreeMap::new(),
+            next_id: 1,
+            emotion_weights: weights,
+        }
+    }
+
+    pub fn store(&mut self, content: &str, emotion: EmotionType, intensity: f32) -> u64 {
+        let id = self.next_id;
+        self.next_id += 1;
+        self.entries.insert(id, EmotionalMemoryEntry {
+            id,
+            content: content.to_string(),
+            emotion,
+            intensity: intensity.clamp(0.0, 1.0),
+            timestamp_ns: crate::ai_os::native::now_ns(),
+            recall_count: 0,
+        });
+        id
+    }
+
+    pub fn recall(&mut self, id: u64) -> Option<String> {
+        if let Some(entry) = self.entries.get_mut(&id) {
+            entry.recall_count += 1;
+            Some(entry.content.clone())
+        } else {
+            None
+        }
+    }
+
+    pub fn recall_by_emotion(&self, emotion: EmotionType) -> Vec<&EmotionalMemoryEntry> {
+        self.entries.values()
+            .filter(|e| e.emotion == emotion)
+            .collect()
+    }
+
+    pub fn strongest_emotion(&self) -> Option<EmotionType> {
+        let mut best = None;
+        let mut best_score = f32::NEG_INFINITY;
+        for entry in self.entries.values() {
+            let score = entry.intensity * self.emotion_weights.get(&entry.emotion).copied().unwrap_or(0.5);
+            if score > best_score {
+                best_score = score;
+                best = Some(entry.emotion);
+            }
+        }
+        best
+    }
+
+    pub fn entry_count(&self) -> usize {
+        self.entries.len()
+    }
+}
+
+// =====================================================================================
+// 联想记忆增强 (EnhancedAssociation)
+// =====================================================================================
+
+/// 联想强度。
+#[derive(Clone, Debug)]
+pub struct EnhancedAssociation {
+    pub source: String,
+    pub target: String,
+    pub strength: f32,
+    pub context: String,
+    pub created_at: u128,
+}
+
+/// 增强记忆联想：基于上下文的关联网络。
+pub struct EnhancedAssociationNetwork {
+    pub associations: BTreeMap<String, Vec<EnhancedAssociation>>,
+}
+
+impl EnhancedAssociationNetwork {
+    pub fn new() -> Self {
+        Self {
+            associations: BTreeMap::new(),
+        }
+    }
+
+    pub fn link(&mut self, source: &str, target: &str, strength: f32, context: &str) {
+        self.associations.entry(source.to_string()).or_default().push(EnhancedAssociation {
+            source: source.to_string(),
+            target: target.to_string(),
+            strength: strength.clamp(0.0, 1.0),
+            context: context.to_string(),
+            created_at: crate::ai_os::native::now_ns(),
+        });
+    }
+
+    pub fn get_associations(&self, source: &str) -> Option<&Vec<EnhancedAssociation>> {
+        self.associations.get(source)
+    }
+
+    pub fn strongest_association(&self, source: &str) -> Option<&EnhancedAssociation> {
+        self.associations.get(source).and_then(|assocs| {
+            assocs.iter().max_by(|a, b| a.strength.partial_cmp(&b.strength).unwrap_or(std::cmp::Ordering::Equal))
+        })
+    }
+
+    pub fn link_count(&self) -> usize {
+        self.associations.values().map(|v| v.len()).sum()
+    }
+
+    pub fn source_count(&self) -> usize {
+        self.associations.len()
+    }
+}
+
+// =====================================================================================
+// 记忆重排序 (MemoryReranking)
+// =====================================================================================
+
+/// 重排序策略。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RerankStrategy {
+    Recency,     // 最新优先
+    Frequency,   // 频率优先
+    Salience,    // 显著性优先
+    Hybrid,      // 混合策略
+}
+
+/// 记忆重排序器：重新排序检索结果。
+pub struct MemoryReranker {
+    pub strategy: RerankStrategy,
+    pub recency_weight: f32,
+    pub frequency_weight: f32,
+    pub salience_weight: f32,
+}
+
+impl MemoryReranker {
+    pub fn new() -> Self {
+        Self {
+            strategy: RerankStrategy::Hybrid,
+            recency_weight: 0.4,
+            frequency_weight: 0.3,
+            salience_weight: 0.3,
+        }
+    }
+
+    pub fn set_strategy(&mut self, strategy: RerankStrategy) {
+        self.strategy = strategy;
+    }
+
+    pub fn rerank(&self, mut items: Vec<(u64, f32, u64, f32)>) -> Vec<(u64, f32)> {
+        // items: (id, base_score, recall_count, salience)
+        let now = crate::ai_os::native::now_ns();
+        let mut scored: Vec<(u64, f32)> = items.into_iter().map(|(id, base_score, recall_count, salience)| {
+            let recency_score = 1.0 / (1.0 + (now as f64 / 1_000_000_000.0) as f32 * 0.001);
+            let freq_score = (recall_count as f32).ln1p() / 10.0;
+            let final_score = match self.strategy {
+                RerankStrategy::Recency => recency_score,
+                RerankStrategy::Frequency => freq_score,
+                RerankStrategy::Salience => salience,
+                RerankStrategy::Hybrid => {
+                    self.recency_weight * recency_score +
+                    self.frequency_weight * freq_score +
+                    self.salience_weight * salience +
+                    (1.0 - self.recency_weight - self.frequency_weight - self.salience_weight) * base_score
+                }
+            };
+            (id, final_score)
+        });
+        scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        scored
+    }
+}
+
+// =====================================================================================
+// 记忆压缩 (MemoryCompression)
+// =====================================================================================
+
+/// 压缩算法。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CompressionAlgorithm {
+    LZ4,
+    Zstd,
+    Snappy,
+    None,
+}
+
+/// 压缩结果。
+#[derive(Clone, Debug)]
+pub struct CompressionResult {
+    pub original_size: u64,
+    pub compressed_size: u64,
+    pub ratio: f32,
+    pub algorithm: CompressionAlgorithm,
+}
+
+/// 记忆压缩器：压缩记忆内容以节省存储。
+pub struct MemoryCompressor {
+    pub algorithm: CompressionAlgorithm,
+    pub total_original: u64,
+    pub total_compressed: u64,
+    pub compression_count: u64,
+}
+
+impl MemoryCompressor {
+    pub fn new() -> Self {
+        Self {
+            algorithm: CompressionAlgorithm::Zstd,
+            total_original: 0,
+            total_compressed: 0,
+            compression_count: 0,
+        }
+    }
+
+    pub fn set_algorithm(&mut self, algorithm: CompressionAlgorithm) {
+        self.algorithm = algorithm;
+    }
+
+    pub fn compress(&mut self, data: &[u8]) -> CompressionResult {
+        let original_size = data.len() as u64;
+        // 简化模拟压缩：基于数据重复性估算
+        let unique_bytes: std::collections::HashSet<u8> = data.iter().copied().collect();
+        let entropy_factor = unique_bytes.len() as f32 / 256.0;
+        let compressed_size = (original_size as f32 * (0.3 + 0.7 * entropy_factor)) as u64;
+        let ratio = compressed_size as f32 / original_size.max(1) as f32;
+
+        self.total_original += original_size;
+        self.total_compressed += compressed_size;
+        self.compression_count += 1;
+
+        CompressionResult {
+            original_size,
+            compressed_size,
+            ratio,
+            algorithm: self.algorithm,
+        }
+    }
+
+    pub fn overall_ratio(&self) -> f32 {
+        if self.total_original == 0 {
+            1.0
+        } else {
+            self.total_compressed as f32 / self.total_original as f32
+        }
+    }
+
+    pub fn compression_count(&self) -> u64 {
+        self.compression_count
+    }
+}
+
+// =====================================================================================
+// 记忆扩展测试
+// =====================================================================================
+
+#[cfg(test)]
+mod advanced_tests {
+    use super::*;
+
+    #[test]
+    fn emotional_memory() {
+        let mut em = EmotionalMemory::new();
+        let id1 = em.store("快乐的日子", EmotionType::Joy, 0.8);
+        let id2 = em.store("愤怒的争吵", EmotionType::Anger, 0.9);
+        assert_eq!(id1, 1);
+        assert_eq!(id2, 2);
+        assert_eq!(em.entry_count(), 2);
+        let content = em.recall(id1).unwrap();
+        assert_eq!(content, "快乐的日子");
+        let joy_entries = em.recall_by_emotion(EmotionType::Joy);
+        assert_eq!(joy_entries.len(), 1);
+        let strongest = em.strongest_emotion().unwrap();
+        assert_eq!(strongest, EmotionType::Anger); // 0.9 * 0.4 > 0.8 * 0.5
+    }
+
+    #[test]
+    fn enhanced_association() {
+        let mut an = EnhancedAssociationNetwork::new();
+        an.link("apple", "fruit", 0.9, "category");
+        an.link("apple", "red", 0.7, "color");
+        an.link("apple", "fruit", 0.5, "category"); // 再次链接
+        assert_eq!(an.link_count(), 3);
+        assert_eq!(an.source_count(), 1);
+        let assocs = an.get_associations("apple").unwrap();
+        assert_eq!(assocs.len(), 3);
+        let strongest = an.strongest_association("apple").unwrap();
+        assert_eq!(strongest.target, "fruit");
+        assert!((strongest.strength - 0.9).abs() < 1e-6);
+    }
+
+    #[test]
+    fn memory_reranker() {
+        let mut reranker = MemoryReranker::new();
+        reranker.set_strategy(RerankStrategy::Hybrid);
+        let items = vec![
+            (1, 0.5, 10, 0.8),
+            (2, 0.9, 1, 0.5),
+            (3, 0.7, 5, 0.6),
+        ];
+        let ranked = reranker.rerank(items);
+        assert_eq!(ranked.len(), 3);
+        assert!(ranked[0].1 >= ranked[1].1);
+        assert!(ranked[1].1 >= ranked[2].1);
+    }
+
+    #[test]
+    fn memory_compressor() {
+        let mut mc = MemoryCompressor::new();
+        mc.set_algorithm(CompressionAlgorithm::LZ4);
+        let data = vec![0u8; 1000];
+        let result = mc.compress(&data);
+        assert_eq!(result.original_size, 1000);
+        assert!(result.ratio > 0.0);
+        assert_eq!(mc.compression_count(), 1);
+        assert!(mc.overall_ratio() > 0.0);
+    }
+
+    #[test]
+    fn emotion_types() {
+        assert_eq!(EmotionType::Joy as u32, 0);
+        assert_eq!(EmotionType::Disgust as u32, 5);
+    }
+
+    #[test]
+    fn rerank_strategies() {
+        assert_eq!(RerankStrategy::Recency as u32, 0);
+        assert_eq!(RerankStrategy::Hybrid as u32, 3);
+    }
+
+    #[test]
+    fn compression_algorithms() {
+        assert_eq!(CompressionAlgorithm::LZ4 as u32, 0);
+        assert_eq!(CompressionAlgorithm::None as u32, 3);
+    }
+}

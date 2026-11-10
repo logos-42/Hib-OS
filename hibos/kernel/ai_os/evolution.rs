@@ -1026,3 +1026,391 @@ mod tests {
         assert_eq!(MutationType::Duplication as u32, 3);
     }
 }
+
+// =====================================================================================
+// 遗传算法 (GeneticAlgorithm)
+// =====================================================================================
+
+/// 选择策略。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SelectionStrategy {
+    Roulette,    // 轮盘赌
+    Tournament,  // 锦标赛
+    Rank,        // 排序
+    Elitism,     // 精英保留
+}
+
+/// 个体适应度。
+#[derive(Clone, Debug)]
+pub struct IndividualFitness {
+    pub individual_id: u64,
+    pub fitness: f32,
+    pub rank: u64,
+}
+
+/// 遗传算法：模拟自然选择的优化算法。
+pub struct GeneticAlgorithm {
+    pub strategy: SelectionStrategy,
+    pub population: BTreeMap<u64, IndividualFitness>,
+    pub mutation_rate: f32,
+    pub crossover_rate: f32,
+    pub generation: u64,
+}
+
+impl GeneticAlgorithm {
+    pub fn new() -> Self {
+        Self {
+            strategy: SelectionStrategy::Tournament,
+            population: BTreeMap::new(),
+            mutation_rate: 0.01,
+            crossover_rate: 0.7,
+            generation: 0,
+        }
+    }
+
+    pub fn set_strategy(&mut self, strategy: SelectionStrategy) {
+        self.strategy = strategy;
+    }
+
+    pub fn add_individual(&mut self, id: u64, fitness: f32) {
+        self.population.insert(id, IndividualFitness {
+            individual_id: id,
+            fitness: fitness.clamp(0.0, 1.0),
+            rank: 0,
+        });
+    }
+
+    pub fn rank_population(&mut self) {
+        let mut sorted: Vec<(u64, &IndividualFitness)> = self.population.iter()
+            .map(|(id, f)| (*id, f))
+            .collect();
+        sorted.sort_by(|a, b| b.1.fitness.partial_cmp(&a.1.fitness).unwrap_or(std::cmp::Ordering::Equal));
+        for (rank, (id, _)) in sorted.iter().enumerate() {
+            if let Some(ind) = self.population.get_mut(id) {
+                ind.rank = rank as u64;
+            }
+        }
+    }
+
+    pub fn select_parent(&self) -> Option<u64> {
+        match self.strategy {
+            SelectionStrategy::Roulette => {
+                let total: f32 = self.population.values().map(|f| f.fitness).sum();
+                if total == 0.0 {
+                    return self.population.keys().next().copied();
+                }
+                let mut target = fastrand_f32() * total;
+                for (id, f) in &self.population {
+                    target -= f.fitness;
+                    if target <= 0.0 {
+                        return Some(*id);
+                    }
+                }
+                self.population.keys().next().copied()
+            }
+            SelectionStrategy::Tournament => {
+                let mut best = None;
+                let mut best_fitness = f32::NEG_INFINITY;
+                for _ in 0..3.min(self.population.len()) {
+                    let ids: Vec<u64> = self.population.keys().copied().collect();
+                    let idx = (fastrand_f32() * ids.len() as f32) as usize;
+                    if let Some(id) = ids.get(idx) {
+                        if let Some(f) = self.population.get(id) {
+                            if f.fitness > best_fitness {
+                                best_fitness = f.fitness;
+                                best = Some(*id);
+                            }
+                        }
+                    }
+                }
+                best
+            }
+            SelectionStrategy::Rank => {
+                let sorted: Vec<u64> = self.population.keys().copied().collect();
+                sorted.first().copied()
+            }
+            SelectionStrategy::Elitism => {
+                self.population.values()
+                    .max_by(|a, b| a.fitness.partial_cmp(&b.fitness).unwrap_or(std::cmp::Ordering::Equal))
+                    .map(|f| f.individual_id)
+            }
+        }
+    }
+
+    pub fn evolve(&mut self) {
+        self.rank_population();
+        self.generation += 1;
+    }
+
+    pub fn best_fitness(&self) -> f32 {
+        self.population.values().map(|f| f.fitness).fold(0.0f32, f32::max)
+    }
+
+    pub fn avg_fitness(&self) -> f32 {
+        if self.population.is_empty() {
+            0.0
+        } else {
+            self.population.values().map(|f| f.fitness).sum::<f32>() / self.population.len() as f32
+        }
+    }
+}
+
+// =====================================================================================
+// 基因编辑 (GeneEditing)
+// =====================================================================================
+
+/// 编辑操作类型。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EditOperation {
+    Insert,   // 插入
+    Delete,   // 删除
+    Replace,  // 替换
+}
+
+/// 基因编辑记录。
+#[derive(Clone, Debug)]
+pub struct GeneEdit {
+    pub id: u64,
+    pub gene_name: String,
+    pub operation: EditOperation,
+    pub old_value: Option<f32>,
+    pub new_value: Option<f32>,
+    pub timestamp_ns: u128,
+}
+
+/// 基因编辑器：精确修改基因。
+pub struct GeneEditor {
+    pub edits: Vec<GeneEdit>,
+    pub next_id: u64,
+}
+
+impl GeneEditor {
+    pub fn new() -> Self {
+        Self {
+            edits: Vec::new(),
+            next_id: 1,
+        }
+    }
+
+    pub fn edit(&mut self, gene_name: &str, operation: EditOperation, old_value: Option<f32>, new_value: Option<f32>) -> u64 {
+        let id = self.next_id;
+        self.next_id += 1;
+        self.edits.push(GeneEdit {
+            id,
+            gene_name: gene_name.to_string(),
+            operation,
+            old_value,
+            new_value,
+            timestamp_ns: crate::ai_os::native::now_ns(),
+        });
+        id
+    }
+
+    pub fn get_edit(&self, id: u64) -> Option<&GeneEdit> {
+        self.edits.iter().find(|e| e.id == id)
+    }
+
+    pub fn edit_count(&self) -> usize {
+        self.edits.len()
+    }
+}
+
+// =====================================================================================
+// 进化策略 (EvolutionStrategy)
+// =====================================================================================
+
+/// 策略参数。
+#[derive(Clone, Debug)]
+pub struct StrategyParameters {
+    pub mutation_sigma: f32,
+    pub learning_rate: f32,
+    pub population_size: u64,
+    pub offspring_size: u64,
+}
+
+/// 进化策略：自适应参数调优的优化算法。
+pub struct EvolutionStrategy {
+    pub params: StrategyParameters,
+    pub history: Vec<(u64, f32)>, // (generation, best_fitness)
+}
+
+impl EvolutionStrategy {
+    pub fn new() -> Self {
+        Self {
+            params: StrategyParameters {
+                mutation_sigma: 0.1,
+                learning_rate: 0.01,
+                population_size: 100,
+                offspring_size: 200,
+            },
+            history: Vec::new(),
+        }
+    }
+
+    pub fn update_params(&mut self, fitness_improvement: f32) {
+        if fitness_improvement > 0.0 {
+            self.params.mutation_sigma = (self.params.mutation_sigma * 0.99).max(0.001);
+            self.params.learning_rate = (self.params.learning_rate * 1.001).min(0.1);
+        } else {
+            self.params.mutation_sigma = (self.params.mutation_sigma * 1.01).min(1.0);
+            self.params.learning_rate = (self.params.learning_rate * 0.999).max(0.0001);
+        }
+    }
+
+    pub fn record_generation(&mut self, generation: u64, best_fitness: f32) {
+        self.history.push((generation, best_fitness));
+    }
+
+    pub fn generation_count(&self) -> usize {
+        self.history.len()
+    }
+
+    pub fn best_fitness_history(&self) -> Vec<f32> {
+        self.history.iter().map(|(_, f)| *f).collect()
+    }
+}
+
+// =====================================================================================
+// 种群动态 (PopulationDynamics)
+// =====================================================================================
+
+/// 种群状态。
+#[derive(Clone, Debug)]
+pub struct PopulationState {
+    pub generation: u64,
+    pub size: u64,
+    pub avg_fitness: f32,
+    pub max_fitness: f32,
+    pub min_fitness: f32,
+    pub diversity: f32,
+}
+
+/// 种群动态：跟踪种群随时间的变化。
+pub struct PopulationDynamics {
+    pub states: Vec<PopulationState>,
+    pub carrying_capacity: u64,
+}
+
+impl PopulationDynamics {
+    pub fn new() -> Self {
+        Self {
+            states: Vec::new(),
+            carrying_capacity: 10000,
+        }
+    }
+
+    pub fn record(&mut self, generation: u64, size: u64, fitnesses: &[f32]) {
+        let avg = if fitnesses.is_empty() {
+            0.0
+        } else {
+            fitnesses.iter().sum::<f32>() / fitnesses.len() as f32
+        };
+        let max = fitnesses.iter().fold(0.0f32, f32::max);
+        let min = fitnesses.iter().fold(f32::INFINITY, f32::min);
+        let diversity = if fitnesses.len() > 1 {
+            let mean = avg;
+            let variance: f32 = fitnesses.iter().map(|f| (f - mean) * (f - mean)).sum::<f32>() / fitnesses.len() as f32;
+            variance.sqrt()
+        } else {
+            0.0
+        };
+        self.states.push(PopulationState {
+            generation,
+            size,
+            avg_fitness: avg,
+            max_fitness: max,
+            min_fitness: min,
+            diversity,
+        });
+    }
+
+    pub fn latest_state(&self) -> Option<&PopulationState> {
+        self.states.last()
+    }
+
+    pub fn state_count(&self) -> usize {
+        self.states.len()
+    }
+}
+
+// =====================================================================================
+// 进化扩展测试
+// =====================================================================================
+
+#[cfg(test)]
+mod advanced_tests {
+    use super::*;
+
+    #[test]
+    fn genetic_algorithm() {
+        let mut ga = GeneticAlgorithm::new();
+        ga.add_individual(1, 0.5);
+        ga.add_individual(2, 0.8);
+        ga.add_individual(3, 0.3);
+        ga.rank_population();
+        ga.evolve();
+        assert_eq!(ga.generation, 1);
+        assert!((ga.best_fitness() - 0.8).abs() < 1e-6);
+        assert!((ga.avg_fitness() - 0.533).abs() < 0.01);
+    }
+
+    #[test]
+    fn genetic_algorithm_selection() {
+        let mut ga = GeneticAlgorithm::new();
+        ga.set_strategy(SelectionStrategy::Roulette);
+        ga.add_individual(1, 0.9);
+        ga.add_individual(2, 0.1);
+        let parent = ga.select_parent();
+        assert!(parent.is_some());
+    }
+
+    #[test]
+    fn gene_editor() {
+        let mut editor = GeneEditor::new();
+        let id = editor.edit("gene_a", EditOperation::Replace, Some(0.5), Some(0.8));
+        assert_eq!(id, 1);
+        let edit = editor.get_edit(id).unwrap();
+        assert_eq!(edit.gene_name, "gene_a");
+        assert_eq!(edit.old_value, Some(0.5));
+        assert_eq!(edit.new_value, Some(0.8));
+        assert_eq!(editor.edit_count(), 1);
+    }
+
+    #[test]
+    fn evolution_strategy() {
+        let mut es = EvolutionStrategy::new();
+        es.record_generation(1, 0.5);
+        es.record_generation(2, 0.7);
+        es.record_generation(3, 0.85);
+        assert_eq!(es.generation_count(), 3);
+        let history = es.best_fitness_history();
+        assert_eq!(history.len(), 3);
+        assert!((history[2] - 0.85).abs() < 1e-6);
+        es.update_params(0.1);
+        assert!(es.params.mutation_sigma < 0.1);
+    }
+
+    #[test]
+    fn population_dynamics() {
+        let mut pd = PopulationDynamics::new();
+        pd.record(1, 100, &[0.1, 0.5, 0.9]);
+        pd.record(2, 150, &[0.2, 0.6, 0.8]);
+        assert_eq!(pd.state_count(), 2);
+        let latest = pd.latest_state().unwrap();
+        assert_eq!(latest.generation, 2);
+        assert_eq!(latest.size, 150);
+        assert!((latest.avg_fitness - 0.533).abs() < 0.01);
+    }
+
+    #[test]
+    fn selection_strategies() {
+        assert_eq!(SelectionStrategy::Roulette as u32, 0);
+        assert_eq!(SelectionStrategy::Elitism as u32, 3);
+    }
+
+    #[test]
+    fn edit_operations() {
+        assert_eq!(EditOperation::Insert as u32, 0);
+        assert_eq!(EditOperation::Replace as u32, 2);
+    }
+}

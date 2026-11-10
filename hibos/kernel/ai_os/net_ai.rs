@@ -1222,3 +1222,437 @@ mod tests {
         assert_eq!(CongestionState::Critical as u32, 2);
     }
 }
+
+// =====================================================================================
+// 网络拓扑分析 (NetworkTopologyAnalysis)
+// =====================================================================================
+
+/// 中心性度量。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CentralityMeasure {
+    Degree,       // 度中心性
+    Betweenness,  // 介数中心性
+    Closeness,    // 接近中心性
+    Eigenvector,  // 特征向量中心性
+}
+
+/// 网络拓扑分析器：分析网络结构和关键节点。
+pub struct NetworkTopologyAnalysis {
+    pub nodes: BTreeSet<u64>,
+    pub edges: BTreeMap<(u64, u64), f32>, // (from, to) -> weight
+}
+
+impl NetworkTopologyAnalysis {
+    pub fn new() -> Self {
+        Self {
+            nodes: BTreeSet::new(),
+            edges: BTreeMap::new(),
+        }
+    }
+
+    pub fn add_node(&mut self, node: u64) {
+        self.nodes.insert(node);
+    }
+
+    pub fn add_edge(&mut self, from: u64, to: u64, weight: f32) {
+        self.nodes.insert(from);
+        self.nodes.insert(to);
+        self.edges.insert((from, to), weight.clamp(0.0, 1.0));
+    }
+
+    pub fn degree_centrality(&self, node: u64) -> f32 {
+        let degree = self.edges.iter().filter(|((a, b), _)| *a == node || *b == node).count();
+        let max_degree = self.nodes.len().saturating_sub(1);
+        if max_degree == 0 {
+            0.0
+        } else {
+            degree as f32 / max_degree as f32
+        }
+    }
+
+    pub fn find_bridges(&self) -> Vec<(u64, u64)> {
+        // 简化：返回权重最低的边作为潜在桥边
+        let mut edges: Vec<((u64, u64), f32)> = self.edges.iter().map(|(k, v)| (*k, *v)).collect();
+        edges.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+        edges.iter().take(3).map(|(k, _)| *k).collect()
+    }
+
+    pub fn node_count(&self) -> usize {
+        self.nodes.len()
+    }
+
+    pub fn edge_count(&self) -> usize {
+        self.edges.len()
+    }
+}
+
+// =====================================================================================
+// 流量分析 (TrafficAnalysis)
+// =====================================================================================
+
+/// 流量模式。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TrafficPattern {
+    Burst,      // 突发
+    Steady,     // 稳定
+    Periodic,   // 周期性
+    Random,     // 随机
+}
+
+/// 流量样本。
+#[derive(Clone, Debug)]
+pub struct TrafficSample {
+    pub timestamp_ns: u128,
+    pub bytes: u64,
+    pub packets: u64,
+    pub src: u64,
+    pub dst: u64,
+}
+
+/// 流量分析器：分析网络流量模式。
+pub struct TrafficAnalyzer {
+    pub samples: Vec<TrafficSample>,
+    pub max_samples: usize,
+    pub total_bytes: u64,
+    pub total_packets: u64,
+}
+
+impl TrafficAnalyzer {
+    pub fn new() -> Self {
+        Self {
+            samples: Vec::new(),
+            max_samples: 100000,
+            total_bytes: 0,
+            total_packets: 0,
+        }
+    }
+
+    pub fn add_sample(&mut self, timestamp_ns: u128, bytes: u64, packets: u64, src: u64, dst: u64) {
+        self.samples.push(TrafficSample {
+            timestamp_ns,
+            bytes,
+            packets,
+            src,
+            dst,
+        });
+        self.total_bytes += bytes;
+        self.total_packets += packets;
+        if self.samples.len() > self.max_samples {
+            self.samples.remove(0);
+        }
+    }
+
+    pub fn detect_pattern(&self) -> TrafficPattern {
+        if self.samples.len() < 3 {
+            return TrafficPattern::Random;
+        }
+        let bytes: Vec<u64> = self.samples.iter().map(|s| s.bytes).collect();
+        let mean: f64 = bytes.iter().map(|&b| b as f64).sum::<f64>() / bytes.len() as f64;
+        let variance: f64 = bytes.iter().map(|&b| (b as f64 - mean) * (b as f64 - mean)).sum::<f64>() / bytes.len() as f64;
+        let cv = if mean > 0.0 {
+            variance.sqrt() / mean
+        } else {
+            0.0
+        };
+        if cv < 0.1 {
+            TrafficPattern::Steady
+        } else if cv > 1.0 {
+            TrafficPattern::Burst
+        } else {
+            TrafficPattern::Periodic
+        }
+    }
+
+    pub fn bandwidth_usage(&self, window_ns: u128) -> f64 {
+        if self.samples.is_empty() {
+            return 0.0;
+        }
+        let latest = self.samples.iter().max_by_key(|s| s.timestamp_ns).unwrap();
+        let cutoff = latest.timestamp_ns.saturating_sub(window_ns);
+        let window_bytes: u64 = self.samples.iter()
+            .filter(|s| s.timestamp_ns >= cutoff)
+            .map(|s| s.bytes)
+            .sum();
+        window_bytes as f64 / (window_ns as f64 / 1_000_000_000.0) / 1_000_000.0 // Mbps
+    }
+
+    pub fn sample_count(&self) -> usize {
+        self.samples.len()
+    }
+}
+
+// =====================================================================================
+// 网络安全 (NetworkSecurity)
+// =====================================================================================
+
+/// 威胁类型。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ThreatType {
+    DDoS,          // 分布式拒绝服务
+    PortScan,      // 端口扫描
+    Intrusion,     // 入侵
+    Malware,       // 恶意软件
+    Phishing,      // 钓鱼
+}
+
+/// 安全告警。
+#[derive(Clone, Debug)]
+pub struct SecurityAlert {
+    pub id: u64,
+    pub threat_type: ThreatType,
+    pub src_ip: u64,
+    pub dst_ip: u64,
+    pub severity: f32,   // 0~1
+    pub timestamp_ns: u128,
+    pub acknowledged: bool,
+}
+
+/// 网络安全监控器：检测和响应网络威胁。
+pub struct NetworkSecurityMonitor {
+    pub alerts: Vec<SecurityAlert>,
+    pub next_id: u64,
+    pub blocked_ips: BTreeSet<u64>,
+    pub threat_count: BTreeMap<ThreatType, u64>,
+}
+
+impl NetworkSecurityMonitor {
+    pub fn new() -> Self {
+        Self {
+            alerts: Vec::new(),
+            next_id: 1,
+            blocked_ips: BTreeSet::new(),
+            threat_count: BTreeMap::new(),
+        }
+    }
+
+    pub fn alert(&mut self, threat_type: ThreatType, src_ip: u64, dst_ip: u64, severity: f32) -> u64 {
+        let id = self.next_id;
+        self.next_id += 1;
+        self.alerts.push(SecurityAlert {
+            id,
+            threat_type,
+            src_ip,
+            dst_ip,
+            severity: severity.clamp(0.0, 1.0),
+            timestamp_ns: crate::ai_os::native::now_ns(),
+            acknowledged: false,
+        });
+        *self.threat_count.entry(threat_type).or_insert(0) += 1;
+        if severity > 0.8 {
+            self.blocked_ips.insert(src_ip);
+        }
+        id
+    }
+
+    pub fn acknowledge(&mut self, id: u64) -> bool {
+        if let Some(alert) = self.alerts.iter_mut().find(|a| a.id == id) {
+            alert.acknowledged = true;
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn is_blocked(&self, ip: u64) -> bool {
+        self.blocked_ips.contains(&ip)
+    }
+
+    pub fn alert_count(&self) -> usize {
+        self.alerts.len()
+    }
+
+    pub fn unacknowledged_count(&self) -> usize {
+        self.alerts.iter().filter(|a| !a.acknowledged).count()
+    }
+}
+
+// =====================================================================================
+// QoS 管理 (QoSManager)
+// =====================================================================================
+
+/// 服务质量类别。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum QoSClass {
+    Voice,        // 语音
+    Video,        // 视频
+    Data,         // 数据
+    Background,   // 后台
+}
+
+/// QoS 策略。
+#[derive(Clone, Debug)]
+pub struct QoSPolicy {
+    pub class: QoSClass,
+    pub min_bandwidth: f64,   // Mbps
+    pub max_bandwidth: f64,   // Mbps
+    pub max_latency: u128,    // ns
+    pub max_jitter: u128,     // ns
+    pub max_loss: f32,        // 0~1
+}
+
+/// QoS 管理器：流量服务质量管理。
+pub struct QoSManager {
+    pub policies: BTreeMap<QoSClass, QoSPolicy>,
+    pub allocations: BTreeMap<u64, QoSClass>, // flow_id -> class
+}
+
+impl QoSManager {
+    pub fn new() -> Self {
+        let mut policies = BTreeMap::new();
+        policies.insert(QoSClass::Voice, QoSPolicy {
+            class: QoSClass::Voice,
+            min_bandwidth: 0.1,
+            max_bandwidth: 1.0,
+            max_latency: 50_000_000,   // 50ms
+            max_jitter: 5_000_000,     // 5ms
+            max_loss: 0.01,
+        });
+        policies.insert(QoSClass::Video, QoSPolicy {
+            class: QoSClass::Video,
+            min_bandwidth: 1.0,
+            max_bandwidth: 10.0,
+            max_latency: 100_000_000,  // 100ms
+            max_jitter: 10_000_000,    // 10ms
+            max_loss: 0.05,
+        });
+        policies.insert(QoSClass::Data, QoSPolicy {
+            class: QoSClass::Data,
+            min_bandwidth: 0.01,
+            max_bandwidth: 100.0,
+            max_latency: 500_000_000,  // 500ms
+            max_jitter: 50_000_000,    // 50ms
+            max_loss: 0.1,
+        });
+        policies.insert(QoSClass::Background, QoSPolicy {
+            class: QoSClass::Background,
+            min_bandwidth: 0.0,
+            max_bandwidth: 10.0,
+            max_latency: 5_000_000_000, // 5s
+            max_jitter: 100_000_000,    // 100ms
+            max_loss: 0.2,
+        });
+        Self {
+            policies,
+            allocations: BTreeMap::new(),
+        }
+    }
+
+    pub fn assign_flow(&mut self, flow_id: u64, class: QoSClass) {
+        self.allocations.insert(flow_id, class);
+    }
+
+    pub fn get_policy(&self, class: QoSClass) -> Option<&QoSPolicy> {
+        self.policies.get(&class)
+    }
+
+    pub fn get_flow_class(&self, flow_id: u64) -> Option<QoSClass> {
+        self.allocations.get(&flow_id).copied()
+    }
+
+    pub fn policy_count(&self) -> usize {
+        self.policies.len()
+    }
+
+    pub fn flow_count(&self) -> usize {
+        self.allocations.len()
+    }
+}
+
+// =====================================================================================
+// 网络扩展测试
+// =====================================================================================
+
+#[cfg(test)]
+mod advanced_tests {
+    use super::*;
+
+    #[test]
+    fn topology_analysis() {
+        let mut ta = NetworkTopologyAnalysis::new();
+        ta.add_node(1);
+        ta.add_node(2);
+        ta.add_node(3);
+        ta.add_edge(1, 2, 0.8);
+        ta.add_edge(2, 3, 0.6);
+        ta.add_edge(1, 3, 0.3);
+        assert_eq!(ta.node_count(), 3);
+        assert_eq!(ta.edge_count(), 3);
+        let centrality = ta.degree_centrality(2);
+        assert!((centrality - 1.0).abs() < 1e-6);
+        let bridges = ta.find_bridges();
+        assert!(!bridges.is_empty());
+    }
+
+    #[test]
+    fn traffic_analyzer() {
+        let mut ta = TrafficAnalyzer::new();
+        ta.add_sample(1_000_000_000, 1000, 10, 1, 2);
+        ta.add_sample(2_000_000_000, 1000, 10, 1, 2);
+        ta.add_sample(3_000_000_000, 1000, 10, 1, 2);
+        assert_eq!(ta.sample_count(), 3);
+        let pattern = ta.detect_pattern();
+        assert_eq!(pattern, TrafficPattern::Steady);
+        let bw = ta.bandwidth_usage(5_000_000_000);
+        assert!(bw >= 0.0);
+    }
+
+    #[test]
+    fn traffic_burst() {
+        let mut ta = TrafficAnalyzer::new();
+        ta.add_sample(1_000_000_000, 10, 1, 1, 2);
+        ta.add_sample(2_000_000_000, 1000000, 10000, 1, 2);
+        ta.add_sample(3_000_000_000, 10, 1, 1, 2);
+        let pattern = ta.detect_pattern();
+        assert_eq!(pattern, TrafficPattern::Burst);
+    }
+
+    #[test]
+    fn network_security() {
+        let mut ns = NetworkSecurityMonitor::new();
+        let id = ns.alert(ThreatType::DDoS, 100, 200, 0.9);
+        assert_eq!(id, 1);
+        assert!(ns.is_blocked(100));
+        assert_eq!(ns.alert_count(), 1);
+        assert_eq!(ns.unacknowledged_count(), 1);
+        ns.acknowledge(1);
+        assert_eq!(ns.unacknowledged_count(), 0);
+        assert!(!ns.is_blocked(300));
+    }
+
+    #[test]
+    fn qos_manager() {
+        let mut qos = QoSManager::new();
+        qos.assign_flow(1, QoSClass::Voice);
+        qos.assign_flow(2, QoSClass::Video);
+        assert_eq!(qos.get_flow_class(1), Some(QoSClass::Voice));
+        assert_eq!(qos.get_flow_class(2), Some(QoSClass::Video));
+        let policy = qos.get_policy(QoSClass::Voice).unwrap();
+        assert!((policy.min_bandwidth - 0.1).abs() < 1e-6);
+        assert_eq!(qos.policy_count(), 4);
+        assert_eq!(qos.flow_count(), 2);
+    }
+
+    #[test]
+    fn traffic_patterns() {
+        assert_eq!(TrafficPattern::Burst as u32, 0);
+        assert_eq!(TrafficPattern::Random as u32, 3);
+    }
+
+    #[test]
+    fn threat_types() {
+        assert_eq!(ThreatType::DDoS as u32, 0);
+        assert_eq!(ThreatType::Phishing as u32, 4);
+    }
+
+    #[test]
+    fn qos_classes() {
+        assert_eq!(QoSClass::Voice as u32, 0);
+        assert_eq!(QoSClass::Background as u32, 3);
+    }
+
+    #[test]
+    fn centrality_measures() {
+        assert_eq!(CentralityMeasure::Degree as u32, 0);
+        assert_eq!(CentralityMeasure::Eigenvector as u32, 3);
+    }
+}

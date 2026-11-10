@@ -845,3 +845,388 @@ mod tests {
         assert_eq!(DreamStage::Wake as u32, 4);
     }
 }
+
+// =====================================================================================
+// 梦境叙事 (DreamNarrative)
+// =====================================================================================
+
+/// 梦境元素。
+#[derive(Clone, Debug)]
+pub struct DreamElement {
+    pub id: u64,
+    pub element_type: String,
+    pub content: String,
+    pub salience: f32,
+    pub connected_to: Vec<u64>,
+}
+
+/// 梦境叙事：梦境中的故事线。
+pub struct DreamNarrative {
+    pub id: u64,
+    pub title: String,
+    pub elements: Vec<DreamElement>,
+    pub coherence: f32,
+    pub emotional_arc: Vec<f32>,
+    pub created_at: u128,
+}
+
+/// 梦境叙事构建器。
+pub struct DreamNarrativeBuilder {
+    pub narratives: BTreeMap<u64, DreamNarrative>,
+    pub next_id: u64,
+}
+
+impl DreamNarrativeBuilder {
+    pub fn new() -> Self {
+        Self {
+            narratives: BTreeMap::new(),
+            next_id: 1,
+        }
+    }
+
+    pub fn create(&mut self, title: &str) -> u64 {
+        let id = self.next_id;
+        self.next_id += 1;
+        self.narratives.insert(id, DreamNarrative {
+            id,
+            title: title.to_string(),
+            elements: Vec::new(),
+            coherence: 0.0,
+            emotional_arc: Vec::new(),
+            created_at: crate::ai_os::native::now_ns(),
+        });
+        id
+    }
+
+    pub fn add_element(&mut self, narrative_id: u64, element_type: &str, content: &str, salience: f32) -> u64 {
+        if let Some(narrative) = self.narratives.get_mut(&narrative_id) {
+            let element_id = narrative.elements.len() as u64 + 1;
+            narrative.elements.push(DreamElement {
+                id: element_id,
+                element_type: element_type.to_string(),
+                content: content.to_string(),
+                salience: salience.clamp(0.0, 1.0),
+                connected_to: Vec::new(),
+            });
+            return element_id;
+        }
+        0
+    }
+
+    pub fn connect_elements(&mut self, narrative_id: u64, from: u64, to: u64) -> bool {
+        if let Some(narrative) = self.narratives.get_mut(&narrative_id) {
+            if let Some(elem) = narrative.elements.iter_mut().find(|e| e.id == from) {
+                if !elem.connected_to.contains(&to) {
+                    elem.connected_to.push(to);
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    pub fn compute_coherence(&mut self, narrative_id: u64) -> f32 {
+        if let Some(narrative) = self.narratives.get_mut(&narrative_id) {
+            if narrative.elements.is_empty() {
+                return 0.0;
+            }
+            let total_connections: usize = narrative.elements.iter().map(|e| e.connected_to.len()).sum();
+            let max_possible = narrative.elements.len() * (narrative.elements.len() - 1);
+            let coherence = if max_possible > 0 {
+                total_connections as f32 / max_possible as f32
+            } else {
+                0.0
+            };
+            narrative.coherence = coherence.clamp(0.0, 1.0);
+            narrative.coherence
+        } else {
+            0.0
+        }
+    }
+
+    pub fn narrative_count(&self) -> usize {
+        self.narratives.len()
+    }
+}
+
+// =====================================================================================
+// 创造力评估 (CreativityAssessment)
+// =====================================================================================
+
+/// 创造力维度。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CreativityDimension {
+    Novelty,      // 新颖度
+    Usefulness,   // 有用性
+    Surprise,     // 惊喜度
+    Elegance,     // 优雅度
+}
+
+/// 创造力评估结果。
+#[derive(Clone, Debug)]
+pub struct CreativityAssessment {
+    pub id: u64,
+    pub dimensions: BTreeMap<CreativityDimension, f32>,
+    pub overall_score: f32,
+    pub timestamp_ns: u128,
+}
+
+/// 创造力评估器：评估梦境产出的创造力。
+pub struct CreativityAssessor {
+    pub assessments: Vec<CreativityAssessment>,
+    pub next_id: u64,
+}
+
+impl CreativityAssessor {
+    pub fn new() -> Self {
+        Self {
+            assessments: Vec::new(),
+            next_id: 1,
+        }
+    }
+
+    pub fn assess(&mut self, dimensions: BTreeMap<CreativityDimension, f32>) -> u64 {
+        let id = self.next_id;
+        self.next_id += 1;
+        let overall: f32 = dimensions.values().sum::<f32>() / dimensions.len().max(1) as f32;
+        self.assessments.push(CreativityAssessment {
+            id,
+            dimensions,
+            overall_score: overall.clamp(0.0, 1.0),
+            timestamp_ns: crate::ai_os::native::now_ns(),
+        });
+        id
+    }
+
+    pub fn get_assessment(&self, id: u64) -> Option<&CreativityAssessment> {
+        self.assessments.iter().find(|a| a.id == id)
+    }
+
+    pub fn assessment_count(&self) -> usize {
+        self.assessments.len()
+    }
+
+    pub fn avg_creativity(&self) -> f32 {
+        if self.assessments.is_empty() {
+            0.0
+        } else {
+            self.assessments.iter().map(|a| a.overall_score).sum::<f32>() / self.assessments.len() as f32
+        }
+    }
+}
+
+// =====================================================================================
+// 记忆整合 (MemoryConsolidationDream)
+// =====================================================================================
+
+/// 整合类型。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ConsolidationType {
+    Synaptic,     // 突触整合
+    Systems,      // 系统整合
+    Reconsolidation, // 再巩固
+}
+
+/// 记忆整合记录。
+#[derive(Clone, Debug)]
+pub struct ConsolidationRecord {
+    pub id: u64,
+    pub source_memory_id: u64,
+    pub consolidation_type: ConsolidationType,
+    pub strength_change: f32,
+    pub timestamp_ns: u128,
+}
+
+/// 记忆整合器：梦境中的记忆整合过程。
+pub struct MemoryConsolidator {
+    pub records: Vec<ConsolidationRecord>,
+    pub next_id: u64,
+    pub total_consolidated: u64,
+}
+
+impl MemoryConsolidator {
+    pub fn new() -> Self {
+        Self {
+            records: Vec::new(),
+            next_id: 1,
+            total_consolidated: 0,
+        }
+    }
+
+    pub fn consolidate(&mut self, source_memory_id: u64, r#type: ConsolidationType, strength_change: f32) -> u64 {
+        let id = self.next_id;
+        self.next_id += 1;
+        self.records.push(ConsolidationRecord {
+            id,
+            source_memory_id,
+            consolidation_type: r#type,
+            strength_change: strength_change.clamp(-1.0, 1.0),
+            timestamp_ns: crate::ai_os::native::now_ns(),
+        });
+        self.total_consolidated += 1;
+        id
+    }
+
+    pub fn get_record(&self, id: u64) -> Option<&ConsolidationRecord> {
+        self.records.iter().find(|r| r.id == id)
+    }
+
+    pub fn record_count(&self) -> usize {
+        self.records.len()
+    }
+
+    pub fn avg_strength_change(&self) -> f32 {
+        if self.records.is_empty() {
+            0.0
+        } else {
+            self.records.iter().map(|r| r.strength_change).sum::<f32>() / self.records.len() as f32
+        }
+    }
+}
+
+// =====================================================================================
+// 梦境分析 (DreamAnalysis)
+// =====================================================================================
+
+/// 分析维度。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AnalysisDimension {
+    Emotional,    // 情感维度
+    Symbolic,     // 象征维度
+    Narrative,    // 叙事维度
+    Cognitive,    // 认知维度
+}
+
+/// 梦境分析结果。
+#[derive(Clone, Debug)]
+pub struct DreamAnalysis {
+    pub id: u64,
+    pub dream_id: u64,
+    pub dimensions: BTreeMap<AnalysisDimension, f32>,
+    pub insights: Vec<String>,
+    pub created_at: u128,
+}
+
+/// 梦境分析器：分析梦境内容和意义。
+pub struct DreamAnalyzer {
+    pub analyses: BTreeMap<u64, DreamAnalysis>,
+    pub next_id: u64,
+}
+
+impl DreamAnalyzer {
+    pub fn new() -> Self {
+        Self {
+            analyses: BTreeMap::new(),
+            next_id: 1,
+        }
+    }
+
+    pub fn analyze(&mut self, dream_id: u64, dimensions: BTreeMap<AnalysisDimension, f32>, insights: Vec<String>) -> u64 {
+        let id = self.next_id;
+        self.next_id += 1;
+        self.analyses.insert(id, DreamAnalysis {
+            id,
+            dream_id,
+            dimensions,
+            insights,
+            created_at: crate::ai_os::native::now_ns(),
+        });
+        id
+    }
+
+    pub fn get_analysis(&self, id: u64) -> Option<&DreamAnalysis> {
+        self.analyses.get(&id)
+    }
+
+    pub fn analysis_count(&self) -> usize {
+        self.analyses.len()
+    }
+}
+
+// =====================================================================================
+// 梦境扩展测试
+// =====================================================================================
+
+#[cfg(test)]
+mod advanced_tests {
+    use super::*;
+
+    #[test]
+    fn dream_narrative() {
+        let mut builder = DreamNarrativeBuilder::new();
+        let id = builder.create("飞行梦境".into());
+        assert_eq!(id, 1);
+        let elem_id = builder.add_element(id, "场景", "天空", 0.8).unwrap();
+        assert_eq!(elem_id, 1);
+        builder.add_element(id, "动作", "飞翔", 0.9).unwrap();
+        builder.connect_elements(id, 1, 2).unwrap();
+        let coherence = builder.compute_coherence(id);
+        assert!(coherence >= 0.0);
+        assert_eq!(builder.narrative_count(), 1);
+    }
+
+    #[test]
+    fn creativity_assessment() {
+        let mut assessor = CreativityAssessor::new();
+        let mut dims = BTreeMap::new();
+        dims.insert(CreativityDimension::Novelty, 0.8);
+        dims.insert(CreativityDimension::Usefulness, 0.6);
+        dims.insert(CreativityDimension::Surprise, 0.7);
+        let id = assessor.assess(dims);
+        assert_eq!(id, 1);
+        let assessment = assessor.get_assessment(id).unwrap();
+        assert!(assessment.overall_score > 0.5);
+        assert_eq!(assessor.assessment_count(), 1);
+        assert!(assessor.avg_creativity() > 0.5);
+    }
+
+    #[test]
+    fn memory_consolidator() {
+        let mut consolidator = MemoryConsolidator::new();
+        let id = consolidator.consolidate(1, ConsolidationType::Synaptic, 0.3).unwrap();
+        assert_eq!(id, 1);
+        let record = consolidator.get_record(id).unwrap();
+        assert_eq!(record.source_memory_id, 1);
+        assert!((record.strength_change - 0.3).abs() < 1e-6);
+        assert_eq!(consolidator.record_count(), 1);
+        assert_eq!(consolidator.total_consolidated, 1);
+    }
+
+    #[test]
+    fn dream_analyzer() {
+        let mut analyzer = DreamAnalyzer::new();
+        let mut dims = BTreeMap::new();
+        dims.insert(AnalysisDimension::Emotional, 0.7);
+        dims.insert(AnalysisDimension::Symbolic, 0.5);
+        let id = analyzer.analyze(1, dims, vec!["恐惧反映现实压力".into()]);
+        assert_eq!(id, 1);
+        let analysis = analyzer.get_analysis(id).unwrap();
+        assert_eq!(analysis.insights.len(), 1);
+        assert_eq!(analyzer.analysis_count(), 1);
+    }
+
+    #[test]
+    fn dream_element_types() {
+        // 测试 DreamStage 枚举
+        assert_eq!(DreamStage::N1 as u32, 0);
+        assert_eq!(DreamStage::Wake as u32, 4);
+    }
+
+    #[test]
+    fn creativity_dimensions() {
+        assert_eq!(CreativityDimension::Novelty as u32, 0);
+        assert_eq!(CreativityDimension::Elegance as u32, 3);
+    }
+
+    #[test]
+    fn consolidation_types() {
+        assert_eq!(ConsolidationType::Synaptic as u32, 0);
+        assert_eq!(ConsolidationType::Reconsolidation as u32, 2);
+    }
+
+    #[test]
+    fn analysis_dimensions() {
+        assert_eq!(AnalysisDimension::Emotional as u32, 0);
+        assert_eq!(AnalysisDimension::Cognitive as u32, 3);
+    }
+}

@@ -1015,3 +1015,374 @@ mod tests {
         assert_eq!(PolicyResult::Warn as u32, 2);
     }
 }
+
+// =====================================================================================
+// 伦理困境推理 (EthicalDilemmaReasoning)
+// =====================================================================================
+
+/// 困境类型。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DilemmaType {
+    Trolley,       // 电车难题
+    Privacy,       // 隐私困境
+    Autonomy,      // 自主权困境
+    Justice,       // 公正困境
+    Truth,         // 真实性困境
+}
+
+/// 伦理困境。
+#[derive(Clone, Debug)]
+pub struct EthicalDilemmaCase {
+    pub id: u64,
+    pub r#type: DilemmaType,
+    pub description: String,
+    pub options: Vec<(String, f32, f32)>, // (选项, 效用, 风险)
+    pub chosen: Option<usize>,
+    pub reasoning: Option<String>,
+}
+
+/// 伦理困境推理器：分析和解决伦理困境。
+pub struct EthicalDilemmaReasoner {
+    pub dilemmas: BTreeMap<u64, EthicalDilemmaCase>,
+    pub next_id: u64,
+    pub principles_weight: BTreeMap<EthicalPrincipleType, f32>,
+}
+
+impl EthicalDilemmaReasoner {
+    pub fn new() -> Self {
+        let mut weights = BTreeMap::new();
+        weights.insert(EthicalPrincipleType::Beneficence, 0.3);
+        weights.insert(EthicalPrincipleType::NonMaleficence, 0.3);
+        weights.insert(EthicalPrincipleType::Autonomy, 0.2);
+        weights.insert(EthicalPrincipleType::Justice, 0.2);
+        Self {
+            dilemmas: BTreeMap::new(),
+            next_id: 1,
+            principles_weight: weights,
+        }
+    }
+
+    pub fn create_dilemma(&mut self, r#type: DilemmaType, description: &str, options: Vec<(String, f32, f32)>) -> u64 {
+        let id = self.next_id;
+        self.next_id += 1;
+        self.dilemmas.insert(id, EthicalDilemmaCase {
+            id,
+            r#type,
+            description: description.to_string(),
+            options,
+            chosen: None,
+            reasoning: None,
+        });
+        id
+    }
+
+    pub fn resolve(&mut self, id: u64, option_idx: usize, reasoning: &str) -> Result<(), String> {
+        let dilemma = self.dilemmas.get_mut(&id).ok_or("困境不存在")?;
+        if option_idx >= dilemma.options.len() {
+            return Err("选项索引越界".into());
+        }
+        dilemma.chosen = Some(option_idx);
+        dilemma.reasoning = Some(reasoning.to_string());
+        Ok(())
+    }
+
+    pub fn evaluate_option(&self, id: u64, option_idx: usize) -> f32 {
+        let dilemma = self.dilemmas.get(&id);
+        if let Some(d) = dilemma {
+            if let Some((_, utility, risk)) = d.options.get(option_idx) {
+                let beneficence = *utility;
+                let non_maleficence = 1.0 - *risk;
+                let autonomy = 0.5; // 简化
+                let justice = 0.5;  // 简化
+                let score = self.principles_weight.get(&EthicalPrincipleType::Beneficence).copied().unwrap_or(0.0) * beneficence
+                    + self.principles_weight.get(&EthicalPrincipleType::NonMaleficence).copied().unwrap_or(0.0) * non_maleficence
+                    + self.principles_weight.get(&EthicalPrincipleType::Autonomy).copied().unwrap_or(0.0) * autonomy
+                    + self.principles_weight.get(&EthicalPrincipleType::Justice).copied().unwrap_or(0.0) * justice;
+                return score;
+            }
+        }
+        0.0
+    }
+
+    pub fn dilemma_count(&self) -> usize {
+        self.dilemmas.len()
+    }
+}
+
+// =====================================================================================
+// 价值冲突 (ValueConflict)
+// =====================================================================================
+
+/// 冲突解决方式。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ConflictResolution {
+    Prioritize,   // 优先级解决
+    Compromise,   // 妥协
+    Escalate,     // 升级处理
+}
+
+/// 价值冲突。
+#[derive(Clone, Debug)]
+pub struct ValueConflict {
+    pub id: u64,
+    pub value1: ValueDimension,
+    pub value2: ValueDimension,
+    pub context: String,
+    pub resolution: Option<ConflictResolution>,
+    pub resolved_value: Option<ValueDimension>,
+}
+
+/// 价值冲突解决器。
+pub struct ValueConflictResolver {
+    pub conflicts: BTreeMap<u64, ValueConflict>,
+    pub next_id: u64,
+}
+
+impl ValueConflictResolver {
+    pub fn new() -> Self {
+        Self {
+            conflicts: BTreeMap::new(),
+            next_id: 1,
+        }
+    }
+
+    pub fn create_conflict(&mut self, v1: ValueDimension, v2: ValueDimension, context: &str) -> u64 {
+        let id = self.next_id;
+        self.next_id += 1;
+        self.conflicts.insert(id, ValueConflict {
+            id,
+            value1: v1,
+            value2: v2,
+            context: context.to_string(),
+            resolution: None,
+            resolved_value: None,
+        });
+        id
+    }
+
+    pub fn resolve(&mut self, id: u64, resolution: ConflictResolution, chosen: ValueDimension) -> Result<(), String> {
+        let conflict = self.conflicts.get_mut(&id).ok_or("冲突不存在")?;
+        conflict.resolution = Some(resolution);
+        conflict.resolved_value = Some(chosen);
+        Ok(())
+    }
+
+    pub fn conflict_count(&self) -> usize {
+        self.conflicts.len()
+    }
+
+    pub fn resolved_count(&self) -> usize {
+        self.conflicts.values().filter(|c| c.resolution.is_some()).count()
+    }
+}
+
+// =====================================================================================
+// 伦理审计 (EthicalAudit)
+// =====================================================================================
+
+/// 审计事件类型。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AuditEventType {
+    Decision,     // 决策事件
+    Policy,       // 策略事件
+    Violation,    // 违规事件
+    Review,       // 审查事件
+}
+
+/// 审计事件。
+#[derive(Clone, Debug)]
+pub struct AuditEvent {
+    pub id: u64,
+    pub r#type: AuditEventType,
+    pub agent_id: u64,
+    pub description: String,
+    pub compliant: bool,
+    pub timestamp_ns: u128,
+}
+
+/// 伦理审计器：记录和审查伦理相关事件。
+pub struct EthicalAudit {
+    pub events: Vec<AuditEvent>,
+    pub next_id: u64,
+    pub violation_count: u64,
+}
+
+impl EthicalAudit {
+    pub fn new() -> Self {
+        Self {
+            events: Vec::new(),
+            next_id: 1,
+            violation_count: 0,
+        }
+    }
+
+    pub fn log(&mut self, r#type: AuditEventType, agent_id: u64, description: &str, compliant: bool) -> u64 {
+        let id = self.next_id;
+        self.next_id += 1;
+        if !compliant {
+            self.violation_count += 1;
+        }
+        self.events.push(AuditEvent {
+            id,
+            r#type,
+            agent_id,
+            description: description.to_string(),
+            compliant,
+            timestamp_ns: crate::ai_os::native::now_ns(),
+        });
+        id
+    }
+
+    pub fn get_violations(&self) -> Vec<&AuditEvent> {
+        self.events.iter().filter(|e| !e.compliant).collect()
+    }
+
+    pub fn event_count(&self) -> usize {
+        self.events.len()
+    }
+
+    pub fn compliance_rate(&self) -> f32 {
+        if self.events.is_empty() {
+            1.0
+        } else {
+            let compliant = self.events.iter().filter(|e| e.compliant).count();
+            compliant as f32 / self.events.len() as f32
+        }
+    }
+}
+
+// =====================================================================================
+// 合规检查 (ComplianceChecker)
+// =====================================================================================
+
+/// 合规标准。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ComplianceStandard {
+    GDPR,       // 数据保护
+    HIPAA,      // 健康信息
+    ISO27001,   // 信息安全
+    AIAct,      // AI 法案
+}
+
+/// 合规检查器：检查AI系统是否符合法规标准。
+pub struct ComplianceChecker {
+    pub standards: BTreeMap<ComplianceStandard, bool>,
+    pub checks: Vec<(ComplianceStandard, String, bool)>,
+}
+
+impl ComplianceChecker {
+    pub fn new() -> Self {
+        let mut standards = BTreeMap::new();
+        standards.insert(ComplianceStandard::GDPR, false);
+        standards.insert(ComplianceStandard::HIPAA, false);
+        standards.insert(ComplianceStandard::ISO27001, false);
+        standards.insert(ComplianceStandard::AIAct, false);
+        Self {
+            standards,
+            checks: Vec::new(),
+        }
+    }
+
+    pub fn check(&mut self, standard: ComplianceStandard, requirement: &str, passed: bool) {
+        self.checks.push((standard, requirement.to_string(), passed));
+        if passed {
+            self.standards.insert(standard, true);
+        }
+    }
+
+    pub fn is_compliant(&self, standard: ComplianceStandard) -> bool {
+        self.standards.get(&standard).copied().unwrap_or(false)
+    }
+
+    pub fn check_count(&self) -> usize {
+        self.checks.len()
+    }
+
+    pub fn passed_count(&self) -> usize {
+        self.checks.iter().filter(|(_, _, p)| *p).count()
+    }
+}
+
+// =====================================================================================
+// 伦理扩展测试
+// =====================================================================================
+
+#[cfg(test)]
+mod advanced_tests {
+    use super::*;
+
+    #[test]
+    fn dilemma_reasoner() {
+        let mut er = EthicalDilemmaReasoner::new();
+        let id = er.create_dilemma(
+            DilemmaType::Trolley,
+            "是否应该牺牲一人拯救五人？",
+            vec![("拯救五人".into(), 0.8, 0.2), ("不作为".into(), 0.2, 0.8)],
+        );
+        assert_eq!(id, 1);
+        er.resolve(id, 0, "效用最大化").unwrap();
+        let d = er.dilemmas.get(&id).unwrap();
+        assert_eq!(d.chosen, Some(0));
+        let score = er.evaluate_option(id, 0);
+        assert!(score > 0.0);
+    }
+
+    #[test]
+    fn value_conflict() {
+        let mut cr = ValueConflictResolver::new();
+        let id = cr.create_conflict(ValueDimension::Safety, ValueDimension::Autonomy, "医疗决策").unwrap();
+        assert_eq!(id, 1);
+        cr.resolve(id, ConflictResolution::Prioritize, ValueDimension::Safety).unwrap();
+        assert_eq!(cr.conflict_count(), 1);
+        assert_eq!(cr.resolved_count(), 1);
+    }
+
+    #[test]
+    fn ethical_audit() {
+        let mut audit = EthicalAudit::new();
+        audit.log(AuditEventType::Decision, 1, "决策A", true);
+        audit.log(AuditEventType::Decision, 2, "决策B", false);
+        audit.log(AuditEventType::Violation, 1, "违规C", false);
+        assert_eq!(audit.event_count(), 3);
+        assert_eq!(audit.violation_count, 2);
+        let violations = audit.get_violations();
+        assert_eq!(violations.len(), 2);
+        assert!((audit.compliance_rate() - 1.0 / 3.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn compliance_checker() {
+        let mut cc = ComplianceChecker::new();
+        cc.check(ComplianceStandard::GDPR, "数据删除权", true);
+        cc.check(ComplianceStandard::GDPR, "数据访问权", true);
+        cc.check(ComplianceStandard::AIAct, "透明度要求", false);
+        assert!(cc.is_compliant(ComplianceStandard::GDPR));
+        assert!(!cc.is_compliant(ComplianceStandard::AIAct));
+        assert_eq!(cc.check_count(), 3);
+        assert_eq!(cc.passed_count(), 2);
+    }
+
+    #[test]
+    fn dilemma_types() {
+        assert_eq!(DilemmaType::Trolley as u32, 0);
+        assert_eq!(DilemmaType::Truth as u32, 4);
+    }
+
+    #[test]
+    fn conflict_resolutions() {
+        assert_eq!(ConflictResolution::Prioritize as u32, 0);
+        assert_eq!(ConflictResolution::Escalate as u32, 2);
+    }
+
+    #[test]
+    fn audit_event_types() {
+        assert_eq!(AuditEventType::Decision as u32, 0);
+        assert_eq!(AuditEventType::Review as u32, 3);
+    }
+
+    #[test]
+    fn compliance_standards() {
+        assert_eq!(ComplianceStandard::GDPR as u32, 0);
+        assert_eq!(ComplianceStandard::AIAct as u32, 3);
+    }
+}

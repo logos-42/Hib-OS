@@ -926,3 +926,328 @@ mod tests {
         assert_eq!(CommandIntent::Unknown as u32, 12);
     }
 }
+
+// =====================================================================================
+// 命令历史搜索 (CommandHistorySearch)
+// =====================================================================================
+
+/// 搜索结果。
+#[derive=Clone, Debug)]
+pub struct HistorySearchResult {
+    pub entry_id: u64,
+    pub command: String,
+    pub relevance_score: f32,
+}
+
+/// 命令历史搜索器：搜索历史命令。
+pub struct CommandHistorySearch {
+    pub history: Vec<String>,
+}
+
+impl CommandHistorySearch {
+    pub fn new() -> Self {
+        Self {
+            history: Vec::new(),
+        }
+    }
+
+    pub fn add(&mut self, command: &str) {
+        self.history.push(command.to_string());
+    }
+
+    pub fn search(&self, query: &str, limit: usize) -> Vec<HistorySearchResult> {
+        let mut results: Vec<HistorySearchResult> = self.history.iter().enumerate()
+            .filter_map(|(i, cmd)| {
+                let score = self.compute_relevance(query, cmd);
+                if score > 0.0 {
+                    Some(HistorySearchResult {
+                        entry_id: i as u64,
+                        command: cmd.clone(),
+                        relevance_score: score,
+                    })
+                } else {
+                    None
+                }
+            })
+            .collect();
+        results.sort_by(|a, b| b.relevance_score.partial_cmp(&a.relevance_score).unwrap_or(std::cmp::Ordering::Equal));
+        results.truncate(limit);
+        results
+    }
+
+    fn compute_relevance(&self, query: &str, command: &str) -> f32 {
+        if command.contains(query) {
+            1.0
+        } else {
+            let query_words: Vec<&str> = query.split_whitespace().collect();
+            let mut matches = 0;
+            for qw in &query_words {
+                if command.contains(qw) {
+                    matches += 1;
+                }
+            }
+            if matches > 0 {
+                matches as f32 / query_words.len() as f32 * 0.5
+            } else {
+                0.0
+            }
+        }
+    }
+
+    pub fn history_count(&self) -> usize {
+        self.history.len()
+    }
+}
+
+// =====================================================================================
+// 别名展开 (AliasExpansion)
+// =====================================================================================
+
+/// 别名展开器：展开命令别名。
+pub struct AliasExpander {
+    pub aliases: BTreeMap<String, String>,
+    pub expansion_count: u64,
+}
+
+impl AliasExpander {
+    pub fn new() -> Self {
+        Self {
+            aliases: BTreeMap::new(),
+            expansion_count: 0,
+        }
+    }
+
+    pub fn define(&mut self, alias: &str, command: &str) {
+        self.aliases.insert(alias.to_string(), command.to_string());
+    }
+
+    pub fn expand(&mut self, input: &str) -> String {
+        let words: Vec<&str> = input.split_whitespace().collect();
+        if words.is_empty() {
+            return input.to_string();
+        }
+        let first_word = words[0];
+        if let Some(expanded) = self.aliases.get(first_word) {
+            self.expansion_count += 1;
+            let rest: String = words[1..].iter().map(|w| w.to_string()).collect::<Vec<_>>().join(" ");
+            if rest.is_empty() {
+                expanded.clone()
+            } else {
+                format!("{} {}", expanded, rest)
+            }
+        } else {
+            input.to_string()
+        }
+    }
+
+    pub fn undefine(&mut self, alias: &str) -> bool {
+        self.aliases.remove(alias).is_some()
+    }
+
+    pub fn alias_count(&self) -> usize {
+        self.aliases.len()
+    }
+
+    pub fn expansion_count(&self) -> u64 {
+        self.expansion_count
+    }
+}
+
+// =====================================================================================
+// 脚本执行 (ScriptExecution)
+// =====================================================================================
+
+/// 脚本执行状态。
+#[derive=Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ScriptStatus {
+    Pending,      // 待处理
+    Running,      // 运行中
+    Completed,    // 完成
+    Failed,       // 失败
+}
+
+/// 脚本执行记录。
+#[derive=Clone, Debug)]
+pub struct ScriptExecutionRecord {
+    pub id: u64,
+    pub script_name: String,
+    pub status: ScriptStatus,
+    pub exit_code: Option<i32>,
+    pub output: String,
+    pub started_at: u128,
+    pub completed_at: Option<u128>,
+}
+
+/// 脚本执行器：执行 shell 脚本。
+pub struct ScriptExecutor {
+    pub scripts: BTreeMap<u64, ScriptExecutionRecord>,
+    pub next_id: u64,
+}
+
+impl ScriptExecutor {
+    pub fn new() -> Self {
+        Self {
+            scripts: BTreeMap::new(),
+            next_id: 1,
+        }
+    }
+
+    pub fn execute(&mut self, script_name: &str, output: &str) -> u64 {
+        let id = self.next_id;
+        self.next_id += 1;
+        let exit_code = if output.contains("error") || output.contains("fail") {
+            Some(1)
+        } else {
+            Some(0)
+        };
+        let status = if exit_code == Some(0) {
+            ScriptStatus::Completed
+        } else {
+            ScriptStatus::Failed
+        };
+        self.scripts.insert(id, ScriptExecutionRecord {
+            id,
+            script_name: script_name.to_string(),
+            status,
+            exit_code,
+            output: output.to_string(),
+            started_at: crate::ai_os::native::now_ns(),
+            completed_at: Some(crate::ai_os::native::now_ns()),
+        });
+        id
+    }
+
+    pub fn get_record(&self, id: u64) -> Option<&ScriptExecutionRecord> {
+        self.scripts.get(&id)
+    }
+
+    pub fn script_count(&self) -> usize {
+        self.scripts.len()
+    }
+
+    pub fn success_count(&self) -> usize {
+        self.scripts.values().filter(|s| s.status == ScriptStatus::Completed).count()
+    }
+}
+
+// =====================================================================================
+// 环境变量模板 (EnvironmentTemplate)
+// =====================================================================================
+
+/// 环境变量模板。
+#[derive=Clone, Debug)]
+pub struct EnvironmentTemplate {
+    pub name: String,
+    pub variables: BTreeMap<String, String>,
+    pub description: String,
+}
+
+/// 环境变量模板管理器：管理环境变量模板。
+pub struct EnvironmentTemplateManager {
+    pub templates: BTreeMap<String, EnvironmentTemplate>,
+}
+
+impl EnvironmentTemplateManager {
+    pub fn new() -> Self {
+        Self {
+            templates: BTreeMap::new(),
+        }
+    }
+
+    pub fn create(&mut self, name: &str, description: &str, variables: &[(&str, &str)]) -> u64 {
+        let vars: BTreeMap<String, String> = variables.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
+        self.templates.insert(name.to_string(), EnvironmentTemplate {
+            name: name.to_string(),
+            variables: vars,
+            description: description.to_string(),
+        });
+        self.templates.len() as u64
+    }
+
+    pub fn apply(&mut self, template_name: &str, env: &mut BTreeMap<String, String>) -> bool {
+        if let Some(template) = self.templates.get(template_name) {
+            for (k, v) in &template.variables {
+                env.insert(k.clone(), v.clone());
+            }
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn template_count(&self) -> usize {
+        self.templates.len()
+    }
+}
+
+// =====================================================================================
+// Shell 扩展测试
+// =====================================================================================
+
+#[cfg(test)]
+mod advanced_tests {
+    use super::*;
+
+    #[test]
+    fn command_history_search() {
+        let mut chs = CommandHistorySearch::new();
+        chs.add("ls -la");
+        chs.add("ls -la /home");
+        chs.add("grep pattern file.txt");
+        chs.add("cat file.txt");
+        let results = chs.search("ls", 5);
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].command, "ls -la");
+        assert!(results[0].relevance_score > 0.0);
+        assert_eq!(chs.history_count(), 4);
+    }
+
+    #[test]
+    fn alias_expansion() {
+        let mut ae = AliasExpander::new();
+        ae.define("ll", "ls -la");
+        ae.define("g", "grep");
+        let expanded = ae.expand("ll /home");
+        assert_eq!(expanded, "ls -la /home");
+        let expanded = ae.expand("g pattern file");
+        assert_eq!(expanded, "grep pattern file");
+        let expanded = ae.expand("unknown cmd");
+        assert_eq!(expanded, "unknown cmd");
+        assert_eq!(ae.expansion_count(), 2);
+        ae.undefine("ll");
+        assert_eq!(ae.alias_count(), 1);
+    }
+
+    #[test]
+    fn script_execution() {
+        let mut se = ScriptExecutor::new();
+        let id = se.execute("backup.sh", "backup completed successfully");
+        assert_eq!(id, 1);
+        let record = se.get_record(id).unwrap();
+        assert_eq!(record.status, ScriptStatus::Completed);
+        assert_eq!(record.exit_code, Some(0));
+        let id2 = se.execute("bad.sh", "error: command not found");
+        let record2 = se.get_record(id2).unwrap();
+        assert_eq!(record2.status, ScriptStatus::Failed);
+        assert_eq!(se.script_count(), 2);
+        assert_eq!(se.success_count(), 1);
+    }
+
+    #[test]
+    fn environment_template() {
+        let mut tm = EnvironmentTemplateManager::new();
+        let id = tm.create("dev", "开发环境", &[("NODE_ENV", "development"), ("DEBUG", "true")]);
+        assert_eq!(id, 1);
+        let mut env = BTreeMap::new();
+        tm.apply("dev", &mut env);
+        assert_eq!(env.get("NODE_ENV"), Some(&"development".into()));
+        assert_eq!(env.get("DEBUG"), Some(&"true".into()));
+        assert_eq!(tm.template_count(), 1);
+    }
+
+    #[test]
+    fn script_statuses() {
+        assert_eq!(ScriptStatus::Pending as u32, 0);
+        assert_eq!(ScriptStatus::Failed as u32, 3);
+    }
+}

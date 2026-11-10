@@ -1248,3 +1248,513 @@ mod tests {
         assert_eq!(ConflictType::Value as u32, 3);
     }
 }
+
+// =====================================================================================
+// 群体智能 (SwarmIntelligence)
+// =====================================================================================
+
+/// 群体行为类型。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SwarmBehavior {
+    Foraging,    // 觅食
+    Clustering,  // 聚类
+    Migrating,   // 迁徙
+    Defending,   // 防御
+}
+
+/// 群体智能：多智能体协同搜索和优化。
+pub struct SwarmIntelligence {
+    pub behavior: SwarmBehavior,
+    pub agents: Vec<u64>,
+    pub pheromone_map: BTreeMap<String, f32>,
+    pub iteration: u64,
+    pub best_solution: Option<String>,
+    pub best_fitness: f32,
+}
+
+impl SwarmIntelligence {
+    pub fn new() -> Self {
+        Self {
+            behavior: SwarmBehavior::Foraging,
+            agents: Vec::new(),
+            pheromone_map: BTreeMap::new(),
+            iteration: 0,
+            best_solution: None,
+            best_fitness: 0.0,
+        }
+    }
+
+    pub fn set_behavior(&mut self, behavior: SwarmBehavior) {
+        self.behavior = behavior;
+    }
+
+    pub fn add_agent(&mut self, agent_id: u64) {
+        self.agents.push(agent_id);
+    }
+
+    pub fn update_pheromone(&mut self, path: &str, strength: f32) {
+        let current = self.pheromone_map.get(path).copied().unwrap_or(0.0);
+        self.pheromone_map.insert(path.to_string(), (current + strength).clamp(0.0, 1.0));
+    }
+
+    pub fn evaporate_pheromones(&mut self, rate: f32) {
+        let rate = rate.clamp(0.0, 1.0);
+        for v in self.pheromone_map.values_mut() {
+            *v *= 1.0 - rate;
+        }
+    }
+
+    pub fn iterate(&mut self) {
+        self.iteration += 1;
+        self.evaporate_pheromones(0.1);
+    }
+
+    pub fn record_solution(&mut self, solution: &str, fitness: f32) {
+        if fitness > self.best_fitness {
+            self.best_fitness = fitness;
+            self.best_solution = Some(solution.to_string());
+        }
+    }
+
+    pub fn agent_count(&self) -> usize {
+        self.agents.len()
+    }
+
+    pub fn pheromone_count(&self) -> usize {
+        self.pheromone_map.len()
+    }
+}
+
+// =====================================================================================
+// 领导力选举 (LeaderElection)
+// =====================================================================================
+
+/// 选举状态。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ElectionState {
+    Idle,
+    Candidate,
+    Leader,
+    Follower,
+}
+
+/// 领导力选举：选举群体领导者。
+pub struct LeaderElection {
+    pub agents: BTreeMap<u64, ElectionState>,
+    pub votes: BTreeMap<u64, u64>,    // candidate_id -> vote_count
+    pub current_leader: Option<u64>,
+    pub term: u64,
+    pub next_vote_id: u64,
+}
+
+impl LeaderElection {
+    pub fn new() -> Self {
+        Self {
+            agents: BTreeMap::new(),
+            votes: BTreeMap::new(),
+            current_leader: None,
+            term: 0,
+            next_vote_id: 1,
+        }
+    }
+
+    pub fn add_agent(&mut self, agent_id: u64) {
+        self.agents.insert(agent_id, ElectionState::Idle);
+    }
+
+    pub fn nominate(&mut self, agent_id: u64) -> Result<(), String> {
+        if self.agents.contains_key(&agent_id) {
+            self.agents.insert(agent_id, ElectionState::Candidate);
+            self.term += 1;
+            Ok(())
+        } else {
+            Err("代理不存在".into())
+        }
+    }
+
+    pub fn vote(&mut self, voter_id: u64, candidate_id: u64) -> Result<(), String> {
+        if !self.agents.contains_key(&voter_id) {
+            return Err("选民不存在".into());
+        }
+        if self.agents.get(&candidate_id) != Some(&ElectionState::Candidate) {
+            return Err("候选人无效".into());
+        }
+        *self.votes.entry(candidate_id).or_insert(0) += 1;
+        self.next_vote_id += 1;
+        Ok(())
+    }
+
+    pub fn finalize(&mut self) -> Option<u64> {
+        let mut best = None;
+        let mut max_votes = 0;
+        for (candidate, votes) in &self.votes {
+            if *votes > max_votes {
+                max_votes = *votes;
+                best = Some(*candidate);
+            }
+        }
+        if let Some(leader) = best {
+            self.current_leader = Some(leader);
+            for state in self.agents.values_mut() {
+                *state = if *leader == self.agents.keys().next().copied().unwrap_or(0) {
+                    ElectionState::Leader
+                } else {
+                    ElectionState::Follower
+                };
+            }
+        }
+        self.current_leader
+    }
+
+    pub fn leader(&self) -> Option<u64> {
+        self.current_leader
+    }
+
+    pub fn vote_count(&self) -> usize {
+        self.votes.len()
+    }
+}
+
+// =====================================================================================
+// 共识机制 (Consensus)
+// =====================================================================================
+
+/// 共识算法类型。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ConsensusAlgorithm {
+    Majority,   // 多数决
+    Unanimous,  // 一致同意
+    Weighted,   // 加权决策
+}
+
+/// 共识提案。
+#[derive(Clone, Debug)]
+pub struct ConsensusProposal {
+    pub id: u64,
+    pub content: String,
+    pub proposer: u64,
+    pub votes_for: u64,
+    pub votes_against: u64,
+    pub decided: bool,
+    pub result: bool,
+}
+
+/// 共识机制：群体决策。
+pub struct ConsensusMechanism {
+    pub algorithm: ConsensusAlgorithm,
+    pub proposals: BTreeMap<u64, ConsensusProposal>,
+    pub next_id: u64,
+    pub total_voters: u64,
+}
+
+impl ConsensusMechanism {
+    pub fn new() -> Self {
+        Self {
+            algorithm: ConsensusAlgorithm::Majority,
+            proposals: BTreeMap::new(),
+            next_id: 1,
+            total_voters: 1,
+        }
+    }
+
+    pub fn set_algorithm(&mut self, algorithm: ConsensusAlgorithm) {
+        self.algorithm = algorithm;
+    }
+
+    pub fn set_total_voters(&mut self, count: u64) {
+        self.total_voters = count;
+    }
+
+    pub fn propose(&mut self, proposer: u64, content: &str) -> u64 {
+        let id = self.next_id;
+        self.next_id += 1;
+        self.proposals.insert(id, ConsensusProposal {
+            id,
+            content: content.to_string(),
+            proposer,
+            votes_for: 0,
+            votes_against: 0,
+            decided: false,
+            result: false,
+        });
+        id
+    }
+
+    pub fn vote_for(&mut self, proposal_id: u64) -> Result<(), String> {
+        let proposal = self.proposals.get_mut(&proposal_id).ok_or("提案不存在")?;
+        proposal.votes_for += 1;
+        Ok(())
+    }
+
+    pub fn vote_against(&mut self, proposal_id: u64) -> Result<(), String> {
+        let proposal = self.proposals.get_mut(&proposal_id).ok_or("提案不存在")?;
+        proposal.votes_against += 1;
+        Ok(())
+    }
+
+    pub fn decide(&mut self, proposal_id: u64) -> Result<bool, String> {
+        let proposal = self.proposals.get_mut(&proposal_id).ok_or("提案不存在")?;
+        if proposal.decided {
+            return Ok(proposal.result);
+        }
+        let total = self.total_voters;
+        let result = match self.algorithm {
+            ConsensusAlgorithm::Majority => proposal.votes_for > total / 2,
+            ConsensusAlgorithm::Unanimous => proposal.votes_for == total && proposal.votes_against == 0,
+            ConsensusAlgorithm::Weighted => proposal.votes_for > proposal.votes_against,
+        };
+        proposal.decided = true;
+        proposal.result = result;
+        Ok(result)
+    }
+
+    pub fn proposal_count(&self) -> usize {
+        self.proposals.len()
+    }
+
+    pub fn decided_count(&self) -> usize {
+        self.proposals.values().filter(|p| p.decided).count()
+    }
+}
+
+// =====================================================================================
+// 声誉传播 (ReputationPropagation)
+// =====================================================================================
+
+/// 声誉变化原因。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RepChangeReason {
+    PositiveInteraction,
+    NegativeInteraction,
+    Endorsement,
+    Condemnation,
+}
+
+/// 声誉传播：声誉在社会网络中的传播。
+pub struct ReputationPropagation {
+    pub reputations: BTreeMap<u64, f32>,
+    pub trust_network: BTreeMap<(u64, u64), f32>, // (from, to) -> trust
+    pub history: Vec<(u64, f32, RepChangeReason, u128)>,
+}
+
+impl ReputationPropagation {
+    pub fn new() -> Self {
+        Self {
+            reputations: BTreeMap::new(),
+            trust_network: BTreeMap::new(),
+            history: Vec::new(),
+        }
+    }
+
+    pub fn set_reputation(&mut self, agent_id: u64, score: f32) {
+        self.reputations.insert(agent_id, score.clamp(0.0, 1.0));
+    }
+
+    pub fn set_trust(&mut self, from: u64, to: u64, trust: f32) {
+        self.trust_network.insert((from, to), trust.clamp(0.0, 1.0));
+    }
+
+    pub fn propagate(&mut self, source: u64, change: f32, reason: RepChangeReason) {
+        let current = self.reputations.get(&source).copied().unwrap_or(0.5);
+        let new_score = (current + change).clamp(0.0, 1.0);
+        self.reputations.insert(source, new_score);
+        self.history.push((source, change, reason, crate::ai_os::native::now_ns()));
+    }
+
+    pub fn get_reputation(&self, agent_id: u64) -> f32 {
+        self.reputations.get(&agent_id).copied().unwrap_or(0.5)
+    }
+
+    pub fn get_trust(&self, from: u64, to: u64) -> f32 {
+        self.trust_network.get(&(from, to)).copied().unwrap_or(0.0)
+    }
+
+    pub fn history_count(&self) -> usize {
+        self.history.len()
+    }
+}
+
+// =====================================================================================
+// 社会网络分析 (SocialNetworkAnalysis)
+// =====================================================================================
+
+/// 中心性类型。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CentralityType {
+    Degree,      // 度中心性
+    Betweenness, // 介数中心性
+    Closeness,   // 接近中心性
+}
+
+/// 社会网络分析：分析智能体社会结构。
+pub struct SocialNetworkAnalysis {
+    pub agents: BTreeSet<u64>,
+    pub edges: BTreeMap<(u64, u64), f32>,
+}
+
+impl SocialNetworkAnalysis {
+    pub fn new() -> Self {
+        Self {
+            agents: BTreeSet::new(),
+            edges: BTreeMap::new(),
+        }
+    }
+
+    pub fn add_agent(&mut self, agent_id: u64) {
+        self.agents.insert(agent_id);
+    }
+
+    pub fn add_edge(&mut self, from: u64, to: u64, weight: f32) {
+        self.agents.insert(from);
+        self.agents.insert(to);
+        self.edges.insert((from, to), weight.clamp(0.0, 1.0));
+    }
+
+    pub fn degree_centrality(&self, agent_id: u64) -> f32 {
+        let degree = self.edges.iter().filter(|((a, b), _)| *a == agent_id || *b == agent_id).count();
+        let max_degree = self.agents.len().saturating_sub(1);
+        if max_degree == 0 {
+            0.0
+        } else {
+            degree as f32 / max_degree as f32
+        }
+    }
+
+    pub fn edge_weight(&self, from: u64, to: u64) -> f32 {
+        self.edges.get(&(from, to)).copied().unwrap_or(0.0)
+    }
+
+    pub fn agent_count(&self) -> usize {
+        self.agents.len()
+    }
+
+    pub fn edge_count(&self) -> usize {
+        self.edges.len()
+    }
+}
+
+// =====================================================================================
+// 社会扩展测试
+// =====================================================================================
+
+#[cfg(test)]
+mod advanced_tests {
+    use super::*;
+
+    #[test]
+    fn swarm_intelligence() {
+        let mut swarm = SwarmIntelligence::new();
+        swarm.set_behavior(SwarmBehavior::Foraging);
+        swarm.add_agent(1);
+        swarm.add_agent(2);
+        swarm.add_agent(3);
+        assert_eq!(swarm.agent_count(), 3);
+        swarm.update_pheromone("path_a", 0.5);
+        swarm.update_pheromone("path_b", 0.3);
+        assert_eq!(swarm.pheromone_count(), 2);
+        swarm.iterate();
+        assert_eq!(swarm.iteration, 1);
+        swarm.record_solution("solution_1", 0.85);
+        assert_eq!(swarm.best_fitness, 0.85);
+        assert_eq!(swarm.best_solution, Some("solution_1".to_string()));
+    }
+
+    #[test]
+    fn leader_election() {
+        let mut le = LeaderElection::new();
+        le.add_agent(1);
+        le.add_agent(2);
+        le.add_agent(3);
+        le.nominate(1).unwrap();
+        le.nominate(2).unwrap();
+        le.vote(1, 1).unwrap();
+        le.vote(2, 2).unwrap();
+        le.vote(3, 2).unwrap();
+        let leader = le.finalize().unwrap();
+        assert_eq!(leader, 2);
+        assert_eq!(le.leader(), Some(2));
+        assert_eq!(le.vote_count(), 2);
+    }
+
+    #[test]
+    fn consensus_mechanism() {
+        let mut cm = ConsensusMechanism::new();
+        cm.set_algorithm(ConsensusAlgorithm::Majority);
+        cm.set_total_voters(3);
+        let pid = cm.propose(1, "提案A").unwrap();
+        assert_eq!(pid, 1);
+        cm.vote_for(pid).unwrap();
+        cm.vote_for(pid).unwrap();
+        let result = cm.decide(pid).unwrap();
+        assert!(result);
+        assert_eq!(cm.proposal_count(), 1);
+        assert_eq!(cm.decided_count(), 1);
+    }
+
+    #[test]
+    fn consensus_unanimous() {
+        let mut cm = ConsensusMechanism::new();
+        cm.set_algorithm(ConsensusAlgorithm::Unanimous);
+        cm.set_total_voters(2);
+        let pid = cm.propose(1, "提案B").unwrap();
+        cm.vote_for(pid).unwrap();
+        let result = cm.decide(pid).unwrap();
+        assert!(!result);
+    }
+
+    #[test]
+    fn reputation_propagation() {
+        let mut rp = ReputationPropagation::new();
+        rp.set_reputation(1, 0.5);
+        rp.set_trust(1, 2, 0.8);
+        rp.propagate(1, 0.2, RepChangeReason::PositiveInteraction);
+        assert!((rp.get_reputation(1) - 0.7).abs() < 1e-6);
+        assert!((rp.get_trust(1, 2) - 0.8).abs() < 1e-6);
+        assert_eq!(rp.history_count(), 1);
+    }
+
+    #[test]
+    fn social_network_analysis() {
+        let mut sna = SocialNetworkAnalysis::new();
+        sna.add_agent(1);
+        sna.add_agent(2);
+        sna.add_agent(3);
+        sna.add_edge(1, 2, 0.8);
+        sna.add_edge(2, 3, 0.6);
+        assert_eq!(sna.agent_count(), 3);
+        assert_eq!(sna.edge_count(), 2);
+        let centrality = sna.degree_centrality(2);
+        assert!((centrality - 1.0).abs() < 1e-6);
+        assert!((sna.edge_weight(1, 2) - 0.8).abs() < 1e-6);
+    }
+
+    #[test]
+    fn swarm_behaviors() {
+        assert_eq!(SwarmBehavior::Foraging as u32, 0);
+        assert_eq!(SwarmBehavior::Defending as u32, 3);
+    }
+
+    #[test]
+    fn election_states() {
+        assert_eq!(ElectionState::Idle as u32, 0);
+        assert_eq!(ElectionState::Leader as u32, 3);
+    }
+
+    #[test]
+    fn consensus_algorithms() {
+        assert_eq!(ConsensusAlgorithm::Majority as u32, 0);
+        assert_eq!(ConsensusAlgorithm::Weighted as u32, 2);
+    }
+
+    #[test]
+    fn rep_change_reasons() {
+        assert_eq!(RepChangeReason::PositiveInteraction as u32, 0);
+        assert_eq!(RepChangeReason::Condemnation as u32, 3);
+    }
+
+    #[test]
+    fn centrality_types() {
+        assert_eq!(CentralityType::Degree as u32, 0);
+        assert_eq!(CentralityType::Closeness as u32, 2);
+    }
+}

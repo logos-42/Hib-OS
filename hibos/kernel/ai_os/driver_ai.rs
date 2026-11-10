@@ -1159,3 +1159,365 @@ mod tests {
         assert_eq!(HotPlugEventType::Remove as u32, 1);
     }
 }
+
+// =====================================================================================
+// 设备电源管理 (DevicePowerManagement)
+// =====================================================================================
+
+/// 电源状态。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PowerState {
+    On,         // 开启
+    Sleep,      // 休眠
+    Standby,    // 待机
+    Off,        // 关闭
+}
+
+/// 设备电源状态。
+#[derive(Clone, Debug)]
+pub struct DevicePowerState {
+    pub device_id: u64,
+    pub state: PowerState,
+    pub power_watts: f32,
+    pub last_transition: u128,
+}
+
+/// 设备电源管理器：管理设备电源状态。
+pub struct DevicePowerManager {
+    pub states: BTreeMap<u64, DevicePowerState>,
+    pub total_power_watts: f32,
+}
+
+impl DevicePowerManager {
+    pub fn new() -> Self {
+        Self {
+            states: BTreeMap::new(),
+            total_power_watts: 0.0,
+        }
+    }
+
+    pub fn set_power(&mut self, device_id: u64, state: PowerState, power_watts: f32) {
+        let old_state = self.states.get(&device_id);
+        let old_power = old_state.map(|s| s.power_watts).unwrap_or(0.0);
+        self.total_power_watts = self.total_power_watts - old_power + power_watts;
+        self.states.insert(device_id, DevicePowerState {
+            device_id,
+            state,
+            power_watts,
+            last_transition: crate::ai_os::native::now_ns(),
+        });
+    }
+
+    pub fn get_power(&self, device_id: u64) -> Option<&DevicePowerState> {
+        self.states.get(&device_id)
+    }
+
+    pub fn total_power(&self) -> f32 {
+        self.total_power_watts
+    }
+
+    pub fn device_count(&self) -> usize {
+        self.states.len()
+    }
+}
+
+// =====================================================================================
+// 驱动签名验证 (DriverSignatureVerification)
+// =====================================================================================
+
+/// 签名算法。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SignatureAlgorithm {
+    Ed25519,
+    ECDsaP256,
+    Rsa4096,
+}
+
+/// 签名记录。
+#[derive(Clone, Debug)]
+pub struct DriverSignature {
+    pub driver_id: u64,
+    pub algorithm: SignatureAlgorithm,
+    pub signature: Vec<u8>,
+    pub signer: String,
+    pub valid_until: u128,
+    pub verified: bool,
+}
+
+/// 驱动签名验证器：验证驱动程序签名。
+pub struct DriverSignatureVerifier {
+    pub signatures: BTreeMap<u64, DriverSignature>,
+    pub trusted_signers: BTreeSet<String>,
+    pub next_id: u64,
+}
+
+impl DriverSignatureVerifier {
+    pub fn new() -> Self {
+        Self {
+            signatures: BTreeMap::new(),
+            trusted_signers: BTreeSet::new(),
+            next_id: 1,
+        }
+    }
+
+    pub fn add_trusted_signer(&mut self, signer: &str) {
+        self.trusted_signers.insert(signer.to_string());
+    }
+
+    pub fn sign(&mut self, driver_id: u64, algorithm: SignatureAlgorithm, signer: &str, signature: Vec<u8>, valid_until: u128) -> u64 {
+        let id = self.next_id;
+        self.next_id += 1;
+        let verified = self.trusted_signers.contains(signer);
+        self.signatures.insert(id, DriverSignature {
+            driver_id,
+            algorithm,
+            signature,
+            signer: signer.to_string(),
+            valid_until,
+            verified,
+        });
+        id
+    }
+
+    pub fn verify(&self, driver_id: u64) -> Option<bool> {
+        self.signatures.values()
+            .find(|s| s.driver_id == driver_id)
+            .map(|s| s.verified)
+    }
+
+    pub fn is_trusted(&self, signer: &str) -> bool {
+        self.trusted_signers.contains(signer)
+    }
+
+    pub fn signature_count(&self) -> usize {
+        self.signatures.len()
+    }
+}
+
+// =====================================================================================
+// 设备健康监控 (DeviceHealthMonitor)
+// =====================================================================================
+
+/// 健康状态。
+#[derive=Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HealthStatus {
+    Healthy,      // 健康
+    Warning,      // 警告
+    Critical,     // 危急
+    Failed,       // 失败
+}
+
+/// 设备健康记录。
+#[derive=Clone, Debug)]
+pub struct DeviceHealthRecord {
+    pub device_id: u64,
+    pub status: HealthStatus,
+    pub temperature_c: f32,
+    pub error_count: u64,
+    pub timestamp_ns: u128,
+}
+
+/// 设备健康监控器：监控设备健康状态。
+pub struct DeviceHealthMonitor {
+    pub records: BTreeMap<u64, DeviceHealthRecord>,
+    pub alert_threshold: f32,
+}
+
+impl DeviceHealthMonitor {
+    pub fn new() -> Self {
+        Self {
+            records: BTreeMap::new(),
+            alert_threshold: 80.0, // 摄氏度
+        }
+    }
+
+    pub fn update(&mut self, device_id: u64, status: HealthStatus, temperature_c: f32, error_count: u64) {
+        self.records.insert(device_id, DeviceHealthRecord {
+            device_id,
+            status,
+            temperature_c,
+            error_count,
+            timestamp_ns: crate::ai_os::native::now_ns(),
+        });
+    }
+
+    pub fn get_health(&self, device_id: u64) -> Option<&DeviceHealthRecord> {
+        self.records.get(&device_id)
+    }
+
+    pub fn needs_attention(&self) -> Vec<u64> {
+        self.records.iter()
+            .filter(|(_, r)| r.status == HealthStatus::Critical || r.status == HealthStatus::Failed || r.temperature_c > self.alert_threshold)
+            .map(|(id, _)| *id)
+            .collect()
+    }
+
+    pub fn record_count(&self) -> usize {
+        self.records.len()
+    }
+}
+
+// =====================================================================================
+// 固件更新 (FirmwareUpdate)
+// =====================================================================================
+
+/// 更新状态。
+#[derive=Clone, Copy, Debug, PartialEq, Eq)]
+pub enum UpdateStatus {
+    Pending,      // 待处理
+    Downloading,  // 下载中
+    Installing,   // 安装中
+    Completed,    // 完成
+    Failed,       // 失败
+}
+
+/// 固件更新记录。
+#[derive=Clone, Debug)]
+pub struct FirmwareUpdate {
+    pub id: u64,
+    pub device_id: u64,
+    pub version: String,
+    pub status: UpdateStatus,
+    pub progress: f32,   // 0~1
+    pub started_at: u128,
+    pub completed_at: Option<u128>,
+}
+
+/// 固件更新管理器：管理设备固件更新。
+pub struct FirmwareUpdateManager {
+    pub updates: BTreeMap<u64, FirmwareUpdate>,
+    pub next_id: u64,
+}
+
+impl FirmwareUpdateManager {
+    pub fn new() -> Self {
+        Self {
+            updates: BTreeMap::new(),
+            next_id: 1,
+        }
+    }
+
+    pub fn schedule(&mut self, device_id: u64, version: &str) -> u64 {
+        let id = self.next_id;
+        self.next_id += 1;
+        self.updates.insert(id, FirmwareUpdate {
+            id,
+            device_id,
+            version: version.to_string(),
+            status: UpdateStatus::Pending,
+            progress: 0.0,
+            started_at: crate::ai_os::native::now_ns(),
+            completed_at: None,
+        });
+        id
+    }
+
+    pub fn update_progress(&mut self, id: u64, progress: f32, status: UpdateStatus) -> bool {
+        if let Some(update) = self.updates.get_mut(&id) {
+            update.progress = progress.clamp(0.0, 1.0);
+            update.status = status;
+            if status == UpdateStatus::Completed || status == UpdateStatus::Failed {
+                update.completed_at = Some(crate::ai_os::native::now_ns());
+            }
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn get_update(&self, id: u64) -> Option<&FirmwareUpdate> {
+        self.updates.get(&id)
+    }
+
+    pub fn update_count(&self) -> usize {
+        self.updates.len()
+    }
+
+    pub fn completed_count(&self) -> usize {
+        self.updates.values().filter(|u| u.status == UpdateStatus::Completed).count()
+    }
+}
+
+// =====================================================================================
+// 驱动扩展测试
+// =====================================================================================
+
+#[cfg(test)]
+mod advanced_tests {
+    use super::*;
+
+    #[test]
+    fn device_power_management() {
+        let mut pm = DevicePowerManager::new();
+        pm.set_power(1, PowerState::On, 10.0);
+        pm.set_power(2, PowerState::Sleep, 1.0);
+        assert_eq!(pm.device_count(), 2);
+        assert!((pm.total_power() - 11.0).abs() < 1e-6);
+        let state = pm.get_power(1).unwrap();
+        assert_eq!(state.state, PowerState::On);
+    }
+
+    #[test]
+    fn driver_signature() {
+        let mut sv = DriverSignatureVerifier::new();
+        sv.add_trusted_signer("vendor_a");
+        let id = sv.sign(1, SignatureAlgorithm::Ed25519, "vendor_a", vec![1, 2, 3], 9999999999);
+        assert_eq!(id, 1);
+        assert!(sv.is_trusted("vendor_a"));
+        assert!(!sv.is_trusted("vendor_b"));
+        let verified = sv.verify(1).unwrap();
+        assert!(verified);
+        assert_eq!(sv.signature_count(), 1);
+    }
+
+    #[test]
+    fn device_health_monitor() {
+        let mut hm = DeviceHealthMonitor::new();
+        hm.update(1, HealthStatus::Healthy, 45.0, 0);
+        hm.update(2, HealthStatus::Critical, 95.0, 10);
+        assert_eq!(hm.record_count(), 2);
+        let health = hm.get_health(1).unwrap();
+        assert_eq!(health.status, HealthStatus::Healthy);
+        let attention = hm.needs_attention();
+        assert!(attention.contains(&2));
+        assert!(!attention.contains(&1));
+    }
+
+    #[test]
+    fn firmware_update_manager() {
+        let mut fum = FirmwareUpdateManager::new();
+        let id = fum.schedule(1, "v2.0.0".into());
+        assert_eq!(id, 1);
+        fum.update_progress(id, 0.5, UpdateStatus::Installing).unwrap();
+        fum.update_progress(id, 1.0, UpdateStatus::Completed).unwrap();
+        let update = fum.get_update(id).unwrap();
+        assert_eq!(update.status, UpdateStatus::Completed);
+        assert!((update.progress - 1.0).abs() < 1e-6);
+        assert_eq!(fum.update_count(), 1);
+        assert_eq!(fum.completed_count(), 1);
+    }
+
+    #[test]
+    fn power_states() {
+        assert_eq!(PowerState::On as u32, 0);
+        assert_eq!(PowerState::Off as u32, 3);
+    }
+
+    #[test]
+    fn signature_algorithms() {
+        assert_eq!(SignatureAlgorithm::Ed25519 as u32, 0);
+        assert_eq!(SignatureAlgorithm::Rsa4096 as u32, 2);
+    }
+
+    #[test]
+    fn health_statuses() {
+        assert_eq!(HealthStatus::Healthy as u32, 0);
+        assert_eq!(HealthStatus::Failed as u32, 3);
+    }
+
+    #[test]
+    fn update_statuses() {
+        assert_eq!(UpdateStatus::Pending as u32, 0);
+        assert_eq!(UpdateStatus::Failed as u32, 4);
+    }
+}

@@ -1177,3 +1177,338 @@ mod tests {
         let _ = ActionSchedulePolicy::Priority;
     }
 }
+
+// =====================================================================================
+// 时间序列预测 (TimeSeriesPrediction)
+// =====================================================================================
+
+/// 预测模型类型。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PredictionModelType {
+    MovingAverage,    // 移动平均
+    Exponential,      // 指数平滑
+    Linear,           // 线性回归
+    Seasonal,         // 季节性分解
+}
+
+/// 时间序列点。
+#[derive(Clone, Debug)]
+pub struct TimeSeriesPoint {
+    pub timestamp_ns: u128,
+    pub value: f32,
+}
+
+/// 时间序列预测器：预测未来时间序列值。
+pub struct TimeSeriesPredictor {
+    pub model_type: PredictionModelType,
+    pub window_size: usize,
+    pub alpha: f32,           // 指数平滑系数
+    pub history: Vec<TimeSeriesPoint>,
+    pub max_history: usize,
+}
+
+impl TimeSeriesPredictor {
+    pub fn new(model_type: PredictionModelType, window_size: usize) -> Self {
+        Self {
+            model_type,
+            window_size,
+            alpha: 0.3,
+            history: Vec::new(),
+            max_history: 10000,
+        }
+    }
+
+    pub fn add_point(&mut self, timestamp_ns: u128, value: f32) {
+        self.history.push(TimeSeriesPoint { timestamp_ns, value });
+        if self.history.len() > self.max_history {
+            self.history.remove(0);
+        }
+    }
+
+    pub fn predict(&self, steps_ahead: usize) -> Vec<f32> {
+        if self.history.is_empty() {
+            return Vec::new();
+        }
+        let window: Vec<&TimeSeriesPoint> = self.history.iter().rev().take(self.window_size.min(self.history.len())).collect();
+        match self.model_type {
+            PredictionModelType::MovingAverage => {
+                let avg: f32 = window.iter().map(|p| p.value).sum::<f32>() / window.len() as f32;
+                vec![avg; steps_ahead]
+            }
+            PredictionModelType::Exponential => {
+                let mut smoothed = window[0].value;
+                for p in window.iter().skip(1) {
+                    smoothed = self.alpha * p.value + (1.0 - self.alpha) * smoothed;
+                }
+                vec![smoothed; steps_ahead]
+            }
+            PredictionModelType::Linear => {
+                if window.len() < 2 {
+                    return vec![window[0].value; steps_ahead];
+                }
+                let n = window.len() as f32;
+                let sum_x: f32 = (0..window.len()).map(|i| i as f32).sum();
+                let sum_y: f32 = window.iter().map(|p| p.value).sum();
+                let sum_xy: f32 = window.iter().enumerate().map(|(i, p)| i as f32 * p.value).sum();
+                let sum_x2: f32 = (0..window.len()).map(|i| (i as f32) * (i as f32)).sum();
+                let slope = (n * sum_xy - sum_x * sum_y) / (n * sum_x2 - sum_x * sum_x);
+                let intercept = (sum_y - slope * sum_x) / n;
+                (0..steps_ahead).map(|i| slope * (window.len() as f32 + i as f32) + intercept).collect()
+            }
+            PredictionModelType::Seasonal => {
+                let avg: f32 = window.iter().map(|p| p.value).sum::<f32>() / window.len() as f32;
+                vec![avg; steps_ahead]
+            }
+        }
+    }
+
+    pub fn history_count(&self) -> usize {
+        self.history.len()
+    }
+}
+
+// =====================================================================================
+// 周期检测 (PeriodDetection)
+// =====================================================================================
+
+/// 周期类型。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PeriodType {
+    Circadian,   // 日夜律
+    Ultradian,   // 超日夜律
+    Infradian,   // 次日夜律
+    Custom,      // 自定义
+}
+
+/// 周期检测结果。
+#[derive(Clone, Debug)]
+pub struct PeriodResult {
+    pub period_type: PeriodType,
+    pub period_ns: u128,
+    pub confidence: f32,
+    pub peaks: Vec<u128>,
+}
+
+/// 周期检测器：检测时间序列中的周期性模式。
+pub struct PeriodDetector {
+    pub min_period_ns: u128,
+    pub max_period_ns: u128,
+    pub detected_periods: Vec<PeriodResult>,
+}
+
+impl PeriodDetector {
+    pub fn new() -> Self {
+        Self {
+            min_period_ns: 1_000_000_000,   // 1 秒
+            max_period_ns: 24 * 60 * 60 * 1_000_000_000, // 24 小时
+            detected_periods: Vec::new(),
+        }
+    }
+
+    pub fn set_range(&mut self, min_ns: u128, max_ns: u128) {
+        self.min_period_ns = min_ns;
+        self.max_period_ns = max_ns;
+    }
+
+    pub fn detect(&mut self, points: &[TimeSeriesPoint]) -> Vec<PeriodResult> {
+        if points.len() < 4 {
+            return Vec::new();
+        }
+        let mut results = Vec::new();
+        // 简化：检测峰值间隔作为周期
+        let mut peaks: Vec<u128> = Vec::new();
+        for i in 1..points.len() - 1 {
+            if points[i].value > points[i - 1].value && points[i].value > points[i + 1].value {
+                peaks.push(points[i].timestamp_ns);
+            }
+        }
+        if peaks.len() >= 2 {
+            let intervals: Vec<u128> = peaks.windows(2).map(|w| w[1] - w[0]).collect();
+            let avg_interval: u128 = intervals.iter().sum::<u128>() / intervals.len() as u128;
+            if avg_interval >= self.min_period_ns && avg_interval <= self.max_period_ns {
+                let period_type = if avg_interval >= 20 * 60 * 60 * 1_000_000_000 {
+                    PeriodType::Circadian
+                } else if avg_interval >= 60 * 60 * 1_000_000_000 {
+                    PeriodType::Ultradian
+                } else {
+                    PeriodType::Infradian
+                };
+                let confidence = if intervals.len() >= 3 { 0.8 } else { 0.5 };
+                results.push(PeriodResult {
+                    period_type,
+                    period_ns: avg_interval,
+                    confidence,
+                    peaks,
+                });
+            }
+        }
+        self.detected_periods = results.clone();
+        results
+    }
+
+    pub fn detection_count(&self) -> usize {
+        self.detected_periods.len()
+    }
+}
+
+// =====================================================================================
+// 时间对齐 (TimeAlignment)
+// =====================================================================================
+
+/// 时间对齐模式。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AlignmentMode {
+    Nearest,    // 最近邻对齐
+    Interpolate,// 插值对齐
+    Extrapolate,// 外推对齐
+}
+
+/// 时间对齐器：对齐不同时间源的数据。
+pub struct TimeAligner {
+    pub mode: AlignmentMode,
+    pub max_tolerance_ns: u128,
+    pub alignment_count: u64,
+}
+
+impl TimeAligner {
+    pub fn new() -> Self {
+        Self {
+            mode: AlignmentMode::Nearest,
+            max_tolerance_ns: 100_000_000, // 100ms
+            alignment_count: 0,
+        }
+    }
+
+    pub fn set_mode(&mut self, mode: AlignmentMode) {
+        self.mode = mode;
+    }
+
+    pub fn align(&self, reference: u128, candidates: &[u128]) -> Option<u128> {
+        let mut best = None;
+        let mut best_diff = u128::MAX;
+        for &c in candidates {
+            let diff = if c > reference { c - reference } else { reference - c };
+            if diff <= self.max_tolerance_ns && diff < best_diff {
+                best_diff = diff;
+                best = Some(c);
+            }
+        }
+        best
+    }
+
+    pub fn align_batch(&self, references: &[u128], candidates: &[u128]) -> Vec<Option<u128>> {
+        references.iter().map(|&r| self.align(r, candidates)).collect()
+    }
+
+    pub fn count(&self) -> u64 {
+        self.alignment_count
+    }
+}
+
+// =====================================================================================
+// 时间扩展测试
+// =====================================================================================
+
+#[cfg(test)]
+mod advanced_tests {
+    use super::*;
+
+    #[test]
+    fn time_series_predictor() {
+        let mut tp = TimeSeriesPredictor::new(PredictionModelType::MovingAverage, 5);
+        for i in 0..10 {
+            tp.add_point(i as u128 * 1_000_000_000, i as f32);
+        }
+        let predictions = tp.predict(3);
+        assert_eq!(predictions.len(), 3);
+        assert!(predictions[0] > 4.0); // 移动平均应该在 4-5 之间
+        assert_eq!(tp.history_count(), 10);
+    }
+
+    #[test]
+    fn time_series_exponential() {
+        let mut tp = TimeSeriesPredictor::new(PredictionModelType::Exponential, 5);
+        for i in 0..5 {
+            tp.add_point(i as u128 * 1_000_000_000, i as f32 * 10.0);
+        }
+        let predictions = tp.predict(1);
+        assert_eq!(predictions.len(), 1);
+        assert!(predictions[0] > 0.0);
+    }
+
+    #[test]
+    fn time_series_linear() {
+        let mut tp = TimeSeriesPredictor::new(PredictionModelType::Linear, 5);
+        for i in 0..5 {
+            tp.add_point(i as u128 * 1_000_000_000, i as f32 * 2.0);
+        }
+        let predictions = tp.predict(2);
+        assert_eq!(predictions.len(), 2);
+        // 线性趋势应该继续上升
+        assert!(predictions[1] > predictions[0]);
+    }
+
+    #[test]
+    fn period_detection() {
+        let mut pd = PeriodDetector::new();
+        let points: Vec<TimeSeriesPoint> = (0..20).map(|i| {
+            TimeSeriesPoint {
+                timestamp_ns: i as u128 * 1_000_000_000,
+                value: if i % 4 == 0 { 1.0 } else { 0.0 },
+            }
+        }).collect();
+        let results = pd.detect(&points);
+        assert!(!results.is_empty());
+        assert_eq!(pd.detection_count(), results.len());
+    }
+
+    #[test]
+    fn period_detection_insufficient() {
+        let mut pd = PeriodDetector::new();
+        let points = vec![
+            TimeSeriesPoint { timestamp_ns: 0, value: 1.0 },
+            TimeSeriesPoint { timestamp_ns: 1_000_000_000, value: 0.0 },
+        ];
+        let results = pd.detect(&points);
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn time_aligner() {
+        let mut ta = TimeAligner::new();
+        ta.set_mode(AlignmentMode::Nearest);
+        let reference = 1_000_000_000;
+        let candidates = vec![500_000_000, 1_200_000_000, 2_000_000_000];
+        let aligned = ta.align(reference, &candidates);
+        assert_eq!(aligned, Some(1_200_000_000));
+    }
+
+    #[test]
+    fn time_aligner_batch() {
+        let ta = TimeAligner::new();
+        let references = vec![1_000_000_000, 2_000_000_000];
+        let candidates = vec![1_100_000_000, 2_100_000_000];
+        let aligned = ta.align_batch(&references, &candidates);
+        assert_eq!(aligned.len(), 2);
+        assert_eq!(aligned[0], Some(1_100_000_000));
+        assert_eq!(aligned[1], Some(2_100_000_000));
+    }
+
+    #[test]
+    fn prediction_model_types() {
+        assert_eq!(PredictionModelType::MovingAverage as u32, 0);
+        assert_eq!(PredictionModelType::Seasonal as u32, 3);
+    }
+
+    #[test]
+    fn period_types() {
+        assert_eq!(PeriodType::Circadian as u32, 0);
+        assert_eq!(PeriodType::Custom as u32, 3);
+    }
+
+    #[test]
+    fn alignment_modes() {
+        assert_eq!(AlignmentMode::Nearest as u32, 0);
+        assert_eq!(AlignmentMode::Extrapolate as u32, 2);
+    }
+}

@@ -973,3 +973,338 @@ mod tests {
         assert_eq!(FileEventType::SemanticChange as u32, 4);
     }
 }
+
+// =====================================================================================
+// 文件版本控制 (FileVersionControl)
+// =====================================================================================
+
+/// 文件版本。
+#[derive(Clone, Debug)]
+pub struct FileVersion {
+    pub version_id: u64,
+    pub ino: u64,
+    pub content_hash: String,
+    pub size: u64,
+    pub created_at: u128,
+    pub message: String,
+}
+
+/// 文件版本控制：Git 风格的文件版本管理。
+pub struct FileVersionControl {
+    pub versions: BTreeMap<u64, Vec<FileVersion>>, // ino -> versions
+    pub next_version_id: u64,
+    pub current_version: BTreeMap<u64, u64>, // ino -> current_version_id
+}
+
+impl FileVersionControl {
+    pub fn new() -> Self {
+        Self {
+            versions: BTreeMap::new(),
+            next_version_id: 1,
+            current_version: BTreeMap::new(),
+        }
+    }
+
+    pub fn commit(&mut self, ino: u64, content_hash: &str, size: u64, message: &str) -> u64 {
+        let version_id = self.next_version_id;
+        self.next_version_id += 1;
+        self.versions.entry(ino).or_default().push(FileVersion {
+            version_id,
+            ino,
+            content_hash: content_hash.to_string(),
+            size,
+            created_at: crate::ai_os::native::now_ns(),
+            message: message.to_string(),
+        });
+        self.current_version.insert(ino, version_id);
+        version_id
+    }
+
+    pub fn get_version(&self, ino: u64, version_id: u64) -> Option<&FileVersion> {
+        self.versions.get(&ino).and_then(|vs| vs.iter().find(|v| v.version_id == version_id))
+    }
+
+    pub fn get_current(&self, ino: u64) -> Option<&FileVersion> {
+        let vid = self.current_version.get(&ino)?;
+        self.versions.get(&ino).and_then(|vs| vs.iter().find(|v| v.version_id == *vid))
+    }
+
+    pub fn version_count(&self, ino: u64) -> usize {
+        self.versions.get(&ino).map(|vs| vs.len()).unwrap_or(0)
+    }
+
+    pub fn total_commits(&self) -> usize {
+        self.versions.values().map(|vs| vs.len()).sum()
+    }
+}
+
+// =====================================================================================
+// 访问控制 (AccessControl)
+// =====================================================================================
+
+/// 权限类型。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PermissionType {
+    Read,
+    Write,
+    Execute,
+    Admin,
+}
+
+/// 访问控制条目。
+#[derive(Clone, Debug)]
+pub struct AccessControlEntry {
+    pub agent_id: u64,
+    pub ino: u64,
+    pub permissions: BTreeSet<PermissionType>,
+    pub granted_at: u128,
+}
+
+/// 访问控制列表：文件级权限管理。
+pub struct AccessControlList {
+    pub entries: BTreeMap<(u64, u64), AccessControlEntry>, // (agent_id, ino) -> entry
+}
+
+impl AccessControlList {
+    pub fn new() -> Self {
+        Self {
+            entries: BTreeMap::new(),
+        }
+    }
+
+    pub fn grant(&mut self, agent_id: u64, ino: u64, permissions: &[PermissionType]) {
+        self.entries.insert((agent_id, ino), AccessControlEntry {
+            agent_id,
+            ino,
+            permissions: permissions.iter().copied().collect(),
+            granted_at: crate::ai_os::native::now_ns(),
+        });
+    }
+
+    pub fn check(&self, agent_id: u64, ino: u64, permission: PermissionType) -> bool {
+        self.entries.get(&(agent_id, ino))
+            .map(|e| e.permissions.contains(&permission))
+            .unwrap_or(false)
+    }
+
+    pub fn revoke(&mut self, agent_id: u64, ino: u64) -> bool {
+        self.entries.remove(&(agent_id, ino)).is_some()
+    }
+
+    pub fn entry_count(&self) -> usize {
+        self.entries.len()
+    }
+}
+
+// =====================================================================================
+// 语义搜索优化 (SemanticSearchOptimizer)
+// =====================================================================================
+
+/// 索引类型。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum IndexType {
+    Flat,       // 线性扫描
+    IVF,        // 倒排文件索引
+    PQ,         // 产品量化
+    HNSW,       // 分层小世界图
+}
+
+/// 语义搜索优化器：优化语义检索性能。
+pub struct SemanticSearchOptimizer {
+    pub index_type: IndexType,
+    pub index: BTreeMap<u64, Vec<f32>>,
+    pub query_count: u64,
+    pub avg_latency_ns: u128,
+}
+
+impl SemanticSearchOptimizer {
+    pub fn new() -> Self {
+        Self {
+            index_type: IndexType::Flat,
+            index: BTreeMap::new(),
+            query_count: 0,
+            avg_latency_ns: 0,
+        }
+    }
+
+    pub fn set_index_type(&mut self, index_type: IndexType) {
+        self.index_type = index_type;
+    }
+
+    pub fn add_vector(&mut self, id: u64, vector: Vec<f32>) {
+        self.index.insert(id, vector);
+    }
+
+    pub fn search(&mut self, query: &[f32], k: usize) -> Vec<(u64, f32)> {
+        let start = crate::ai_os::native::now_ns();
+        let mut results: Vec<(u64, f32)> = self.index.iter()
+            .map(|(id, v)| {
+                let dot: f32 = query.iter().zip(v.iter()).map(|(a, b)| a * b).sum();
+                let nq: f32 = query.iter().map(|x| x * x).sum::<f32>().sqrt();
+                let nv: f32 = v.iter().map(|x| x * x).sum::<f32>().sqrt();
+                let sim = if nq == 0.0 || nv == 0.0 { 0.0 } else { dot / (nq * nv) };
+                (*id, sim)
+            })
+            .collect();
+        results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        results.truncate(k);
+        let end = crate::ai_os::native::now_ns();
+        self.query_count += 1;
+        self.avg_latency_ns = (self.avg_latency_ns * (self.query_count - 1) + (end - start)) / self.query_count;
+        results
+    }
+
+    pub fn vector_count(&self) -> usize {
+        self.index.len()
+    }
+}
+
+// =====================================================================================
+// 文件元数据管理 (FileMetadataManager)
+// =====================================================================================
+
+/// 文件元数据。
+#[derive(Clone, Debug)]
+pub struct FileMetadata {
+    pub ino: u64,
+    pub name: String,
+    pub mime_type: String,
+    pub tags: BTreeSet<String>,
+    pub custom_fields: BTreeMap<String, String>,
+    pub updated_at: u128,
+}
+
+/// 文件元数据管理器。
+pub struct FileMetadataManager {
+    pub metadata: BTreeMap<u64, FileMetadata>,
+    pub next_id: u64,
+}
+
+impl FileMetadataManager {
+    pub fn new() -> Self {
+        Self {
+            metadata: BTreeMap::new(),
+            next_id: 1,
+        }
+    }
+
+    pub fn create(&mut self, ino: u64, name: &str, mime_type: &str) -> u64 {
+        let id = self.next_id;
+        self.next_id += 1;
+        self.metadata.insert(ino, FileMetadata {
+            ino,
+            name: name.to_string(),
+            mime_type: mime_type.to_string(),
+            tags: BTreeSet::new(),
+            custom_fields: BTreeMap::new(),
+            updated_at: crate::ai_os::native::now_ns(),
+        });
+        id
+    }
+
+    pub fn add_tag(&mut self, ino: u64, tag: &str) -> bool {
+        if let Some(meta) = self.metadata.get_mut(&ino) {
+            meta.tags.insert(tag.to_string());
+            meta.updated_at = crate::ai_os::native::now_ns();
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn set_custom_field(&mut self, ino: u64, key: &str, value: &str) -> bool {
+        if let Some(meta) = self.metadata.get_mut(&ino) {
+            meta.custom_fields.insert(key.to_string(), value.to_string());
+            meta.updated_at = crate::ai_os::native::now_ns();
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn get(&self, ino: u64) -> Option<&FileMetadata> {
+        self.metadata.get(&ino)
+    }
+
+    pub fn metadata_count(&self) -> usize {
+        self.metadata.len()
+    }
+}
+
+// =====================================================================================
+// 文件版本控制测试
+// =====================================================================================
+
+#[cfg(test)]
+mod advanced_tests {
+    use super::*;
+
+    #[test]
+    fn file_version_control() {
+        let mut fvc = FileVersionControl::new();
+        let vid1 = fvc.commit(1, "hash1", 100, "初始版本".into());
+        let vid2 = fvc.commit(1, "hash2", 200, "更新内容".into());
+        assert_eq!(vid1, 1);
+        assert_eq!(vid2, 2);
+        assert_eq!(fvc.version_count(1), 2);
+        let current = fvc.get_current(1).unwrap();
+        assert_eq!(current.version_id, 2);
+        let v1 = fvc.get_version(1, 1).unwrap();
+        assert_eq!(v1.content_hash, "hash1");
+        assert_eq!(fvc.total_commits(), 2);
+    }
+
+    #[test]
+    fn access_control() {
+        let mut acl = AccessControlList::new();
+        acl.grant(1, 10, &[PermissionType::Read, PermissionType::Write]);
+        assert!(acl.check(1, 10, PermissionType::Read));
+        assert!(acl.check(1, 10, PermissionType::Write));
+        assert!(!acl.check(1, 10, PermissionType::Execute));
+        assert!(!acl.check(2, 10, PermissionType::Read));
+        acl.revoke(1, 10);
+        assert!(!acl.check(1, 10, PermissionType::Read));
+        assert_eq!(acl.entry_count(), 0);
+    }
+
+    #[test]
+    fn semantic_search_optimizer() {
+        let mut so = SemanticSearchOptimizer::new();
+        so.set_index_type(IndexType::HNSW);
+        so.add_vector(1, vec![1.0, 0.0, 0.0]);
+        so.add_vector(2, vec![0.0, 1.0, 0.0]);
+        so.add_vector(3, vec![1.0, 0.1, 0.0]);
+        let results = so.search(&[1.0, 0.0, 0.0], 2);
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].0, 1);
+        assert_eq!(so.vector_count(), 3);
+        assert!(so.query_count > 0);
+    }
+
+    #[test]
+    fn file_metadata_manager() {
+        let mut mm = FileMetadataManager::new();
+        let id = mm.create(1, "document.pdf", "application/pdf");
+        assert_eq!(id, 1);
+        mm.add_tag(1, "important");
+        mm.add_tag(1, "work");
+        mm.set_custom_field(1, "author", "Alice");
+        let meta = mm.get(1).unwrap();
+        assert_eq!(meta.name, "document.pdf");
+        assert!(meta.tags.contains("important"));
+        assert_eq!(meta.custom_fields.get("author"), Some(&"Alice".into()));
+        assert_eq!(mm.metadata_count(), 1);
+    }
+
+    #[test]
+    fn permission_types() {
+        assert_eq!(PermissionType::Read as u32, 0);
+        assert_eq!(PermissionType::Admin as u32, 3);
+    }
+
+    #[test]
+    fn index_types() {
+        assert_eq!(IndexType::Flat as u32, 0);
+        assert_eq!(IndexType::HNSW as u32, 3);
+    }
+}
