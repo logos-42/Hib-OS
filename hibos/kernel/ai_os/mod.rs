@@ -30,6 +30,9 @@ pub mod mind;
 pub mod attention;
 pub mod semantic;
 pub mod memory_ws;
+pub mod body_schema;
+pub mod action;
+pub mod temporal;
 
 /// AI 原生子系统初始化：在 `kernel::boot_subsystems` 或 shell 启动时调用一次。
 pub fn init() {
@@ -47,6 +50,9 @@ pub fn init() {
     attention::init();
     semantic::init();
     memory_ws::init();
+    body_schema::init();
+    action::init();
+    temporal::init();
 }
 
 /// 聚合状态摘要，供 `sense aios://status` 使用。
@@ -66,6 +72,9 @@ pub fn status() -> String {
     lines.push(format!("attention={}", attention::status()));
     lines.push(format!("semantic={}", semantic::status()));
     lines.push(format!("memory={}", memory_ws::status()));
+    lines.push(format!("body={}", body_schema::status()));
+    lines.push(format!("action={}", action::status()));
+    lines.push(format!("temporal={}", temporal::status()));
     lines.join(" | ")
 }
 
@@ -91,5 +100,8 @@ mod tests {
         assert!(s.contains("attention="));
         assert!(s.contains("semantic="));
         assert!(s.contains("memory="));
+        assert!(s.contains("body="));
+        assert!(s.contains("action="));
+        assert!(s.contains("temporal="));
     }
 }

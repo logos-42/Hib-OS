@@ -19,6 +19,14 @@ use crate::ai_os::tool::{status as tool_status};
 use crate::ai_os::security;
 use crate::ai_os::deadlock;
 use crate::ai_os::container;
+use crate::ai_os::native;
+use crate::ai_os::mind;
+use crate::ai_os::attention;
+use crate::ai_os::semantic;
+use crate::ai_os::memory_ws;
+use crate::ai_os::body_schema;
+use crate::ai_os::action;
+use crate::ai_os::temporal;
 use crate::ai_os::{status as ai_os_status};
 use crate::agent;
 use crate::belief::beliefs;
@@ -900,6 +908,16 @@ fn act_raw(name: &str, payload: &str) -> Option<Result<String, String>> {
         }
         "memory://sensory" | "memory://wm" | "memory://stm" | "memory://ltm" | "memory://episode" | "memory://semantic" | "memory://skill" => {
             Some(crate::ai_os::memory_ws::memory_act_dispatch(payload))
+        }
+        // —— AI 原生身体 / 动作 / 时间层通道 ——
+        "body://schema" | "body://proprioception" | "body://map" | "body://kinematic" | "body://state" => {
+            Some(crate::ai_os::body_schema::body_act_dispatch(payload))
+        }
+        "action://primitive" | "action://command" | "action://execute" | "action://sequence" | "action://constraint" => {
+            Some(crate::ai_os::action::action_act_dispatch(payload))
+        }
+        "temporal://clock" | "temporal://circadian" | "temporal://ultradian" | "temporal://sequence" | "temporal://schedule" | "temporal://memory" | "temporal://prediction" => {
+            Some(crate::ai_os::temporal::temporal_act_dispatch(payload))
         }
         _ => None,
     }

@@ -26,7 +26,8 @@ use crate::lease::{self, Epoch};
 // =======================================================================
 // 散射聚合描述符
 // =======================================================================
-/// DMA 传输方向。
+
+/// DMA 传输方向。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DmaDirection {
     /// 从设备读到内存（Device -> Memory）。
@@ -34,7 +35,8 @@ pub enum DmaDirection {
     /// 从内存写到设备（Memory -> Device）。
     MemToDev,
 }
-impl DmaDirection {
+
+impl DmaDirection {
     pub fn name(self) -> &'static str {
         match self {
             DmaDirection::DevToMem => "DEV_TO_MEM",
@@ -42,7 +44,8 @@ pub enum DmaDirection {
         }
     }
 }
-/// 单个散射聚合描述符：一段连续缓冲区。
+
+/// 单个散射聚合描述符：一段连续缓冲区。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DmaDescriptor {
     /// 缓冲区起始地址（原型中用虚拟地址索引；真实硬件为物理地址/IOVA）。
@@ -54,7 +57,8 @@ pub struct DmaDescriptor {
     /// 已在该描述符上传输的字节数。
     pub transferred: u64,
 }
-/// 描述符状态。
+
+/// 描述符状态。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DmaDescStatus {
     Pending,
@@ -62,12 +66,14 @@ pub enum DmaDescStatus {
     Done,
     Error,
 }
-impl Default for DmaDescriptor {
+
+impl Default for DmaDescriptor {
     fn default() -> Self {
         Self { addr: 0, length: 0, status: DmaDescStatus::Pending, transferred: 0 }
     }
 }
-/// 散射聚合列表：一组描述符构成一次 DMA 传输的缓冲区集合。
+
+/// 散射聚合列表：一组描述符构成一次 DMA 传输的缓冲区集合。
 #[derive(Clone, Debug)]
 pub struct DmaSgList {
     /// 描述符数组。
@@ -75,28 +81,36 @@ pub struct DmaSgList {
     /// 总字节数（所有描述符长度之和）。
     pub total_bytes: u64,
 }
-impl DmaSgList {
+
+impl DmaSgList {
     /// 新建空 S-G 列表。
     pub fn new() -> Self { Self { descriptors: Vec::new(), total_bytes: 0 } }
-    /// 添加一个描述符。
+
+    /// 添加一个描述符。
     pub fn push(&mut self, addr: u64, length: u64) {
         self.total_bytes = self.total_bytes.saturating_add(length);
         self.descriptors.push(DmaDescriptor { addr, length, status: DmaDescStatus::Pending, transferred: 0 });
     }
-    /// 描述符数量。
+
+    /// 描述符数量。
     pub fn len(&self) -> usize { self.descriptors.len() }
-    pub fn is_empty(&self) -> bool { self.descriptors.is_empty() }
+
+    pub fn is_empty(&self) -> bool { self.descriptors.is_empty() }
 }
-impl Default for DmaSgList {
+
+impl Default for DmaSgList {
     fn default() -> Self { Self::new() }
 }
-// =======================================================================
+
+// =======================================================================
 // DMA 传输
 // =======================================================================
-/// DMA 传输句柄。
+
+/// DMA 传输句柄。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct DmaTransferId(pub u64);
-/// DMA 传输状态。
+
+/// DMA 传输状态。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DmaTransferState {
     Queued,   // 已提交，等待调度
@@ -105,7 +119,8 @@ pub enum DmaTransferState {
     Completed,// 传输完成
     Failed,   // 传输失败（总线错误、地址越界等）
 }
-impl DmaTransferState {
+
+impl DmaTransferState {
     pub fn name(self) -> &'static str {
         match self {
             DmaTransferState::Queued => "QUEUED",
@@ -116,8 +131,9 @@ pub enum DmaTransferState {
         }
     }
 }
-/// 单个 DMA 传输记录。
-#[derive(Clone, Debug)]
+
+/// 单个 DMA 传输记录。
+/// （callback 为 Box<dyn Fn>，不实现 Clone/Debug，故此处不派生。）
 pub struct DmaTransfer {
     pub id: DmaTransferId,
     pub channel: u8,
@@ -133,10 +149,12 @@ pub struct DmaTransfer {
     /// 关联的中断线编号（完成后向该 IRQ 发信号，原始 u32，避免跨模块依赖）。
     pub completion_irq: Option<u32>,
 }
-// =======================================================================
+
+// =======================================================================
 // DMA 通道
 // =======================================================================
-/// DMA 通道状态。
+
+/// DMA 通道状态。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DmaChannelState {
     Idle,
@@ -144,7 +162,8 @@ pub enum DmaChannelState {
     Paused,
     Error,
 }
-/// 单个 DMA 通道：维护当前传输、已传输字节、错误计数。
+
+/// 单个 DMA 通道：维护当前传输、已传输字节、错误计数。
 pub struct DmaChannel {
     pub index: u8,
     pub state: DmaChannelState,
@@ -161,16 +180,19 @@ pub struct DmaChannel {
     /// 通道带宽限制（字节/秒，0 = 无限制）。
     pub bandwidth_limit: u64,
 }
-impl DmaChannel {
+
+impl DmaChannel {
     fn new(index: u8) -> Self {
         Self { index, state: DmaChannelState::Idle, current: None, queue: VecDeque::new(),
                bytes_transferred: 0, transfers_done: 0, errors: 0, bandwidth_limit: 0 }
     }
 }
-// =======================================================================
+
+// =======================================================================
 // DMA 引擎
 // =======================================================================
-/// DMA 引擎：管理多个通道、传输队列、完成中断与统计。
+
+/// DMA 引擎：管理多个通道、传输队列、完成中断与统计。
 pub struct DmaEngine {
     /// 通道索引 -> 通道。
     pub channels: HashMap<u8, DmaChannel>,
@@ -185,7 +207,8 @@ pub struct DmaEngine {
     /// 统计。
     pub stats: DmaStats,
 }
-/// DMA 统计。
+
+/// DMA 统计。
 #[derive(Clone, Debug, Default)]
 pub struct DmaStats {
     pub submissions: u64,
@@ -195,7 +218,8 @@ pub struct DmaStats {
     pub active_transfers: u64,
     pub channels: u64,
 }
-impl DmaEngine {
+
+impl DmaEngine {
     /// 新建 DMA 引擎（无通道）。
     pub fn new() -> Self {
         Self {
@@ -207,13 +231,16 @@ pub struct DmaStats {
             stats: DmaStats::default(),
         }
     }
-    /// 全局 DMA 引擎单例（`drv://dma` 通道后端）。
+
+    /// 全局 DMA 引擎单例（`drv://dma` 通道后端）。
     pub fn engine() -> &'static Mutex<DmaEngine> {
         static ENGINE: OnceLock<Mutex<DmaEngine>> = OnceLock::new();
         ENGINE.get_or_init(|| Mutex::new(Self::new()))
     }
-    // ------ 通道管理 ------
-    /// 分配一个新 DMA 通道，返回通道索引。
+
+    // ------ 通道管理 ------
+
+    /// 分配一个新 DMA 通道，返回通道索引。
     pub fn alloc_channel(&mut self) -> u8 {
         let idx = self.next_channel;
         self.next_channel = self.next_channel.saturating_add(1);
@@ -221,14 +248,17 @@ pub struct DmaStats {
         self.stats.channels = self.channels.len() as u64;
         idx
     }
-    /// 设置通道带宽限制。
+
+    /// 设置通道带宽限制。
     pub fn set_bandwidth_limit(&mut self, channel: u8, bytes_per_sec: u64) -> Result<(), String> {
         let ch = self.channels.get_mut(&channel).ok_or_else(|| format!("DMA 通道 {} 不存在", channel))?;
         ch.bandwidth_limit = bytes_per_sec;
         Ok(())
     }
-    // ------ 传输提交 ------
-    /// 提交一个散射聚合列表作为 DMA 传输。
+
+    // ------ 传输提交 ------
+
+    /// 提交一个散射聚合列表作为 DMA 传输。
     /// * `channel`：目标通道。
     /// * `direction`：传输方向。
     /// * `sg`：散射聚合列表。
@@ -257,7 +287,7 @@ pub struct DmaStats {
             submitted_at: Instant::now(), completed_at: None, bytes_transferred: 0,
             error: None, callback: None, completion_irq,
         };
-        self.transfers.insert(id, transfer.clone());
+        self.transfers.insert(id, transfer);
         let ch = self.channels.get_mut(&channel).unwrap();
         ch.queue.push_back(id);
         if ch.state == DmaChannelState::Idle {
@@ -268,7 +298,8 @@ pub struct DmaStats {
         self.stats.active_transfers = self.transfers.values().filter(|t| matches!(t.state, DmaTransferState::Active | DmaTransferState::Queued)).count() as u64;
         Ok(id)
     }
-    /// 为指定传输注册完成回调（传输完成后调用）。
+
+    /// 为指定传输注册完成回调（传输完成后调用）。
     pub fn register_completion_callback(
         &mut self, id: DmaTransferId, callback: Box<dyn Fn(DmaTransferId) + Send + Sync>,
     ) -> Result<(), String> {
@@ -281,8 +312,10 @@ pub struct DmaStats {
         }
         Ok(())
     }
-    // ------ 轮询与完成 ------
-    /// 模拟 DMA 控制器一轮：把 Queued/Active 传输推进，完成后触发回调与中断。
+
+    // ------ 轮询与完成 ------
+
+    /// 模拟 DMA 控制器一轮：把 Queued/Active 传输推进，完成后触发回调与中断。
     /// 返回本轮完成的传输 ID 列表。
     pub fn dma_poll(&mut self) -> Vec<DmaTransferId> {
         let mut completed = Vec::new();
@@ -335,27 +368,32 @@ pub struct DmaStats {
         self.stats.active_transfers = self.transfers.values().filter(|t| matches!(t.state, DmaTransferState::Active | DmaTransferState::Queued)).count() as u64;
         completed
     }
-    /// 查询指定传输的状态。
+
+    /// 查询指定传输的状态。
     pub fn dma_transfer_status(&self, id: DmaTransferId) -> Option<DmaTransferState> {
         self.transfers.get(&id).map(|t| t.state)
     }
-    /// 查询指定传输的已传输字节。
+
+    /// 查询指定传输的已传输字节。
     pub fn dma_transfer_bytes(&self, id: DmaTransferId) -> Option<u64> {
         self.transfers.get(&id).map(|t| t.bytes_transferred)
     }
-    /// 暂停指定通道。
+
+    /// 暂停指定通道。
     pub fn dma_pause_channel(&mut self, channel: u8) -> Result<(), String> {
         let ch = self.channels.get_mut(&channel).ok_or_else(|| format!("DMA 通道 {} 不存在", channel))?;
         if ch.state == DmaChannelState::Busy { ch.state = DmaChannelState::Paused; }
         Ok(())
     }
-    /// 恢复指定通道。
+
+    /// 恢复指定通道。
     pub fn dma_resume_channel(&mut self, channel: u8) -> Result<(), String> {
         let ch = self.channels.get_mut(&channel).ok_or_else(|| format!("DMA 通道 {} 不存在", channel))?;
         if ch.state == DmaChannelState::Paused { ch.state = DmaChannelState::Busy; }
         Ok(())
     }
-    /// 状态快照（供 `sense drv://dma`）。
+
+    /// 状态快照（供 `sense drv://dma`）。
     pub fn status(&self) -> String {
         let mut ch_lines: Vec<String> = self.channels.values().map(|c| {
             format!("  ch={} state={} queued={} bytes={} done={} errors={}",
@@ -374,18 +412,22 @@ pub struct DmaStats {
         )
     }
 }
-impl Default for DmaEngine {
+
+impl Default for DmaEngine {
     fn default() -> Self { Self::new() }
 }
-// =======================================================================
+
+// =======================================================================
 // sense/act 接口（drv://dma）
 // =======================================================================
-/// 查询 DMA 引擎状态快照（供 `sense drv://dma`）。
+
+/// 查询 DMA 引擎状态快照（供 `sense drv://dma`）。
 pub fn dma_sense_snapshot() -> String {
     let e = DmaEngine::engine().lock().unwrap();
     e.status()
 }
-/// 对 DMA 通道执行行动（供 `act drv://dma`）。
+
+/// 对 DMA 通道执行行动（供 `act drv://dma`）。
 /// 负载：`stats` / `list` / `chan <index>` / `submit <channel> <dir> <addr:len[,...]> <irq>` / `pause <ch>` / `resume <ch>` / `poll`。
 pub fn dma_act_raw(payload: &str) -> Result<String, String> {
     let mut it = payload.split_whitespace();
@@ -448,16 +490,20 @@ pub fn dma_act_raw(payload: &str) -> Result<String, String> {
         _ => Err("用法: act drv://dma stats | list | chan <index> | submit <channel> <dir> <addr:len[,...]> [irq] | pause <ch> | resume <ch> | poll".to_string()),
     }
 }
-// =======================================================================
+
+// =======================================================================
 // 单元测试
 // =======================================================================
-#[cfg(test)]
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::Arc;
-    fn test_owner() -> ExecId { ExecId(7) }
-    #[test]
+
+    fn test_owner() -> ExecId { ExecId(7) }
+
+    #[test]
     fn sg_list_push_and_total() {
         let mut sg = DmaSgList::new();
         assert!(sg.is_empty());
@@ -466,7 +512,8 @@ mod tests {
         assert_eq!(sg.len(), 2);
         assert_eq!(sg.total_bytes, 12288);
     }
-    #[test]
+
+    #[test]
     fn dma_engine_alloc_channel() {
         let mut e = DmaEngine::new();
         let c1 = e.alloc_channel();
@@ -477,7 +524,8 @@ mod tests {
         assert!(e.channels.contains_key(&0));
         assert!(e.channels.contains_key(&1));
     }
-    #[test]
+
+    #[test]
     fn dma_submit_and_poll_completes() {
         let mut e = DmaEngine::new();
         let ch = e.alloc_channel();
@@ -496,21 +544,24 @@ mod tests {
         // 通道空闲。
         assert_eq!(e.channels.get(&ch).unwrap().state, DmaChannelState::Idle);
     }
-    #[test]
+
+    #[test]
     fn dma_submit_empty_sg_fails() {
         let mut e = DmaEngine::new();
         let ch = e.alloc_channel();
         let sg = DmaSgList::new();
         assert!(e.dma_submit(test_owner(), ch, DmaDirection::MemToDev, sg, None).is_err());
     }
-    #[test]
+
+    #[test]
     fn dma_submit_nonexistent_channel_fails() {
         let mut e = DmaEngine::new();
         let mut sg = DmaSgList::new();
         sg.push(0x1000, 64);
         assert!(e.dma_submit(test_owner(), 99, DmaDirection::MemToDev, sg, None).is_err());
     }
-    #[test]
+
+    #[test]
     fn dma_sequential_transfers_on_same_channel() {
         let mut e = DmaEngine::new();
         let ch = e.alloc_channel();
@@ -528,7 +579,8 @@ mod tests {
         assert_eq!(e.channels.get(&ch).unwrap().state, DmaChannelState::Idle);
         assert_eq!(e.channels.get(&ch).unwrap().bytes_transferred, 300);
     }
-    #[test]
+
+    #[test]
     fn dma_completion_callback() {
         let mut e = DmaEngine::new();
         let ch = e.alloc_channel();
@@ -541,7 +593,8 @@ mod tests {
         e.dma_poll();
         assert_eq!(fired.load(Ordering::SeqCst), 1);
     }
-    #[test]
+
+    #[test]
     fn dma_pause_resume_channel() {
         let mut e = DmaEngine::new();
         let ch = e.alloc_channel();
@@ -556,16 +609,19 @@ mod tests {
         e.dma_poll();
         assert_eq!(e.channels.get(&ch).unwrap().state, DmaChannelState::Idle);
     }
-    #[test]
+
+    #[test]
     fn dma_nonexistent_transfer_status() {
         assert_eq!(DmaEngine::new().dma_transfer_status(DmaTransferId(999)), None);
     }
-    #[test]
+
+    #[test]
     fn dma_direction_names() {
         assert_eq!(DmaDirection::DevToMem.name(), "DEV_TO_MEM");
         assert_eq!(DmaDirection::MemToDev.name(), "MEM_TO_DEV");
     }
-    #[test]
+
+    #[test]
     fn sense_and_act() {
         let snap = dma_sense_snapshot();
         assert!(snap.contains("dma_engine"));
@@ -574,4 +630,4 @@ mod tests {
         assert!(dma_act_raw("poll").is_ok());
         assert!(dma_act_raw("chan 0").is_err()); // 默认无通道
     }
-}
+}

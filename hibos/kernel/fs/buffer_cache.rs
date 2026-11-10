@@ -539,7 +539,10 @@ impl BufferCacheLeased {
         dev_id: u64,
     ) -> Result<Epoch, crate::lease::CommitError> {
         // 先确保持有租约。
-        let _ = self.acquire_sync_lease(owner)?;
+        let _ = self.acquire_sync_lease(owner)
+            .map_err(|c| crate::lease::CommitError::NotLeaseOwner {
+                holder: Some(c.holder),
+            })?;
         let done = self.inner.sync_device(dev_id)?;
         // 提交：epoch 必须等于 expected，否则拒绝（乐观 CAS）。
         lease::commit(
@@ -556,7 +559,10 @@ impl BufferCacheLeased {
         owner: u64,
         expected_epoch: Epoch,
     ) -> Result<Epoch, crate::lease::CommitError> {
-        let _ = self.acquire_sync_lease(owner)?;
+        let _ = self.acquire_sync_lease(owner)
+            .map_err(|c| crate::lease::CommitError::NotLeaseOwner {
+                holder: Some(c.holder),
+            })?;
         let done = self.inner.sync_all()?;
         lease::commit(
             &self.channel,
@@ -667,7 +673,8 @@ impl BufferCacheCaps {
 // ============================================================================
 
 /// 感知缓冲区缓存通道：返回缓存统计快照。
-////// 通道名形式：`buffercache://<设备名>`（设备名可为 "all" 查看全部）
+///
+/// 通道名形式：`buffercache://<设备名>`（设备名可为 "all" 查看全部）
 pub fn probe_buffer_cache(name: &str) -> Option<String> {
     // 此处为无状态探针：返回通道级元数据与当前 epoch。
     // 实际缓存实例由调用方持有，探针仅报告通道存在性与版本。
@@ -678,8 +685,10 @@ pub fn probe_buffer_cache(name: &str) -> Option<String> {
         name, epoch
     ))
 }
-/// 对缓冲区缓存通道执行行动。
-////// 支持子命令：
+
+/// 对缓冲区缓存通道执行行动。
+///
+/// 支持子命令：
 /// - `stats` —— 返回缓存统计摘要（占位，实际需关联缓存实例）
 /// - `epoch` —— 返回当前 epoch
 pub fn act_buffer_cache(name: &str, payload: &str) -> Option<Result<String, String>> {
@@ -980,4 +989,4 @@ fn write_sector_inner(cache: &BufferCacheLeased, dev_id: u64, sector: u64, byte:
         .expect("device must exist");
     let mut data = [byte; BLOCK_SIZE];
     dev.write_at(sector, &data).unwrap();
-}
+}

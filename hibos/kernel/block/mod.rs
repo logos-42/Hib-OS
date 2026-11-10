@@ -12,10 +12,6 @@ pub mod block_device;
 pub mod request_queue;
 pub mod io_scheduler;
 
-// 公共类型
-pub use block_device::{BlockDevice, BlockDeviceType, block_device_register, block_device_lookup};
-pub use request_queue::{BlockRequest, RequestQueue, block_submit, block_complete};
-
 // 块设备类型。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BlockDeviceType {

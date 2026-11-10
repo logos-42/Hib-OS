@@ -13,6 +13,17 @@ pub mod inode;
 pub mod dentry;
 pub mod fd_table;
 pub mod mount_mgr;
+pub mod disk_img;
+pub mod partition;
+pub mod buffer_cache;
+pub mod ext2_like;
+pub mod journal;
+pub mod file_lock;
+pub mod mmap_file;
+pub mod dentry_cache;
+pub mod quota;
+pub mod aio;
+pub mod procfs_ext;
 
 // 公共类型
 pub use vfs::{Vfs, vfs, vfs_open, vfs_read, vfs_write, vfs_close, vfs_unlink, vfs_stats};

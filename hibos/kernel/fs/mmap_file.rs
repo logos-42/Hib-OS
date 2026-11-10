@@ -559,7 +559,8 @@ impl MmapManagerLeased {
         fd: u64,
         offset: u64,
     ) -> Result<(crate::fs::mmap_file::MmapId, Epoch), crate::fs::mmap_file::MmapError> {
-        let _ = self.acquire_map_lease(owner)?;
+        let _ = self.acquire_map_lease(owner)
+            .map_err(|c| crate::fs::mmap_file::MmapError::Fault(format!("租约冲突: holder={:?}", c.holder)))?;
         let id = self.inner.mmap(addr, length, prot, flags, fd, offset)?;
         let new_ep = lease::commit(
             &self.channel,
@@ -578,7 +579,8 @@ impl MmapManagerLeased {
         expected_epoch: Epoch,
         addr: u64,
     ) -> Result<Epoch, crate::fs::mmap_file::MmapError> {
-        let _ = self.acquire_map_lease(owner)?;
+        let _ = self.acquire_map_lease(owner)
+            .map_err(|c| crate::fs::mmap_file::MmapError::Fault(format!("租约冲突: holder={:?}", c.holder)))?;
         self.inner.munmap(addr)?;
         let new_ep = lease::commit(
             &self.channel,

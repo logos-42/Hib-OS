@@ -9,6 +9,8 @@
 //! * 本地包数据库为内存 + 可选 JSON 文件（手写最小实现，无 serde）；
 //! * 网络下载被模拟为本地缓存，可在脱网环境运行。
 
+pub mod package_manager;
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 

@@ -788,7 +788,7 @@ impl MindEngine {
     pub fn set_mode(&mut self, mode: MindMode) {
         self.state = self.state.with_mode(mode);
         self.cognitive_load.record(
-            crate::ai_os::native::native::LoadType::Intrinsic,
+            LoadType::Intrinsic,
             self.state.cognitive_load,
             "mind_mode_change",
         );

@@ -624,7 +624,8 @@ impl PartitionCaps {
 // ============================================================================
 
 /// 感知分区表通道：返回磁盘的分区表摘要。
-////// 通道名形式：`partition://<设备路径>`
+///
+/// 通道名形式：`partition://<设备路径>`
 pub fn probe_partition(name: &str) -> Option<String> {
     let dev = name.strip_prefix("partition://")?;
     let path = Path::new(dev);
@@ -639,7 +640,8 @@ pub fn probe_partition(name: &str) -> Option<String> {
 }
 
 /// 对分区表通道执行行动。
-////// 支持子命令：
+///
+/// 支持子命令：
 /// - `parse` —— 解析并返回分区表摘要
 /// - `epoch` —— 返回当前 epoch
 pub fn act_partition(name: &str, payload: &str) -> Option<Result<String, String>> {
@@ -1065,4 +1067,4 @@ mod tests {
         assert!(r.contains("epoch="));
         let _ = std::fs::remove_file(&path);
     }
-}
+}

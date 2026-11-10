@@ -25,10 +25,12 @@ use crate::lease::{self, Epoch};
 // =======================================================================
 // 中断线句柄
 // =======================================================================
-/// 中断线号（IRQ 编号，0..=255 对应 IDT 向量）。
+
+/// 中断线号（IRQ 编号，0..=255 对应 IDT 向量）。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct IrqLine(pub u32);
-impl IrqLine {
+
+impl IrqLine {
     /// 是否为硬件中断（IRQ 0..15，对应 IDT 向量 0x20..0x2F 的传统 PIC 映射）。
     pub fn is_hardware_irq(self) -> bool {
         self.0 <= 15
@@ -38,10 +40,12 @@ pub struct IrqLine(pub u32);
         (0x20 + self.0 as u8) & 0xFF
     }
 }
-// =======================================================================
+
+// =======================================================================
 // IDT 中断门描述符（x86 64 位中断门，16 字节）
 // =======================================================================
-/// IDT 条目：中断门描述符。
+
+/// IDT 条目：中断门描述符。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct IdtEntry {
     /// 处理函数偏移低 16 位。
@@ -59,7 +63,8 @@ pub struct IdtEntry {
     /// 保留（必须为 0）。
     pub zero: u32,
 }
-impl IdtEntry {
+
+impl IdtEntry {
     /// 中断门存在位。
     pub const IDT_PRESENT: u8 = 0x80;
     /// 描述符特权级（DPL）掩码，位移 5..6。
@@ -68,7 +73,8 @@ pub struct IdtEntry {
     pub const IDT_TYPE_INT32: u8 = 0x0E;
     /// 32 位陷阱门类型（0xF）。
     pub const IDT_TYPE_TRAP32: u8 = 0x0F;
-    /// 构造一个中断门描述符。
+
+    /// 构造一个中断门描述符。
     /// * `handler_addr`：中断处理函数入口地址。
     /// * `selector`：段选择子。
     /// * `ist`：IST 索引。
@@ -90,17 +96,20 @@ pub struct IdtEntry {
             zero: 0,
         }
     }
-    /// 条目是否标记为存在。
+
+    /// 条目是否标记为存在。
     pub fn is_present(self) -> bool {
         self.type_attr & Self::IDT_PRESENT != 0
     }
-    /// 组合处理函数完整地址（64 位）。
+
+    /// 组合处理函数完整地址（64 位）。
     pub fn handler_address(self) -> u64 {
         (self.offset_low as u64)
             | ((self.offset_mid as u64) << 16)
             | ((self.offset_high as u64) << 32)
     }
-    /// 序列化为 16 字节（供调试/持久化）。
+
+    /// 序列化为 16 字节（供调试/持久化）。
     pub fn serialize(self) -> [u8; 16] {
         let mut b = [0u8; 16];
         b[0..2].copy_from_slice(&self.offset_low.to_le_bytes());
@@ -113,12 +122,14 @@ pub struct IdtEntry {
         b
     }
 }
-impl Default for IdtEntry {
+
+impl Default for IdtEntry {
     fn default() -> Self {
         Self { offset_low: 0, selector: 0, ist: 0, type_attr: 0, offset_mid: 0, offset_high: 0, zero: 0 }
     }
 }
-/// 中断描述符表（IDT），固定 256 个向量。
+
+/// 中断描述符表（IDT），固定 256 个向量。
 #[derive(Clone, Debug)]
 pub struct Idt {
     /// 条目表（向量号 -> IdtEntry）。
@@ -126,7 +137,8 @@ pub struct Idt {
     /// 最后一次修改时刻（供统计）。
     pub last_modified: Instant,
 }
-impl Idt {
+
+impl Idt {
     /// 新建空 IDT（全不存在）。
     pub fn new() -> Self {
         Self {
@@ -134,36 +146,44 @@ pub struct Idt {
             last_modified: Instant::now(),
         }
     }
-    /// 设置指定向量的中断门。
+
+    /// 设置指定向量的中断门。
     pub fn set_gate(&mut self, vector: u8, entry: IdtEntry) {
         self.entries[vector as usize] = entry;
         self.last_modified = Instant::now();
     }
-    /// 清除指定向量（标记为不存在）。
+
+    /// 清除指定向量（标记为不存在）。
     pub fn clear_gate(&mut self, vector: u8) {
         self.entries[vector as usize] = IdtEntry::default();
         self.last_modified = Instant::now();
     }
-    /// 查询指定向量的条目。
+
+    /// 查询指定向量的条目。
     pub fn entry(&self, vector: u8) -> Option<&IdtEntry> {
         let e = &self.entries[vector as usize];
         if e.is_present() { Some(e) } else { None }
     }
-    /// 已注册中断门的向量数量。
+
+    /// 已注册中断门的向量数量。
     pub fn present_count(&self) -> usize {
         self.entries.iter().filter(|e| e.is_present()).count()
     }
 }
-impl Default for Idt {
+
+impl Default for Idt {
     fn default() -> Self { Self::new() }
 }
-// =======================================================================
+
+// =======================================================================
 // 中断处理器注册表与分发
 // =======================================================================
-/// 中断处理器：接收 IrqLine，返回 true 表示已处理（停止后续处理器）。
+
+/// 中断处理器：接收 IrqLine，返回 true 表示已处理（停止后续处理器）。
 pub type IrqHandler = Box<dyn Fn(IrqLine) -> bool + Send + Sync>;
-/// 中断处理器注册项：处理器 + 绑定者（exec id）+ 优先级。
-#[derive(Clone, Debug)]
+
+/// 中断处理器注册项：处理器 + 绑定者（exec id）+ 优先级。
+/// （handler 为 Box<dyn Fn>，不实现 Clone/Debug，故此处不派生。）
 pub struct IrqHandlerEntry {
     /// 处理器闭包。
     pub handler: IrqHandler,
@@ -176,7 +196,8 @@ pub struct IrqHandlerEntry {
     /// 累计被标记为“已处理”的次数。
     pub handled: u64,
 }
-/// 中断控制器：维护 IDT 表与每中断线的处理器链，负责分发。
+
+/// 中断控制器：维护 IDT 表与每中断线的处理器链，负责分发。
 pub struct IrqController {
     /// IDT 表。
     pub idt: Idt,
@@ -191,7 +212,8 @@ pub struct IrqController {
     /// 中断是否全局使能（CLI/STI 模拟）。
     pub enabled: bool,
 }
-impl IrqController {
+
+impl IrqController {
     /// 新建中断控制器（IDT 空，中断使能，未屏蔽）。
     pub fn new() -> Self {
         Self {
@@ -203,27 +225,33 @@ pub struct IrqController {
             enabled: true,
         }
     }
-    /// 全局中断控制器单例（`drv://irq_ctrl` 通道后端）。
+
+    /// 全局中断控制器单例（`drv://irq_ctrl` 通道后端）。
     pub fn instance() -> &'static Mutex<IrqController> {
         static INST: OnceLock<Mutex<IrqController>> = OnceLock::new();
         INST.get_or_init(|| Mutex::new(Self::new()))
     }
-    // ------ IDT 操作 ------
-    /// 设置 IDT 指定向量的中断门处理地址（不关联具体处理器闭包，仅供底层 CPU 使用）。
+
+    // ------ IDT 操作 ------
+
+    /// 设置 IDT 指定向量的中断门处理地址（不关联具体处理器闭包，仅供底层 CPU 使用）。
     pub fn idt_set_gate(&mut self, vector: u8, handler_addr: u64, selector: u16, ist: u8, dpl: u8, is_trap: bool) {
         let entry = IdtEntry::set_handler(handler_addr, selector, ist, dpl, is_trap);
         self.idt.set_gate(vector, entry);
     }
-    /// 清除 IDT 指定向量的中断门。
+
+    /// 清除 IDT 指定向量的中断门。
     pub fn idt_clear_gate(&mut self, vector: u8) {
         self.idt.clear_gate(vector);
     }
-    /// 模拟加载 IDT（lgdt/lidt）。在原型中仅标记 IDT 已加载。
+
+    /// 模拟加载 IDT（lgdt/lidt）。在原型中仅标记 IDT 已加载。
     pub fn idt_load(&mut self) {
         // 真实硬件中会执行 lidt 指令；此处记录加载时刻。
         self.idt.last_modified = Instant::now();
     }
-    /// 查询 IDT 已注册门的向量列表。
+
+    /// 查询 IDT 已注册门的向量列表。
     pub fn idt_present_vectors(&self) -> Vec<u8> {
         let mut out: Vec<u8> = self.idt.entries.iter().enumerate()
             .filter(|(_, e)| e.is_present())
@@ -232,31 +260,40 @@ pub struct IrqController {
         out.sort();
         out
     }
-    // ------ 中断屏蔽 / 使能 ------
-    /// 屏蔽指定中断线。
+
+    // ------ 中断屏蔽 / 使能 ------
+
+    /// 屏蔽指定中断线。
     pub fn mask_irq(&mut self, irq: IrqLine) {
         if irq.0 < 128 {
             self.mask |= 1u128 << irq.0;
         }
     }
-    /// 取消屏蔽指定中断线。
+
+    /// 取消屏蔽指定中断线。
     pub fn unmask_irq(&mut self, irq: IrqLine) {
         if irq.0 < 128 {
             self.mask &= !(1u128 << irq.0);
         }
     }
-    /// 指定中断线是否被屏蔽。
+
+    /// 指定中断线是否被屏蔽。
     pub fn is_masked(&self, irq: IrqLine) -> bool {
         if irq.0 < 128 { (self.mask >> irq.0) & 1 != 0 } else { false }
     }
-    /// 全局关中断（CLI）。
+
+    /// 全局关中断（CLI）。
     pub fn cli(&mut self) { self.enabled = false; }
-    /// 全局开中断（STI）。
+
+    /// 全局开中断（STI）。
     pub fn sti(&mut self) { self.enabled = true; }
-    /// 中断是否全局使能。
+
+    /// 中断是否全局使能。
     pub fn interrupts_enabled(&self) -> bool { self.enabled }
-    // ------ 处理器注册（单写者租约保护） ------
-    /// 注册一个中断处理器到指定中断线。
+
+    // ------ 处理器注册（单写者租约保护） ------
+
+    /// 注册一个中断处理器到指定中断线。
     /// * `irq`：中断线号。
     /// * `handler`：处理器闭包，返回 true 表示已处理。
     /// * `owner`：绑定者执行体 ID（用于租约/优先级继承）。
@@ -279,7 +316,8 @@ pub struct IrqController {
         }
         Ok(())
     }
-    /// 注销指定 owner 在指定中断线上的所有处理器。
+
+    /// 注销指定 owner 在指定中断线上的所有处理器。
     pub fn irq_handler_unregister_owner(&mut self, owner: ExecId, irq: IrqLine) -> usize {
         if let Some(list) = self.handlers.get_mut(&irq) {
             let before = list.len();
@@ -289,8 +327,10 @@ pub struct IrqController {
             0
         }
     }
-    // ------ 中断分发 ------
-    /// 分发一个中断到该中断线上全部注册的处理器，直至有处理器返回 true（已处理）。
+
+    // ------ 中断分发 ------
+
+    /// 分发一个中断到该中断线上全部注册的处理器，直至有处理器返回 true（已处理）。
     /// 返回被调用的处理器数量。若中断被屏蔽或中断未使能，返回 0 并计入伪中断。
     pub fn irq_dispatch(&mut self, irq: IrqLine) -> u64 {
         if !self.enabled {
@@ -304,40 +344,58 @@ pub struct IrqController {
         let count = self.irq_counts.entry(irq).or_insert(0);
         *count += 1;
         let list = match self.handlers.get(&irq) {
-            Some(l) => l.clone(), // 快照，避免在调用闭包时持有可变借用
+            Some(l) => l,
             None => {
                 self.spurious_count += 1;
                 return 0;
             }
         };
         let mut called: u64 = 0;
-        for entry in &list {
+        let mut handled_index: Option<usize> = None;
+        // 先在不可变借用下调用全部处理器，记录第一个返回 true 的索引。
+        for i in 0..list.len() {
+            let handled = (list[i].handler)(irq);
             called += 1;
-            let handled = (entry.handler)(irq);
-            // 更新统计（需可变借用，故在循环外重新获取）。
+            if handled {
+                handled_index = Some(i);
+                break;
+            }
+        }
+        // 不可变借用 list 在此结束，再可变借用更新 per-handler 统计。
+        if let Some(idx) = handled_index {
             if let Some(list_mut) = self.handlers.get_mut(&irq) {
-                if let Some(e) = list_mut.iter_mut().find(|e| std::ptr::eq(e.handler.as_ref(), entry.handler.as_ref())) {
+                if let Some(e) = list_mut.get_mut(idx) {
                     e.invocations += 1;
-                    if handled { e.handled += 1; }
+                    e.handled += 1;
                 }
             }
-            if handled { break; }
+        } else {
+            // 无处理器返回 true：全部 handler 均被调用，仅累 invocations。
+            if let Some(list_mut) = self.handlers.get_mut(&irq) {
+                for e in list_mut.iter_mut() {
+                    e.invocations += 1;
+                }
+            }
         }
         called
     }
-    /// 触发指定中断线（供测试/上层驱动调用），等价于 irq_dispatch。
+
+    /// 触发指定中断线（供测试/上层驱动调用），等价于 irq_dispatch。
     pub fn raise_irq(&mut self, irq: IrqLine) -> u64 {
         self.irq_dispatch(irq)
     }
-    /// 查询指定中断线的触发次数。
+
+    /// 查询指定中断线的触发次数。
     pub fn irq_count(&self, irq: IrqLine) -> u64 {
         self.irq_counts.get(&irq).copied().unwrap_or(0)
     }
-    /// 指定中断线的处理器数量。
+
+    /// 指定中断线的处理器数量。
     pub fn handler_count(&self, irq: IrqLine) -> usize {
         self.handlers.get(&irq).map(|l| l.len()).unwrap_or(0)
     }
-    /// 状态快照（供 `sense drv://irq_ctrl`）。
+
+    /// 状态快照（供 `sense drv://irq_ctrl`）。
     pub fn status(&self) -> String {
         let mut lines: Vec<String> = self.handlers.iter().map(|(irq, list)| {
             let invocations: u64 = list.iter().map(|e| e.invocations).sum();
@@ -352,18 +410,22 @@ pub struct IrqController {
         )
     }
 }
-impl Default for IrqController {
+
+impl Default for IrqController {
     fn default() -> Self { Self::new() }
 }
-// =======================================================================
+
+// =======================================================================
 // sense/act 接口（drv://irq_ctrl）
 // =======================================================================
-/// 查询中断控制器状态快照（供 `sense drv://irq_ctrl`）。
+
+/// 查询中断控制器状态快照（供 `sense drv://irq_ctrl`）。
 pub fn irq_ctrl_sense_snapshot() -> String {
     let c = IrqController::instance().lock().unwrap();
     c.status()
 }
-/// 对中断控制器通道执行行动（供 `act drv://irq_ctrl`）。
+
+/// 对中断控制器通道执行行动（供 `act drv://irq_ctrl`）。
 /// 负载：`stats` / `list` / `mask <irq>` / `unmask <irq>` / `cli` / `sti` / `raise <irq>`。
 pub fn irq_ctrl_act_raw(payload: &str) -> Result<String, String> {
     let mut it = payload.split_whitespace();
@@ -404,16 +466,20 @@ pub fn irq_ctrl_act_raw(payload: &str) -> Result<String, String> {
         _ => Err("用法: act drv://irq_ctrl stats | list | mask <irq> | unmask <irq> | cli | sti | raise <irq>".to_string()),
     }
 }
-// =======================================================================
+
+// =======================================================================
 // 单元测试
 // =======================================================================
-#[cfg(test)]
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
-    fn test_owner() -> ExecId { ExecId(1) }
-    #[test]
+
+    fn test_owner() -> ExecId { ExecId(1) }
+
+    #[test]
     fn idt_entry_roundtrip() {
         let entry = IdtEntry::set_handler(0xFFFF_FFFF_F000_1000, 0x08, 0, 0, false);
         assert!(entry.is_present());
@@ -426,7 +492,8 @@ mod tests {
         // 解析回低 16 位。
         assert_eq!(u16::from_le_bytes([bytes[0], bytes[1]]), 0x1000);
     }
-    #[test]
+
+    #[test]
     fn idt_present_count() {
         let mut idt = Idt::new();
         assert_eq!(idt.present_count(), 0);
@@ -438,7 +505,8 @@ mod tests {
         idt.clear_gate(0x20);
         assert_eq!(idt.present_count(), 1);
     }
-    #[test]
+
+    #[test]
     fn idt_present_vectors_sorted() {
         let mut idt = Idt::new();
         idt.set_gate(0xFF, IdtEntry::set_handler(1, 0x08, 0, 0, false));
@@ -447,7 +515,8 @@ mod tests {
         let vecs = idt.idt_present_vectors();
         assert_eq!(vecs, vec![0x20, 0x21, 0xFF]);
     }
-    #[test]
+
+    #[test]
     fn irq_handler_register_and_dispatch() {
         let mut c = IrqController::new();
         let irq = IrqLine(42);
@@ -462,7 +531,8 @@ mod tests {
         assert!(called.load(Ordering::SeqCst));
         assert_eq!(c.irq_count(irq), 1);
     }
-    #[test]
+
+    #[test]
     fn irq_dispatch_stops_on_handled() {
         let mut c = IrqController::new();
         let irq = IrqLine(7);
@@ -476,7 +546,8 @@ mod tests {
         assert_eq!(n, 1); // 只调用 h1
         assert!(first.load(Ordering::SeqCst));
     }
-    #[test]
+
+    #[test]
     fn irq_mask_and_cli() {
         let mut c = IrqController::new();
         let irq = IrqLine(3);
@@ -502,7 +573,8 @@ mod tests {
         c.sti();
         assert!(c.interrupts_enabled());
     }
-    #[test]
+
+    #[test]
     fn spurious_irq_counting() {
         let mut c = IrqController::new();
         let irq = IrqLine(99); // 无处理器
@@ -510,14 +582,16 @@ mod tests {
         assert_eq!(n, 0);
         assert_eq!(c.spurious_count, 1);
     }
-    #[test]
+
+    #[test]
     fn irq_line_pic_vector() {
         assert_eq!(IrqLine(0).pic_vector(), 0x20);
         assert_eq!(IrqLine(15).pic_vector(), 0x2F);
         assert!(IrqLine(5).is_hardware_irq());
         assert!(!IrqLine(200).is_hardware_irq());
     }
-    #[test]
+
+    #[test]
     fn unregister_owner() {
         let mut c = IrqController::new();
         let irq = IrqLine(11);
@@ -530,7 +604,8 @@ mod tests {
         assert_eq!(removed, 2);
         assert_eq!(c.handler_count(irq), 0);
     }
-    #[test]
+
+    #[test]
     fn sense_and_act() {
         let snap = irq_ctrl_sense_snapshot();
         assert!(snap.contains("irq_ctrl"));
@@ -542,4 +617,4 @@ mod tests {
         assert!(irq_ctrl_act_raw("sti").is_ok());
         assert!(irq_ctrl_act_raw("raise 3").is_ok());
     }
-}
+}

@@ -5,9 +5,9 @@
 
 use std::collections::BTreeMap;
 
-use crate::fs::inode::{alloc_inode, get_inode, get_inode_mut, InodeType};
-use crate::fs::dentry::{dentry_lookup, dentry_create, dentry_delete, ROOT_INO};
-use crate::fs::fd_table::{fd_alloc, fd_close, fd_count, fd_get, Access, OpenFile, FdTable};
+use super::inode::{alloc_inode, get_inode, get_inode_mut, InodeType};
+use super::dentry::{dentry_lookup, dentry_create, dentry_delete, ROOT_INO};
+use super::fd_table::{fd_alloc, fd_close, fd_count, fd_get, Access, OpenFile, FdTable, fd_registry};
 
 /// 全局 VFS：按进程 ID 维护独立 fd 表。
 pub struct Vfs {
@@ -58,7 +58,7 @@ impl Vfs {
         buf[..n].copy_from_slice(&data[start..end]);
         // 更新 offset 需要可变访问
         {
-            let mut g = crate::fs::fd_table::fd_registry().lock().unwrap();
+            let mut g = fd_registry().lock().unwrap();
             if let Some(table) = g.tables.get_mut(&pid) {
                 if let Some(of) = table.get_mut(fd) {
                     of.offset += n as u64;
@@ -74,7 +74,7 @@ impl Vfs {
         if !of.access.can_write() {
             return Err("不可写".to_string());
         }
-        let mut g = crate::fs::fd_table::fd_registry().lock().unwrap();
+        let mut g = fd_registry().lock().unwrap();
         let table = g.tables.get_mut(&pid).ok_or("进程表未找到")?;
         let of = table.get_mut(fd).ok_or("fd 未找到")?;
         let pos = of.offset as usize;
@@ -113,7 +113,7 @@ impl Vfs {
         if new_offset < 0 {
             return Err("负偏移".to_string());
         }
-        let mut g = crate::fs::fd_table::fd_registry().lock().unwrap();
+        let mut g = fd_registry().lock().unwrap();
         let table = g.tables.get_mut(&pid).ok_or("进程表未找到")?;
         let of = table.get_mut(fd).ok_or("fd 未找到")?;
         of.offset = new_offset as u64;
@@ -123,7 +123,7 @@ impl Vfs {
 
     /// 是否有有效的 fd。
     pub fn has_fd(&self, pid: u64, fd: u64) -> bool {
-        let g = crate::fs::fd_table::fd_registry().lock().unwrap();
+        let g = fd_registry().lock().unwrap();
         g.tables.get(&pid).and_then(|t| t.get(fd)).is_some()
     }
 
@@ -204,7 +204,7 @@ pub fn vfs_unlink(pid: u64, path: &str) -> Result<(), String> {
 
 /// vfs_stats 便捷函数。
 pub fn vfs_stats() -> String {
-    format!("vfs 就绪，fd 表项数={}", crate::fs::fd_table::fd_registry().lock().unwrap().tables.len())
+    format!("vfs 就绪，fd 表项数={}", fd_registry().lock().unwrap().tables.len())
 }
 
 fn remove_entry(parent_ino: u64, name: &str) -> Result<(), String> {

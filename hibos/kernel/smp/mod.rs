@@ -9,15 +9,12 @@
 
 // 子模块（由子智能体并行填充）
 pub mod cpu_topology;
-pub mod spinlock;
 pub mod ipi;
 pub mod load_balancer;
 pub mod core_scheduler;
 
-// 公共类型
-pub use cpu_topology::{CpuTopology, CpuInfo, cpu_topology, cpu_online, cpu_offline};
-pub use spinlock::{SpinLock, spin_lock, spin_unlock, spin_trylock};
-pub use ipi::{IpiMessage, ipi_send, ipi_broadcast};
+// 公共类型（已在本模块定义）
+pub use ipi::{ipi_send, ipi_broadcast};
 pub use load_balancer::{LoadBalancer, balance_load};
 pub use core_scheduler::{CoreScheduler, core_schedule, core_migrate};
 

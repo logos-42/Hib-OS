@@ -404,7 +404,8 @@ impl QuotaManagerLeased {
         block_limit: u64,
         inode_limit: u64,
     ) -> Result<Epoch, QuotaError> {
-        let _ = self.acquire_quota_lease(owner)?;
+        let _ = self.acquire_quota_lease(owner)
+            .map_err(|c| QuotaError::Invalid)?;
         self.inner.set_quota(uid, block_limit, inode_limit)?;
         let new_ep = lease::commit(
             &self.channel,
@@ -425,7 +426,8 @@ impl QuotaManagerLeased {
         blocks: u64,
         inodes: u64,
     ) -> Result<Epoch, QuotaError> {
-        let _ = self.acquire_quota_lease(owner)?;
+        let _ = self.acquire_quota_lease(owner)
+            .map_err(|c| QuotaError::Invalid)?;
         self.inner.charge(uid, blocks, inodes)?;
         let new_ep = lease::commit(
             &self.channel,
@@ -446,7 +448,8 @@ impl QuotaManagerLeased {
         blocks: u64,
         inodes: u64,
     ) -> Result<Epoch, QuotaError> {
-        let _ = self.acquire_quota_lease(owner)?;
+        let _ = self.acquire_quota_lease(owner)
+            .map_err(|c| QuotaError::Invalid)?;
         self.inner.release(uid, blocks, inodes)?;
         let new_ep = lease::commit(
             &self.channel,

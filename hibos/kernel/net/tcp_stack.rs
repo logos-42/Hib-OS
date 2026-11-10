@@ -405,25 +405,26 @@ impl TcpStack {
             return Err("tcp_connect 需要 CAP_NET_RAW 能力".to_string());
         }
         let key = TcpConnKey { local_port, remote_ip: [0, 0, 0, 0], remote_port: 0 };
-        let conn = self.conns.get_mut(&key).ok_or_else(|| format!("端口 {} 未绑定", local_port))?;
+        let conn = self.conns.get(&key).ok_or_else(|| format!("端口 {} 未绑定", local_port))?;
         if conn.state != TcpState::Closed {
             return Err(format!("端口 {} 状态非法 (connect): {}", local_port, conn.state.name()));
         }
         let iss = 1000 + local_port as u32; // ISS 基数（与 tcp.rs 一致，实际应随机化）
-        conn.remote_ip = remote_ip;
-        conn.remote_port = remote_port;
-        conn.iss = iss;
-        conn.snd_una = iss;
-        conn.snd_nxt = iss + 1; // SYN 占一个序号
-        conn.state = TcpState::SynSent;
-        conn.key = TcpConnKey { local_port, remote_ip, remote_port };
-        conn.last_sent = Some(Instant::now());
-        conn.rto_deadline = Instant::now() + conn.rto;
-        conn.rtt_seq = Some(iss); // SYN 需要被确认，用于 RTT 测量
-        conn.rtt_start = Some(Instant::now());
-        let new_key = conn.key.clone();
+        let new_key = TcpConnKey { local_port, remote_ip, remote_port };
+        drop(conn); // 释放只读借用，再可变操作 conns
         // 从旧 key 移动到新 key（四元组变化）。
-        let moved = self.conns.remove(&key).unwrap();
+        let mut moved = self.conns.remove(&key).unwrap();
+        moved.remote_ip = remote_ip;
+        moved.remote_port = remote_port;
+        moved.key = new_key.clone();
+        moved.iss = iss;
+        moved.snd_una = iss;
+        moved.snd_nxt = iss + 1; // SYN 占一个序号
+        moved.state = TcpState::SynSent;
+        moved.last_sent = Some(Instant::now());
+        moved.rto_deadline = Instant::now() + moved.rto;
+        moved.rtt_seq = Some(iss); // SYN 需要被确认，用于 RTT 测量
+        moved.rtt_start = Some(Instant::now());
         self.conns.insert(new_key.clone(), moved);
 
         let syn = TcpSegment::new(local_port, remote_port, iss, 0, TCP_SYN, 65535, Vec::new());
@@ -858,17 +859,25 @@ pub fn tcp_stack_act_raw(payload: &str) -> Result<String, String> {
             Ok(st.status())
         }
         Some("connect") => {
-            let port: u16 = it.next().ok_or("用法: connect <local_port> <remote_ip> <remote_port>")?.parse()?;
+            let port: u16 = it
+                .next()
+                .ok_or("用法: connect <local_port> <remote_ip> <remote_port>")?
+                .parse()
+                .map_err(|e| e.to_string())?;
             let ip_s = it.next().ok_or("缺少 remote_ip")?;
             let ip = crate::net::parse_ip(ip_s);
-            let rport: u16 = it.next().ok_or("缺少 remote_port")?.parse()?;
+            let rport: u16 = it
+                .next()
+                .ok_or("缺少 remote_port")?
+                .parse()
+                .map_err(|e| e.to_string())?;
             let mut st = TcpStack::stack().lock().unwrap();
             let segs = st.connect(1, port, ip, rport)?;
+            let segs_len = segs.len();
             // 环回驱动握手：把发出的段再送回本栈处理（模拟对端回应）。
             for _ in 0..8 {
                 let mut progressed = false;
                 let segs_clone: Vec<TcpSegment> = segs.iter().cloned().collect();
-                drop(segs); // 避免借用冲突：此处简化，直接用已收集的 segs_clone
                 for seg in &segs_clone {
                     let bytes = seg.serialize(st.our_ip, ip);
                     if let Ok(replies) = st.process_segment(ip, st.our_ip, &bytes) {
@@ -877,24 +886,35 @@ pub fn tcp_stack_act_raw(payload: &str) -> Result<String, String> {
                 }
                 if !progressed { break; }
             }
-            Ok(format!("tcp_connect port={} ip={}:{} segs={}", port, crate::net::fmt_ip(ip), rport, segs.len()))
+            Ok(format!("tcp_connect port={} ip={}:{} segs={}", port, crate::net::fmt_ip(ip), rport, segs_len))
         }
         Some("send") => {
-            let port: u16 = it.next().ok_or("用法: send <local_port> <hex数据>")?.parse()?;
+            let port: u16 = it
+                .next()
+                .ok_or("用法: send <local_port> <hex数据>")?
+                .parse()
+                .map_err(|e| e.to_string())?;
             let hex = it.next().ok_or("缺少 hex 数据")?;
             let data = hex_decode(hex)?;
             let mut st = TcpStack::stack().lock().unwrap();
             // 找到该端口的已建立连接（任意对端）。
-            let key = st.conns.iter().find(|(_, c)| c.local_port == port && c.state == TcpState::Established)
+            let key = st
+                .conns
+                .iter()
+                .find(|(_, c)| c.key.local_port == port && c.state == TcpState::Established)
                 .map(|(k, _)| k.clone())
                 .ok_or_else(|| format!("端口 {} 无已建立连接", port))?;
             let segs = st.send(&key, &data)?;
             Ok(format!("tcp_send port={} bytes={} segs={}", port, data.len(), segs.len()))
         }
         Some("close") => {
-            let port: u16 = it.next().ok_or("用法: close <local_port>")?.parse()?;
+            let port: u16 = it
+                .next()
+                .ok_or("用法: close <local_port>")?
+                .parse()
+                .map_err(|e| e.to_string())?;
             let mut st = TcpStack::stack().lock().unwrap();
-            let key = st.conns.iter().find(|(_, c)| c.local_port == port).map(|(k, _)| k.clone())
+            let key = st.conns.iter().find(|(_, c)| c.key.local_port == port).map(|(k, _)| k.clone())
                 .ok_or_else(|| format!("端口 {} 无连接", port))?;
             let segs = st.close(&key)?;
             Ok(format!("tcp_close port={} segs={}", port, segs.len()))

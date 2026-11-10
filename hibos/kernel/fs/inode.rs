@@ -65,12 +65,10 @@ struct InodeTable {
 static INODE_TABLE: OnceLock<Mutex<InodeTable>> = OnceLock::new();
 
 fn inode_table() -> &'static Mutex<InodeTable> {
-    INODE_TABLE.get_or_init(|| {
-        Mutex::new(InodeTable {
-            inodes: BTreeMap::new(),
-            next_ino: 1,
-        })
-    })
+    INODE_TABLE.get_or_init(|| Mutex::new(InodeTable {
+        inodes: BTreeMap::new(),
+        next_ino: 1,
+    }))
 }
 
 /// 分配新 inode。
@@ -127,7 +125,7 @@ mod tests {
             i.size = 5;
         }).unwrap();
         let inode = get_inode(ino).unwrap();
-        assert_eq!(i_size(&inode), 5);
+        assert_eq!(inode.size, 5);
     }
 
     #[test]
@@ -136,8 +134,4 @@ mod tests {
         assert!(free_inode(ino));
         assert!(get_inode(ino).is_none());
     }
-}
-
-fn i_size(inode: &Inode) -> u64 {
-    inode.size
 }

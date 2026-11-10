@@ -91,6 +91,12 @@ pub enum ChannelKind {
     Semantic,
     /// AI 原生：工作记忆层（memory://*）
     MemoryWs,
+    /// AI 原生：身体图式层（body://*）
+    BodySchema,
+    /// AI 原生：动作空间层（action://*）
+    ActionAi,
+    /// AI 原生：时间处理层（temporal://*）
+    Temporal,
 }
 
 impl ChannelKind {
@@ -135,6 +141,9 @@ impl ChannelKind {
             ChannelKind::Attention => "attention",
             ChannelKind::Semantic => "semantic",
             ChannelKind::MemoryWs => "memory",
+            ChannelKind::BodySchema => "body",
+            ChannelKind::ActionAi => "action",
+            ChannelKind::Temporal => "temporal",
         }
     }
 }
@@ -480,6 +489,24 @@ pub fn bootstrap() -> ChannelRegistry {
         (ChannelKind::MemoryWs, "memory://episode", Access::ReadWrite),
         (ChannelKind::MemoryWs, "memory://semantic", Access::ReadWrite),
         (ChannelKind::MemoryWs, "memory://skill", Access::ReadWrite),
+        // —— AI 原生身体/动作/时间层通道：身体图式 / 动作空间 / 时间处理 ——
+        (ChannelKind::BodySchema, "body://schema", Access::ReadWrite),
+        (ChannelKind::BodySchema, "body://proprioception", Access::ReadWrite),
+        (ChannelKind::BodySchema, "body://map", Access::Read),
+        (ChannelKind::BodySchema, "body://kinematic", Access::ReadWrite),
+        (ChannelKind::BodySchema, "body://state", Access::ReadWrite),
+        (ChannelKind::ActionAi, "action://primitive", Access::ReadWrite),
+        (ChannelKind::ActionAi, "action://command", Access::ReadWrite),
+        (ChannelKind::ActionAi, "action://execute", Access::Write),
+        (ChannelKind::ActionAi, "action://sequence", Access::ReadWrite),
+        (ChannelKind::ActionAi, "action://constraint", Access::ReadWrite),
+        (ChannelKind::Temporal, "temporal://clock", Access::Read),
+        (ChannelKind::Temporal, "temporal://circadian", Access::Read),
+        (ChannelKind::Temporal, "temporal://ultradian", Access::Read),
+        (ChannelKind::Temporal, "temporal://sequence", Access::ReadWrite),
+        (ChannelKind::Temporal, "temporal://schedule", Access::ReadWrite),
+        (ChannelKind::Temporal, "temporal://memory", Access::ReadWrite),
+        (ChannelKind::Temporal, "temporal://prediction", Access::ReadWrite),
     ];
     for (kind, name, access) in defaults {
         let _ = reg.open(kind, name, access);
@@ -494,7 +521,7 @@ mod tests {
     #[test]
     fn bootstrap_opens_all_channels() {
         let reg = bootstrap();
-        assert_eq!(reg.len(), 143);
+        assert_eq!(reg.len(), 160);
         assert_eq!(reg.of_kind(ChannelKind::Net).count(), 5);
         assert_eq!(reg.of_kind(ChannelKind::Will).count(), 4);
         assert_eq!(reg.of_kind(ChannelKind::Context).count(), 2);
@@ -522,6 +549,9 @@ mod tests {
         assert_eq!(reg.of_kind(ChannelKind::Attention).count(), 4);
         assert_eq!(reg.of_kind(ChannelKind::Semantic).count(), 4);
         assert_eq!(reg.of_kind(ChannelKind::MemoryWs).count(), 7);
+        assert_eq!(reg.of_kind(ChannelKind::BodySchema).count(), 5);
+        assert_eq!(reg.of_kind(ChannelKind::ActionAi).count(), 5);
+        assert_eq!(reg.of_kind(ChannelKind::Temporal).count(), 7);
         assert!(reg.find("file://vfs").is_some());
         assert!(reg.find("desktop://screen").is_some());
         assert!(reg.find("trace://exec").is_some());
@@ -540,6 +570,9 @@ mod tests {
         assert!(reg.find("attention://lens").is_some());
         assert!(reg.find("semantic://search").is_some());
         assert!(reg.find("memory://wm").is_some());
+        assert!(reg.find("body://schema").is_some());
+        assert!(reg.find("action://primitive").is_some());
+        assert!(reg.find("temporal://clock").is_some());
     }
 
     #[test]

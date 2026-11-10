@@ -417,7 +417,8 @@ impl FileLockManagerLeased {
         len: u64,
         pid: u64,
     ) -> Result<Epoch, LockError> {
-        let _ = self.acquire_lock_lease(owner)?;
+        let _ = self.acquire_lock_lease(owner)
+            .map_err(|c| LockError::Internal(format!("租约冲突: holder={:?}", c.holder)))?;
         self.inner.lock_with_pid(fd, pid, lock_type, start, len)?;
         let new_ep = lease::commit(
             &self.channel,
@@ -439,7 +440,8 @@ impl FileLockManagerLeased {
         start: u64,
         len: u64,
     ) -> Result<Epoch, LockError> {
-        let _ = self.acquire_lock_lease(owner)?;
+        let _ = self.acquire_lock_lease(owner)
+            .map_err(|c| LockError::Internal(format!("租约冲突: holder={:?}", c.holder)))?;
         self.inner.unlock(fd, pid, start, len)?;
         let new_ep = lease::commit(
             &self.channel,
@@ -458,7 +460,8 @@ impl FileLockManagerLeased {
         expected_epoch: Epoch,
         fd: u64,
     ) -> Result<Epoch, LockError> {
-        let _ = self.acquire_lock_lease(owner)?;
+        let _ = self.acquire_lock_lease(owner)
+            .map_err(|c| LockError::Internal(format!("租约冲突: holder={:?}", c.holder)))?;
         self.inner.release_fd(fd)?;
         let new_ep = lease::commit(
             &self.channel,

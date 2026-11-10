@@ -413,7 +413,10 @@ impl DiskImageLeased {
     ) -> Result<Epoch, crate::lease::CommitError> {
         // 先校验租约所有权与 epoch（乐观 CAS）。
         use crate::lease::{commit, acquire};
-        let _ = acquire(&self.channel, crate::exec::ExecId(owner), None)?;
+        let _ = acquire(&self.channel, crate::exec::ExecId(owner), None)
+            .map_err(|c| crate::lease::CommitError::NotLeaseOwner {
+                holder: Some(c.holder),
+            })?;
         {
             let mut img = self.inner.lock().unwrap();
             img.write_block(sector_idx, buf)?;
@@ -537,8 +540,10 @@ impl DiskImageCaps {
 // ============================================================================
 // sense/act 通道接口：diskimg://<路径>
 // ============================================================================
-/// 感知磁盘镜像通道：返回镜像实时快照（扇区数、脏块数、epoch）。
-////// 通道名形式：`diskimg://<绝对路径>`
+
+/// 感知磁盘镜像通道：返回镜像实时快照（扇区数、脏块数、epoch）。
+///
+/// 通道名形式：`diskimg://<绝对路径>`
 pub fn probe_disk_img(name: &str) -> Option<String> {
     let path = name.strip_prefix("diskimg://")?;
     let path = Path::new(path);
@@ -557,8 +562,10 @@ pub fn probe_disk_img(name: &str) -> Option<String> {
         epoch
     ))
 }
-/// 对磁盘镜像通道执行行动。
-////// 支持子命令：
+
+/// 对磁盘镜像通道执行行动。
+///
+/// 支持子命令：
 /// - `create <字节数>` —— 创建新镜像
 /// - `write <扇区> <十六进制数据>` —— 写入一个扇区（需先获取租约，此处简化为 force 写）
 /// - `read <扇区>` —— 读取一个扇区并返回十六进制摘要
@@ -944,4 +951,4 @@ mod tests {
         assert!(r.contains("epoch="));
         let _ = std::fs::remove_file(&path);
     }
-}
+}

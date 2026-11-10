@@ -321,7 +321,10 @@ impl DentryCacheLeased {
         expected_epoch: Epoch,
         dentry: Dentry,
     ) -> Result<Epoch, crate::lease::CommitError> {
-        let _ = self.acquire_dcache_lease(owner)?;
+        let _ = self.acquire_dcache_lease(owner)
+            .map_err(|c| crate::lease::CommitError::NotLeaseOwner {
+                holder: Some(c.holder),
+            })?;
         self.inner.insert(dentry);
         let new_ep = lease::commit(
             &self.channel,
@@ -340,7 +343,10 @@ impl DentryCacheLeased {
         parent_ino: Ino,
         name: &str,
     ) -> Result<Epoch, crate::lease::CommitError> {
-        let _ = self.acquire_dcache_lease(owner)?;
+        let _ = self.acquire_dcache_lease(owner)
+            .map_err(|c| crate::lease::CommitError::NotLeaseOwner {
+                holder: Some(c.holder),
+            })?;
         let _ = self.inner.invalidate(parent_ino, name);
         let new_ep = lease::commit(
             &self.channel,

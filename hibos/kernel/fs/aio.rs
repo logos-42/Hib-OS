@@ -420,7 +420,8 @@ impl AioContextLeased {
         buf: Vec<u8>,
         offset: u64,
     ) -> Result<(crate::fs::aio::AioReqId, Epoch), crate::fs::aio::AioError> {
-        let _ = self.acquire_sq_lease(owner)?;
+        let _ = self.acquire_sq_lease(owner)
+            .map_err(|c| crate::fs::aio::AioError::IoError(format!("租约冲突: holder={:?}", c.holder)))?;
         let req_id = self.inner.submit(op, fd, buf, offset)?;
         let new_ep = lease::commit(
             &self.channel,
@@ -805,5 +806,120 @@ mod tests {
         ctx.start().unwrap();
         assert!(ctx.is_running());
         ctx.shutdown().unwrap();
+    }
+
+    // ----- lease 并发控制测试 -----
+
+    #[test]
+    fn aio_leased_single_writer() {
+        let ctx = AioContextLeased::new(32, "aio://test-lease");
+        assert!(ctx.acquire_sq_lease(101).is_ok());
+        let err = ctx.acquire_sq_lease(102).unwrap_err();
+        assert_eq!(err.holder, crate::exec::ExecId(101));
+        assert!(ctx.release_sq_lease(101));
+        assert!(ctx.acquire_sq_lease(102).is_ok());
+        assert!(ctx.release_sq_lease(102));
+    }
+
+    #[test]
+    fn aio_leased_submit_commit_epoch() {
+        let ctx = AioContextLeased::new(32, "aio://test-lease2");
+        let fd = 1;
+        ctx.register_device(fd, Box::new(MemBlockDevice::new("ram0", 64)));
+        ctx.start().unwrap();
+        let ep0 = ctx.epoch();
+        let ep1 = ctx.acquire_sq_lease(201).unwrap();
+        assert_eq!(ep1, ep0);
+        let (req_id, new_ep) = ctx.submit_under_lease(
+            201, ep0, AioOp::Write, fd, vec![0x42u8; BLOCK_SIZE], 0,
+        ).unwrap();
+        assert_eq!(new_ep, ep0 + 1);
+        let res = ctx.poll(req_id, Duration::from_secs(2)).unwrap();
+        assert!(res.result.is_ok());
+        ctx.shutdown().unwrap();
+        assert!(ctx.release_sq_lease(201));
+    }
+
+    #[test]
+    fn aio_leased_stale_epoch_rejected() {
+        let ctx = AioContextLeased::new(32, "aio://test-lease3");
+        let fd = 1;
+        ctx.register_device(fd, Box::new(MemBlockDevice::new("ram0", 64)));
+        ctx.start().unwrap();
+        let ep = ctx.acquire_sq_lease(301).unwrap();
+        let _ = ctx.submit_under_lease(
+            301, ep, AioOp::Read, fd, vec![0u8; BLOCK_SIZE], 0,
+        ).unwrap();
+        // 再用旧 epoch 提交应被拒绝。
+        let ep2 = ctx.acquire_sq_lease(301).unwrap();
+        let err = ctx.submit_under_lease(
+            301, ep, AioOp::Read, fd, vec![0u8; BLOCK_SIZE], 1,
+        ).unwrap_err();
+        assert!(matches!(err, AioError::IoError(_)));
+        ctx.shutdown().unwrap();
+        let _ = ctx.release_sq_lease(301);
+    }
+
+    #[test]
+    fn aio_leased_force_shutdown() {
+        let ctx = AioContextLeased::new(32, "aio://test-lease4");
+        let ep0 = ctx.epoch();
+        let ep1 = ctx.force_shutdown(401);
+        assert!(ep1 > ep0);
+    }
+
+    // ----- caps 权限测试 -----
+
+    #[test]
+    fn aio_caps_rawio_required() {
+        let ctx = AioContext::new(32);
+        let caps_ctx = AioContextCaps::new(ctx);
+        {
+            let mut c = caps::caps().lock().unwrap();
+            let _ = c.revoke("CAP_SYS_RAWIO");
+        }
+        assert!(caps_ctx.submit(AioOp::Read, 1, vec![0u8; BLOCK_SIZE], 0).is_err());
+        {
+            let mut c = caps::caps().lock().unwrap();
+            let _ = c.grant("CAP_SYS_RAWIO");
+        }
+        // submit 会因 NoFd 失败，但不是权限错误，说明能力检查通过了。
+        let err = caps_ctx.submit(AioOp::Read, 1, vec![0u8; BLOCK_SIZE], 0).unwrap_err();
+        assert_eq!(err, AioError::NoFd);
+    }
+
+    #[test]
+    fn aio_caps_admin_required_for_start() {
+        let ctx = AioContext::new(32);
+        let caps_ctx = AioContextCaps::new(ctx);
+        {
+            let mut c = caps::caps().lock().unwrap();
+            let _ = c.revoke("CAP_SYS_ADMIN");
+        }
+        assert!(caps_ctx.start().is_err());
+        {
+            let mut c = caps::caps().lock().unwrap();
+            let _ = c.grant("CAP_SYS_ADMIN");
+        }
+        assert!(caps_ctx.start().is_ok());
+        caps_ctx.shutdown().unwrap();
+    }
+
+    // ----- sense/act 通道测试 -----
+
+    #[test]
+    fn aio_probe_channel() {
+        let snap = probe_aio("aio://ram0").unwrap();
+        assert!(snap.contains("aio://ram0"));
+        assert!(snap.contains("epoch="));
+        assert!(snap.contains("ops="));
+    }
+
+    #[test]
+    fn aio_act_channel_status_epoch() {
+        let r = act_aio("aio://ram0", "status").unwrap().unwrap();
+        assert!(r.contains("status=active"));
+        let r = act_aio("aio://ram0", "epoch").unwrap().unwrap();
+        assert!(r.contains("epoch="));
     }
 }

@@ -32,6 +32,7 @@ use crate::net::{net, NetStack, fmt_ip};
 
 /// ICMP 报文类型。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
 pub enum IcmpType {
     EchoReply = 0,
     DestinationUnreachable = 3,
@@ -97,6 +98,7 @@ pub enum IcmpType {
     }
 }
 /// ICMP 目的不可达的细分代码（RFC 792）。
+#[repr(u8)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DestUnreachableCode {
     NetUnreachable = 0,
@@ -167,6 +169,7 @@ pub enum DestUnreachableCode {
     }
 }
 /// ICMP 时间超时的细分代码。
+#[repr(u8)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TimeExceededCode {
     TtlExpiredInTransit = 0,
@@ -414,12 +417,17 @@ pub struct IcmpStats {
 const ICMP_TIME_EXCEEDED: u8 = 11;
 const ICMP_PARAMETER_PROBLEM: u8 = 12;
 /// 对已构造的 IcmpPacket 重算校验并序列化为字节。
+/// `serialize_placeholder` 是 `ipv4::IcmpPacket` 的私有方法，此处改用公有的
+/// `serialize()`（把当前 checksum 字段写入）后手动重算 1 的补码校验和。
 fn finalize_icmp(pkt: &IcmpPacket) -> Vec<u8> {
-    let mut b = pkt.serialize_placeholder();
-    let csum = compute_checksum(&[&b]);
-    let mut out = b;
-    out[2..4].copy_from_slice(&csum.to_be_bytes());
-    out
+    let mut b = pkt.serialize(); // checksum 字段按 pkt.checksum（应为 0）写入
+    // 重算：把 checksum 字段（字节 2..4）置 0 后求 1 的补码和，再写回。
+    let mut csum_bytes = b.clone();
+    csum_bytes[2] = 0;
+    csum_bytes[3] = 0;
+    let csum = compute_checksum(&[&csum_bytes]);
+    b[2..4].copy_from_slice(&csum.to_be_bytes());
+    b
 }
 /// 从 ICMP 错误报文载荷中提取原始数据报的目标 IP（原 IP 首部位于载荷偏移 4 字节处，第 12-15 字节）。
 fn extract_orig_dst(payload: &[u8]) -> Option<[u8; 4]> {
@@ -462,8 +470,16 @@ pub fn icmp_act_raw(payload: &str) -> Result<String, String> {
             }
             let ip_s = it.next().ok_or("用法: ping <ip> <id> <seq> <hexpayload>")?;
             let dst = crate::net::parse_ip(ip_s);
-            let id: u16 = it.next().ok_or("缺少 id")?.parse()?;
-            let seq: u16 = it.next().ok_or("缺少 seq")?.parse()?;
+            let id: u16 = it
+                .next()
+                .ok_or("缺少 id")?
+                .parse()
+                .map_err(|e| e.to_string())?;
+            let seq: u16 = it
+                .next()
+                .ok_or("缺少 seq")?
+                .parse()
+                .map_err(|e| e.to_string())?;
             let hex = it.next().unwrap_or("50696e67"); // 默认 "ping"
             let data = hex_decode(hex)?;
             let mut st = IcmpStack::stack().lock().unwrap();
@@ -478,7 +494,11 @@ pub fn icmp_act_raw(payload: &str) -> Result<String, String> {
             }
             let ip_s = it.next().ok_or("用法: unreach <dst_ip> <code>")?;
             let dst = crate::net::parse_ip(ip_s);
-            let code: u8 = it.next().unwrap_or("1").parse()?; // 默认 Host Unreachable
+            let code: u8 = it
+                .next()
+                .unwrap_or("1")
+                .parse()
+                .map_err(|e| e.to_string())?; // 默认 Host Unreachable
             let code = DestUnreachableCode::from_u8(code);
             let orig_hdr = [0x45, 0, 0, 20, 0, 0, 0, 0, 64, IP_PROTO_ICMP, 0, 0, 10, 0, 0, 2];
             let orig_data = b"original packet data";

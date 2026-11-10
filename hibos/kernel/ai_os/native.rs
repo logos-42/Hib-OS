@@ -21,6 +21,14 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use std::time::SystemTime;
 
+/// 当前时间纳秒（供 AI 原生模块使用）。
+pub fn now_ns() -> u128 {
+    SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0)
+}
+
 // =====================================================================================
 // 质原 (Qualia) —— 意识的原始体验单元
 // =====================================================================================
@@ -184,7 +192,7 @@ impl QualiaFactory {
     }
 
     pub fn create_semantic(&mut self, concept: &str) -> Quale {
-        let hash = concept.bytes().iter().fold(0u64, |acc, &b| acc * 31 + b as u64);
+        let hash = concept.bytes().fold(0u64, |acc, &b| acc * 31 + b as u64);
         let dims: Vec<f32> = (0..64)
             .map(|i| {
                 let bit = (hash >> i) & 1;

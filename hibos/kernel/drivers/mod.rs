@@ -13,9 +13,10 @@ pub mod driver_registry;
 pub mod pci_enumerator;
 pub mod irq_dispatcher;
 pub mod devtree;
+pub mod irq_ctrl;
+pub mod dma;
 
-// 公共类型
-pub use driver_registry::{Driver, DriverRegistry, driver_register, driver_lookup, driver_bind, driver_unbind};
+// 公共类型（已在本模块定义）
 pub use pci_enumerator::{PciDevice, PciClass, pci_enumerate, pci_lookup};
 pub use irq_dispatcher::{IrqLine, IrqHandler, irq_bind, irq_fire, irq_unbind};
 pub use devtree::{DeviceTree, devtree_insert, devtree_lookup};
