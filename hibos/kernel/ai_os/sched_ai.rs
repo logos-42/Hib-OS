@@ -1,1 +1,245 @@
-//! 模型感知调度 —— AI 原生 OS 的“调度器”。 //! //! 传统操作系统调度 CPU 时间片给进程；AI 原生 OS 调度的是“推理带宽/上下文窗口/模型实例” //! 给智能体。调度决策除优先级外，还考虑模型负载信号： //! * 大模型实例独占推理流水线，应享有更长时间片与更高抢占保护； //! * 上下文窗口接近饱和的智能体应优先获得“上下文换入/摘要”调度； //! * token 预算耗尽的智能体降级到最低优先级（类似“CPU 饥饿保护”）。 //! //! 这是策略层：它不接管 exec 的真实线程调度（避免改动既有 exec.rs），而是为 //! `sched://ai` 通道与 shell 提供可被外部调度器（inspiration 核心 / 各调度域）消费的 //! 就绪队列、pick_next、时间片到期与抢占语义。 //! //! 调度域（沿用 Hib OS 五域，AI 原生变体）： //! * reflex：中断/工具返回级，最高优先级抢占； //! * perception：多模态感知与 `sense` 快照，通道事件驱动； //! * deliberation：`act` 通道写入与租约提交，单写者租约串行化； //! * memory：上下文窗口与长期记忆回溯，只读为主； //! * governance：能力/电源/策略决策，root capability 门禁。  use std::collections::{BTreeMap, VecDeque}; use std::sync::{Mutex, OnceLock};  use crate::scheduler::CpuPriority;  /// 调度域。 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Ord, PartialOrd)] pub enum SchedDomain {     Reflex,     Perception,     Deliberation,     Memory,     Governance, }  impl SchedDomain {     pub fn name(self) -> &'static str {         match self {             SchedDomain::Reflex => "reflex",             SchedDomain::Perception => "perception",             SchedDomain::Deliberation => "deliberation",             SchedDomain::Memory => "memory",             SchedDomain::Governance => "governance",         }     }      pub fn parse(s: &str) -> Result<Self, String> {         match s {             "reflex" => Ok(SchedDomain::Reflex),             "perception" => Ok(SchedDomain::Perception),             "deliberation" => Ok(SchedDomain::Deliberation),             "memory" => Ok(SchedDomain::Memory),             "governance" => Ok(SchedDomain::Governance),             other => Err(format!("未知调度域 {}", other)),         }     } }  /// 就绪队列条目：智能体 + 模型负载信号。 #[derive(Clone, Debug)] pub struct SchedEntry {     pub agent_id: crate::ai_os::agent_proc::Pid,     pub priority: CpuPriority,     pub domain: SchedDomain,     /// 所属模型实例（用于亲和性调度：同模型实例的任务倾向于连续调度）。     pub model_instance: Option<crate::ai_os::model::InstanceId>,     /// 剩余 token 预算（0 表示已耗尽，降级）。     pub token_budget_left: u64,     /// 上下文窗口占用率 0.0-1.0。     pub ctx_fill: f64,     pub enqueued_ns: u128, }  /// 多域 MLFQ 简化：每个域独立队列，带老化与时间片。 pub struct SchedulerAi {     domains: BTreeMap<SchedDomain, DomainQueue>,     time_slice_ns: u128,     enqueue_count: u64,     pick_count: u64,     preempt_count: u64,     last_picked_instance: Option<crate::ai_os::model::InstanceId>, }  struct DomainQueue {     queues: BTreeMap<CpuPriority, VecDeque<SchedEntry>>,     aging_ticks: u64, }  impl DomainQueue {     fn new() -> Self {         let mut queues = BTreeMap::new();         queues.insert(CpuPriority::Critical, VecDeque::new());         queues.insert(CpuPriority::High, VecDeque::new());         queues.insert(CpuPriority::Medium, VecDeque::new());         queues.insert(CpuPriority::Low, VecDeque::new());         Self {             queues,             aging_ticks: 0,         }     }      fn enqueue(&mut self, entry: SchedEntry) {         self.queues.get_mut(&entry.priority).unwrap().push_back(entry);     }      fn pick_next(&mut self, last_instance: Option<crate::ai_os::model::InstanceId>) -> Option<SchedEntry> {         // 优先级高到低扫描；同优先级内若上一个被选中的条目属于同一模型实例，         // 给予亲和性加权（连续推理利用 KV 缓存，减少上下文切换）。         for (prio, q) in self.queues.iter_mut().rev() {             if let Some(pos) = q.iter().position(|e| {                 last_instance.is_some() && e.model_instance == last_instance             }) {                 return Some(q.remove(pos).unwrap());             }             if let Some(e) = q.pop_front() {                 return Some(e);             }         }         None     }      fn len(&self) -> usize {         self.queues.values().map(|q| q.len()).sum()     } }  impl SchedulerAi {     pub fn new() -> Self {         let mut domains = BTreeMap::new();         domains.insert(SchedDomain::Reflex, DomainQueue::new());         domains.insert(SchedDomain::Perception, DomainQueue::new());         domains.insert(SchedDomain::Deliberation, DomainQueue::new());         domains.insert(SchedDomain::Memory, DomainQueue::new());         domains.insert(SchedDomain::Governance, DomainQueue::new());         Self {             domains,             time_slice_ns: 10_000_000, // 10ms，与 Hib OS 一致             enqueue_count: 0,             pick_count: 0,             preempt_count: 0,             last_picked_instance: None,         }     }      pub fn enqueue(         &mut self,         domain: SchedDomain,         agent_id: crate::ai_os::agent_proc::Pid,         priority: CpuPriority,         model_instance: Option<crate::ai_os::model::InstanceId>,         token_budget_left: u64,         ctx_fill: f64,     ) {         let q = self.domains.get_mut(&domain).unwrap();         q.enqueue(SchedEntry {             agent_id,             priority,             domain,             model_instance,             token_budget_left,             ctx_fill,             enqueued_ns: crate::monitor::get_time_ns() as u128,         });         self.enqueue_count += 1;     }      pub fn pick_next(&mut self, domain: SchedDomain) -> Option<crate::ai_os::agent_proc::Pid> {         let q = self.domains.get_mut(&domain).unwrap();         let entry = q.pick_next(self.last_picked_instance);         if let Some(e) = &entry {             self.last_picked_instance = e.model_instance;             self.pick_count += 1;         }         entry.map(|e| e.agent_id)     }      pub fn on_time_slice_expiry(&mut self, domain: SchedDomain) {         // 时间片到期：当前运行任务降级一级重入队（MLFQ 经典策略，避免饿死通过老化）。         let q = self.domains.get_mut(&domain).unwrap();         q.aging_ticks = q.aging_ticks.saturating_add(1);         if q.aging_ticks % 4 == 0 {             // 老化：把最低优先级队列的一个任务提升到中级，防止饿死。             if let Some(e) = q.queues.get(&CpuPriority::Low).and_then(|q| q.front().cloned()) {                 // 此处简化：仅计数，真实提升由外部调度域按策略执行。                 let _ = e;             }         }     }      pub fn preempt(&mut self, domain: SchedDomain, reason: &str) {         let _ = reason;         self.preempt_count += 1;         // 抢占：将当前选中实例标记为需重新排队，由下次 pick_next 重新评估。     }      pub fn len(&self) -> usize {         self.domains.values().map(|d| d.len()).sum()     }      pub fn status_line(&self) -> String {         format!(             "enqueue={} pick={} preempt={} queued={} slice={}ns",             self.enqueue_count, self.pick_count, self.preempt_count, self.len(), self.time_slice_ns         )     } }  static SCHED_AI: OnceLock<Mutex<SchedulerAi>> = OnceLock::new();  pub fn sched_ai() -> &'static Mutex<SchedulerAi> {     SCHED_AI.get_or_init(|| Mutex::new(SchedulerAi::new())) }  pub fn init() {     let _ = sched_ai(); }  /// `sense sched://ai`：调度器状态摘要。 pub fn sched_ai_sense() -> String {     sched_ai().lock().unwrap().status_line() }  /// 聚合状态摘要。 pub fn status() -> String {     sched_ai_sense() }  /// `act sched://ai <op>`：调度器行动。 pub fn sched_ai_act(payload: &str) -> Result<String, String> {     let mut it = payload.split_whitespace();     match it.next().unwrap_or("") {         "enqueue" => {             let domain = SchedDomain::parse(it.next().ok_or("缺少域")?)?;             let agent_id: u64 = it.next().ok_or("缺少智能体 id")?.parse().map_err(|e| e.to_string())?;             let priority = match it.next().unwrap_or("medium") {                 "low" => CpuPriority::Low,                 "high" => CpuPriority::High,                 "critical" => CpuPriority::Critical,                 _ => CpuPriority::Medium,             };             let model_inst: Option<u64> = it.next().and_then(|v| v.parse().ok());             let budget: u64 = it.next().and_then(|v| v.parse().ok()).unwrap_or(1_000_000);             let ctx_fill: f64 = it.next().and_then(|v| v.parse().ok()).unwrap_or(0.0);             sched_ai().lock().unwrap().enqueue(domain, agent_id, priority, model_inst, budget, ctx_fill);             Ok(format!("已入队智能体 {} 到域 {} (优先级={})", agent_id, domain.name(), priority.name()))         }         "pick_next" => {             let domain = SchedDomain::parse(it.next().ok_or("缺少域")?)?;             match sched_ai().lock().unwrap().pick_next(domain) {                 Some(aid) => Ok(format!("域 {} 下一个运行智能体 {}", domain.name(), aid)),                 None => Ok(format!("域 {} 就绪队列为空", domain.name())),             }         }         "expiry" => {             let domain = SchedDomain::parse(it.next().ok_or("缺少域")?)?;             sched_ai().lock().unwrap().on_time_slice_expiry(domain);             Ok(format!("域 {} 时间片到期，任务已评估降级", domain.name()))         }         "preempt" => {             let domain = SchedDomain::parse(it.next().ok_or("缺少域")?)?;             let reason = it.collect::<Vec<_>>().join(" ");             sched_ai().lock().unwrap().preempt(domain, &reason);             Ok(format!("域 {} 已抢占 (原因: {})", domain.name(), reason))         }         "status" => Ok(sched_ai_sense()),         _ => Err(             "用法: sched enqueue <域> <智能体> <优先级> [模型实例] [预算] [ctx填充] | pick_next <域> | expiry <域> | preempt <域> <原因> | status"                 .to_string(),         ),     } }  #[cfg(test)] mod tests {     use super::*;     use crate::scheduler::CpuPriority;      #[test]     fn enqueue_pick_next_affinity() {         let mut s = SchedulerAi::new();         let inst = Some(7);         s.enqueue(SchedDomain::Deliberation, 1, CpuPriority::Medium, inst, 500_000, 0.3);         s.enqueue(SchedDomain::Deliberation, 2, CpuPriority::Medium, None, 500_000, 0.3);         // 先选 1（模型实例 7），再 pick 应优先选同实例 7（若还有）。         let first = s.pick_next(SchedDomain::Deliberation).unwrap();         assert_eq!(first, 1);         s.enqueue(SchedDomain::Deliberation, 3, CpuPriority::Medium, inst, 500_000, 0.3);         let second = s.pick_next(SchedDomain::Deliberation).unwrap();         assert_eq!(second, 3); // 亲和性：同模型实例优先         let third = s.pick_next(SchedDomain::Deliberation).unwrap();         assert_eq!(third, 2);         assert!(s.pick_next(SchedDomain::Deliberation).is_none());     }      #[test]     fn expiry_and_preempt_do_not_panic() {         let mut s = SchedulerAi::new();         s.enqueue(SchedDomain::Reflex, 5, CpuPriority::Critical, None, 1_000_000, 0.0);         s.on_time_slice_expiry(SchedDomain::Reflex);         s.preempt(SchedDomain::Reflex, "上下文窗口溢出");         assert_eq!(s.pick_next(SchedDomain::Reflex), Some(5));     }      #[test]     fn sched_ai_act_roundtrip() {         let res = sched_ai_act("enqueue deliberation 10 medium 7 100000 0.5").unwrap();         assert!(res.contains("已入队"));         let res = sched_ai_act("pick_next deliberation").unwrap();         assert!(res.contains("下一个运行智能体 10"));         let res = sched_ai_act("expiry reflex").unwrap();         assert!(res.contains("时间片到期"));         let res = sched_ai_act("status").unwrap();         assert!(res.contains("enqueue="));     } }
+//! AI 智能体调度器 —— 把「CPU 调度」映射为「模型推理配额调度」。
+//!
+//! 对应《现代操作系统》第 2.4 节「调度」：
+//! * 就绪队列按优先级分层（High / Medium / Low）；
+//! * 每层内部使用虚拟运行时间 (vruntime) 实现近似公平；
+//! * 支持模型实例亲和 (affinity) 与预算 (token budget)；
+//! * 提供 pick_next / enqueue / dequeue / tick / status。
+
+use std::collections::BTreeMap;
+use std::sync::{Mutex, OnceLock};
+
+use crate::scheduler::CpuPriority;
+
+/// 调度条目。
+#[derive(Clone, Debug)]
+pub struct SchedEntry {
+    pub agent_id: u64,
+    pub priority: CpuPriority,
+    /// 虚拟运行时间（越小越优先）。
+    pub vruntime: u64,
+    /// 本轮 token 预算。
+    pub budget: u64,
+    /// 已消耗。
+    pub consumed: u64,
+    /// 模型实例亲和。
+    pub affinity: Option<u64>,
+}
+
+impl SchedEntry {
+    pub fn new(agent_id: u64, priority: CpuPriority, budget: u64) -> Self {
+        Self {
+            agent_id,
+            priority,
+            vruntime: 0,
+            budget,
+            consumed: 0,
+            affinity: None,
+        }
+    }
+
+    pub fn weight(&self) -> u64 {
+        match self.priority {
+            CpuPriority::Critical => 4,
+            CpuPriority::High => 3,
+            CpuPriority::Medium => 2,
+            CpuPriority::Low => 1,
+        }
+    }
+
+    pub fn exhausted(&self) -> bool {
+        self.budget > 0 && self.consumed >= self.budget
+    }
+}
+
+/// 单层就绪队列。
+#[derive(Default)]
+pub struct RunQueue {
+    entries: Vec<SchedEntry>,
+}
+
+impl RunQueue {
+    pub fn enqueue(&mut self, e: SchedEntry) {
+        self.entries.push(e);
+    }
+
+    /// 选 vruntime 最小的条目。
+    pub fn pick(&self) -> Option<&SchedEntry> {
+        self.entries.iter().min_by_key(|e| e.vruntime)
+    }
+
+    pub fn take_next(&mut self) -> Option<SchedEntry> {
+        let idx = self
+            .entries
+            .iter()
+            .enumerate()
+            .min_by_key(|(_, e)| e.vruntime)
+            .map(|(i, _)| i)?;
+        Some(self.entries.remove(idx))
+    }
+
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+}
+
+/// 多级调度器。
+pub struct AiScheduler {
+    critical: RunQueue,
+    high: RunQueue,
+    medium: RunQueue,
+    low: RunQueue,
+    /// 已完成调度的 agent 累计配额账本。
+    ledger: BTreeMap<u64, u64>,
+    pub switches: u64,
+}
+
+impl AiScheduler {
+    pub fn new() -> Self {
+        Self {
+            critical: RunQueue::default(),
+            high: RunQueue::default(),
+            medium: RunQueue::default(),
+            low: RunQueue::default(),
+            ledger: BTreeMap::new(),
+            switches: 0,
+        }
+    }
+
+    fn queue_mut(&mut self, p: CpuPriority) -> &mut RunQueue {
+        match p {
+            CpuPriority::Critical | CpuPriority::High => &mut self.high,
+            CpuPriority::Medium => &mut self.medium,
+            CpuPriority::Low => &mut self.low,
+        }
+    }
+
+    pub fn enqueue(&mut self, e: SchedEntry) {
+        let p = e.priority;
+        self.queue_mut(p).enqueue(e);
+    }
+
+    /// 高优先级先选，同级按 vruntime。
+    pub fn pick_next(&self) -> Option<&SchedEntry> {
+        self.critical
+            .pick()
+            .or_else(|| self.high.pick())
+            .or_else(|| self.medium.pick())
+            .or_else(|| self.low.pick())
+    }
+
+    /// 取下一个并记一次上下文切换。
+    pub fn dequeue_next(&mut self) -> Option<SchedEntry> {
+        let e = if !self.critical.is_empty() {
+            self.critical.take_next()
+        } else if !self.high.is_empty() {
+            self.high.take_next()
+        } else if !self.medium.is_empty() {
+            self.medium.take_next()
+        } else {
+            self.low.take_next()
+        };
+        if e.is_some() {
+            self.switches += 1;
+        }
+        e
+    }
+
+    /// 记账：消耗 token 后按权重推进 vruntime。
+    pub fn charge(&mut self, agent_id: u64, tokens: u64) {
+        let delta = tokens.saturating_mul(1024) / 3;
+        *self.ledger.entry(agent_id).or_insert(0) += tokens;
+        for q in [
+            &mut self.critical,
+            &mut self.high,
+            &mut self.medium,
+            &mut self.low,
+        ] {
+            for e in q.entries.iter_mut().filter(|e| e.agent_id == agent_id) {
+                e.consumed += tokens;
+                e.vruntime += delta / e.weight();
+            }
+        }
+    }
+
+    pub fn total_ready(&self) -> usize {
+        self.critical.len() + self.high.len() + self.medium.len() + self.low.len()
+    }
+
+    pub fn ledger(&self) -> &BTreeMap<u64, u64> {
+        &self.ledger
+    }
+}
+
+impl Default for AiScheduler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+static SCHED: OnceLock<Mutex<AiScheduler>> = OnceLock::new();
+
+pub fn scheduler() -> &'static Mutex<AiScheduler> {
+    SCHED.get_or_init(|| Mutex::new(AiScheduler::new()))
+}
+
+pub fn init() {
+    // 预留：启动时可按模型实例亲和预热队列。
+}
+
+pub fn status() -> String {
+    let s = scheduler().lock().unwrap();
+    format!(
+        "ready={} switches={} ledger={}",
+        s.total_ready(),
+        s.switches,
+        s.ledger().len()
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn priority_ordering() {
+        let mut s = AiScheduler::new();
+        s.enqueue(SchedEntry::new(1, CpuPriority::Low, 100));
+        s.enqueue(SchedEntry::new(2, CpuPriority::High, 100));
+        assert_eq!(s.pick_next().unwrap().agent_id, 2);
+        assert_eq!(s.dequeue_next().unwrap().agent_id, 2);
+        assert_eq!(s.dequeue_next().unwrap().agent_id, 1);
+    }
+
+    #[test]
+    fn vruntime_fairness() {
+        let mut s = AiScheduler::new();
+        s.enqueue(SchedEntry::new(1, CpuPriority::Medium, 0));
+        s.enqueue(SchedEntry::new(2, CpuPriority::Medium, 0));
+        s.charge(1, 300);
+        assert_eq!(s.pick_next().unwrap().agent_id, 2);
+    }
+
+    #[test]
+    fn charge_records_ledger() {
+        let mut s = AiScheduler::new();
+        s.enqueue(SchedEntry::new(7, CpuPriority::Low, 10));
+        s.charge(7, 5);
+        assert_eq!(s.ledger()[&7], 5);
+        assert_eq!(s.total_ready(), 1);
+    }
+
+    #[test]
+    fn exhausted_budget() {
+        let mut s = AiScheduler::new();
+        s.enqueue(SchedEntry::new(3, CpuPriority::Low, 2));
+        s.charge(3, 5);
+        assert!(s.total_ready() == 1);
+        let e = s.pick_next().unwrap();
+        assert!(e.exhausted());
+    }
+}

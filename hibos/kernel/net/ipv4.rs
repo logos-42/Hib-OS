@@ -499,7 +499,7 @@ mod tests {
     fn test_iface() -> Interface {
         Interface {
             name: "eth0".to_string(),
-            mac: [0x02, 0, 0, 0, 0, 0, 1],
+            mac: [0x02, 0, 0, 0, 0, 1],
             ip: [10, 0, 0, 2],
             mask: [255, 255, 255, 0],
             link_up: true,
@@ -524,7 +524,7 @@ mod tests {
     #[test]
     fn fragment_and_reassemble() {
         let mut layer = Ipv4Layer::new([10, 0, 0, 2]);
-        let payload: Vec<u8> = (0..3000u8).collect();
+        let payload: Vec<u8> = (0..3000u16).map(|x| x as u8).collect();
         let packets = layer.transmit([10, 0, 0, 3], IP_PROTO_UDP, &payload, 1500).unwrap();
         assert!(packets.len() > 1, "应当分片: {}", packets.len());
         let id = packets[0].header.identification;
@@ -555,7 +555,7 @@ mod tests {
     #[test]
     fn fragment_incomplete_waits() {
         let mut layer = Ipv4Layer::new([10, 0, 0, 2]);
-        let payload: Vec<u8> = (0..3000u8).collect();
+        let payload: Vec<u8> = (0..3000u16).map(|x| x as u8).collect();
         let packets = layer.transmit([10, 0, 0, 3], IP_PROTO_UDP, &payload, 1500).unwrap();
         let mut buf = ReassemblyBuffer::new();
         // 只投递第一片和最后一片，缺中间一片应返回 None

@@ -1,1 +1,370 @@
-//! 上下文窗口 / KV 缓存管理 —— AI 原生 OS 中的“虚拟内存”。 //! //! 传统操作系统：虚拟地址空间 → 页表 → 物理页框；缺页中断 → 调入磁盘页框； //! 页面置换（LRU/Clock）淘汰冷页面，Swap 区作为后端；抖动时系统吞吐崩溃。 //! //! AI 原生 OS：模型上下文窗口 + KV 缓存即虚拟地址空间；“上下文页”（ContextPage， //! 一段 token 序列及其 KV 缓存）即物理页；窗口溢出即缺页中断，由 //! ctx_mem 决定淘汰哪个页并将其摘要后写入长期记忆 (knowledge，等价 Swap)； //! RAG 检索即按需调页。 //! //! 接口（供 `ctx://*` 通道）： //! * `ctx alloc <智能体> <窗口cap tokens>` —— 为智能体创建上下文窗口 //! * `ctx load <智能体> <知识id> [tokens]` —— 调入一页上下文（缺页处理） //! * `ctx evict <智能体> [页id]` —— 主动淘汰一页（页面置换） //! * `ctx access <智能体> <页id>` —— 访问页，更新 LRU 时间戳（类页表引用位） //! * `ctx status <智能体>` —— 窗口占用、缺页次数、换出次数  use std::collections::{BTreeMap, VecDeque}; use std::sync::{Mutex, OnceLock};  use crate::ai_os::agent_proc::Pid; use crate::monitor::get_time_ns;  /// 上下文页：一段连续 token 序列及其 KV 缓存占用，等价于一个物理页框。 #[derive(Clone, Debug)] pub struct ContextPage {     pub id: u64,     pub owner: Pid,     pub tokens: u64,           // 页内 token 数     pub kv_bytes: u64,         // KV 缓存占用字节     pub content_hash: u64,   // 内容摘要（模拟）     pub in_memory: bool,     // 是否驻留窗口（有效位，类页表 Present 位）     pub last_access_ns: u128, // 引用位/时间戳，供 LRU/Clock 置换     pub dirty: bool,           // 已修改，需回写长期记忆     pub swap_out_count: u64,   // 被换出次数 }  /// 单个智能体的上下文窗口（虚拟地址空间等价物）。 #[derive(Clone, Debug)] pub struct ContextWindow {     pub owner: Pid,     pub capacity_tokens: u64,   // 窗口总容量（虚拟地址空间大小）     pub used_tokens: u64,       // 已用 token 数     pub pages: Vec<u64>,        // 驻留页 id 列表（顺序 = 逻辑地址）     pub page_faults: u64,       // 缺页次数     pub swap_outs: u64,         // 换出次数     pub swap_ins: u64,          // 换入次数     pub evictions: u64,         // 主动淘汰次数 }  /// 上下文页注册表（所有页，无论是否驻留）。 pub struct PageTable {     pages: BTreeMap<u64, ContextPage>,     next_id: u64, }  /// 窗口管理器：每个智能体一个窗口 + 全局页表 + 置换策略 (LRU)。 pub struct CtxManager {     windows: BTreeMap<Pid, ContextWindow>,     pages: PageTable,     page_faults_total: u64,     swap_outs_total: u64,     swap_ins_total: u64,     next_window_id: u64, }  impl PageTable {     fn new() -> Self {         Self { pages: BTreeMap::new(), next_id: 1 }     }      fn alloc(&mut self, owner: Pid, tokens: u64, kv_bytes: u64) -> u64 {         let id = self.next_id;         self.next_id += 1;         self.pages.insert(id, ContextPage {             id, owner, tokens, kv_bytes, content_hash: id.wrapping_mul(0x9E37_79B9_7F4A_7C15),             in_memory: false, last_access_ns: 0, dirty: false, swap_out_count: 0,         });         id     }      fn get(&self, id: u64) -> Option<&ContextPage> {         self.pages.get(&id)     }      fn get_mut(&mut self, id: u64) -> Option<&mut ContextPage> {         self.pages.get_mut(&id)     }      fn mark_dirty(&mut self, id: u64) {         if let Some(p) = self.pages.get_mut(&id) {             p.dirty = true;         }     }      fn page_count(&self) -> usize {         self.pages.len()     }      fn resident_count(&self) -> usize {         self.pages.values().filter(|p| p.in_memory).count()     } }  impl CtxManager {     pub fn new() -> Self {         Self {             windows: BTreeMap::new(),             pages: PageTable::new(),             page_faults_total: 0,             swap_outs_total: 0,             swap_ins_total: 0,             next_window_id: 1,         }     }      /// 为智能体创建上下文窗口（创建进程地址空间等价物）。     pub fn create_window(&mut self, owner: Pid, capacity_tokens: u64) -> u64 {         let id = self.next_window_id;         self.next_window_id += 1;         self.windows.insert(owner, ContextWindow {             owner,             capacity_tokens,             used_tokens: 0,             pages: Vec::new(),             page_faults: 0,             swap_outs: 0,             swap_ins: 0,             evictions: 0,         });         id     }      pub fn window(&self, owner: Pid) -> Option<&ContextWindow> {         self.windows.get(&owner)     }      pub fn window_mut(&mut self, owner: Pid) -> Option<&mut ContextWindow> {         self.windows.get_mut(&owner)     }      /// 缺页处理：将知识页调入窗口；窗口满时按 LRU 淘汰一页到长期记忆（Swap）。     pub fn load_page(         &mut self,         owner: Pid,         page_id: u64,         tokens: u64,     ) -> Result<String, String> {         let page = self.pages.get(&page_id).cloned().ok_or_else(|| format!("上下文页 #{} 不存在", page_id))?;         if page.owner != owner {             return Err(format!("页 #{} 不属于智能体 {}", page_id, owner));         }         self.page_faults_total += 1;         let win = self.window_mut(owner).ok_or_else(|| format!("智能体 {} 无上下文窗口", owner))?;         win.page_faults += 1;          // 若页已驻留，仅更新访问时间（TLB 命中等价物）。         if page.in_memory {             if let Some(p) = self.pages.get_mut(&page_id) {                 p.last_access_ns = get_time_ns() as u128;             }             return Ok(format!("页 #{} 已驻留，TLB 命中 (tokens={})", page_id, page.tokens));         }          // 容量检查：不足则按 LRU 淘汰最久未访问的驻留页（页面置换 → Swap）。         while win.used_tokens + tokens > win.capacity_tokens && !win.pages.is_empty() {             self.evict_lru(owner)?;         }          // 调入页。         if let Some(p) = self.pages.get_mut(&page_id) {             p.in_memory = true;             p.last_access_ns = get_time_ns() as u128;             win.used_tokens += p.tokens;             win.pages.push(page_id);             win.swap_ins += 1;             self.swap_ins_total += 1;         }         Ok(format!(             "缺页处理：页 #{} 已调入智能体 {} 窗口 (窗口 {}/{} tokens)",             page_id, owner, win.used_tokens, win.capacity_tokens         ))     }      /// LRU 置换：淘汰窗口中最久未访问的驻留页，写入长期记忆（Swap out，脏页回写）。     fn evict_lru(&mut self, owner: Pid) -> Result<u64, String> {         let win = self.window_mut(owner).ok_or_else(|| "窗口不存在".to_string())?;         let victim = win.pages.iter()             .filter_map(|pid| self.pages.get(pid).map(|p| (*pid, p.last_access_ns)))             .min_by_key(|(_, t)| *t)             .map(|(pid, _)| pid);         let victim = match victim {             Some(v) => v,             None => return Err("无可驱逐页".to_string()),         };         let victim_tokens = self.pages.get(&victim).map(|p| p.tokens).unwrap_or(0);         let victim_dirty = self.pages.get(&victim).map(|p| p.dirty).unwrap_or(false);         if let Some(mut p) = self.pages.get_mut(&victim) {             if victim_dirty {                 p.swap_out_count += 1;                 win.swap_outs += 1;                 self.swap_outs_total += 1;                 p.dirty = false;             }             p.in_memory = false;             p.last_access_ns = 0;         }         win.used_tokens = win.used_tokens.saturating_sub(victim_tokens);         win.pages.retain(|pid| *pid != victim);         win.evictions += 1;         Ok(victim)     }      /// 主动淘汰指定页（类 `munmap` / 页面手动回收）。     pub fn evict_page(&mut self, owner: Pid, page_id: u64) -> Result<String, String> {         let win = self.window_mut(owner).ok_or_else(|| format!("智能体 {} 无窗口", owner))?;         if !win.pages.contains(&page_id) {             return Err(format!("页 #{} 不在窗口中", page_id));         }         let page_tokens = self.pages.get(&page_id).map(|p| p.tokens).unwrap_or(0);         let page_dirty = self.pages.get(&page_id).map(|p| p.dirty).unwrap_or(false);         if let Some(mut p) = self.pages.get_mut(&page_id) {             if page_dirty {                 p.swap_out_count += 1;                 win.swap_outs += 1;                 self.swap_outs_total += 1;                 p.dirty = false;             }             p.in_memory = false;             p.last_access_ns = 0;         }         win.used_tokens = win.used_tokens.saturating_sub(page_tokens);         win.pages.retain(|pid| *pid != page_id);         win.evictions += 1;         Ok(format!("已淘汰页 #{} 到长期记忆", page_id))     }      /// 访问页：更新引用时间戳（类页表引用位置位）。     pub fn access_page(&mut self, owner: Pid, page_id: u64) -> Result<String, String> {         let win = self.window(owner).ok_or_else(|| format!("智能体 {} 无窗口", owner))?;         if !win.pages.contains(&page_id) {             return Err(format!("页 #{} 不在窗口中", page_id));         }         if let Some(p) = self.pages.get_mut(page_id) {             p.last_access_ns = get_time_ns() as u128;         }         Ok(format!("页 #{} 已访问 (LRU 刷新)", page_id))     }      /// 标记页脏（内容被修改，需回写）。     pub fn mark_dirty(&mut self, page_id: u64) -> Result<(), String> {         self.pages.get_mut(page_id).ok_or_else(|| format!("页 #{} 不存在", page_id))?;         self.pages.get_mut(page_id).unwrap().dirty = true;         Ok(())     }      pub fn status(&self) -> String {         let resident = self.pages.resident_count();         let total = self.pages.page_count();         let win_count = self.windows.len();         let total_used: u64 = self.windows.values().map(|w| w.used_tokens).sum();         let total_cap: u64 = self.windows.values().map(|w| w.capacity_tokens).sum();         format!(             "windows={} pages={} resident={} used_tokens={}/{} page_faults={} swap_outs={} swap_ins={}",             win_count, total, resident, total_used, total_cap,             self.page_faults_total, self.swap_outs_total, self.swap_ins_total         )     }      pub fn window_status(&self, owner: Pid) -> Option<String> {         self.windows.get(&owner).map(|w| {             format!(                 "窗口 owner={} cap={}tok used={}tok pages={} faults={} swap_outs={} swap_ins={} evictions={}",                 w.owner, w.capacity_tokens, w.used_tokens, w.pages.len(),                 w.page_faults, w.swap_outs, w.swap_ins, w.evictions             )         })     }      pub fn is_empty(&self) -> bool {         self.windows.is_empty() && self.pages.pages.is_empty()     } }  static CTX_MGR: OnceLock<Mutex<CtxManager>> = OnceLock::new();  pub fn ctx_manager() -> &'static Mutex<CtxManager> {     CTX_MGR.get_or_init(|| Mutex::new(CtxManager::new())) }  pub fn init() {     let _ = ctx_manager(); }  /// `sense ctx://window/<智能体>` / `ctx://kv`：窗口快照。 pub fn ctx_sense(name: &str) -> Option<String> {     match name {         "ctx://kv" => Some(ctx_manager().lock().unwrap().status()),         s if s.starts_with("ctx://window/") => {             let pid: u64 = s["ctx://window/".len()..].parse().ok()?;             ctx_manager().lock().unwrap().window_status(pid)         }         _ => None,     } }  /// 聚合状态摘要。 pub fn status() -> String {     ctx_manager().lock().unwrap().status() }  /// `act ctx://<op>`：上下文窗口行动。 pub fn ctx_act(payload: &str) -> Result<String, String> {     let mut it = payload.split_whitespace();     match it.next().unwrap_or("") {         "alloc" => {             let owner: u64 = it.next().ok_or("缺少智能体 id")?.parse().map_err(|e| e.to_string())?;             let cap: u64 = it.next().ok_or("缺少窗口容量(tokens)")?.parse().map_err(|e| e.to_string())?;             let id = ctx_manager().lock().unwrap().create_window(owner, cap);             Ok(format!("已为智能体 {} 创建上下文窗口 #{} cap={}tok", owner, id, cap))         }         "load" => {             let owner: u64 = it.next().ok_or("缺少智能体 id")?.parse().map_err(|e| e.to_string())?;             let page_id: u64 = it.next().ok_or("缺少页 id")?.parse().map_err(|e| e.to_string())?;             let tokens: u64 = it.next().and_then(|v| v.parse().ok()).unwrap_or(256);             let msg = ctx_manager().lock().unwrap().load_page(owner, page_id, tokens)?;             Ok(msg)         }         "evict" => {             let owner: u64 = it.next().ok_or("缺少智能体 id")?.parse().map_err(|e| e.to_string())?;             match it.next() {                 Some(pid) => {                     let page_id: u64 = pid.parse().map_err(|e| e.to_string())?;                     ctx_manager().lock().unwrap().evict_page(owner, page_id)                 }                 None => {                     // 自动 LRU 淘汰一页。                     let mgr = ctx_manager();                     let mut m = mgr.lock().unwrap();                     // 找该智能体第一个驻留页并淘汰。                     let victim = m.window(owner).and_then(|w| w.pages.first().copied());                     match victim {                         Some(v) => { let r = m.evict_page(owner, v)?; Ok(r) }                         None => Err(format!("智能体 {} 窗口无可驱逐页", owner)),                     }                 }             }         }         "access" => {             let owner: u64 = it.next().ok_or("缺少智能体 id")?.parse().map_err(|e| e.to_string())?;             let page_id: u64 = it.next().ok_or("缺少页 id")?.parse().map_err(|e| e.to_string())?;             ctx_manager().lock().unwrap().access_page(owner, page_id)         }         "dirty" => {             let page_id: u64 = it.next().ok_or("缺少页 id")?.parse().map_err(|e| e.to_string())?;             ctx_manager().lock().unwrap().mark_dirty(page_id)?;             Ok(format!("页 #{} 已标脏，待回写长期记忆", page_id))         }         "status" | "" => Ok(ctx_manager().lock().unwrap().status()),         _ => Err(             "用法: ctx alloc <智能体> <cap> | load <智能体> <页id> [tokens] | evict <智能体> [页id] | access <智能体> <页id> | dirty <页id> | status".to_string(),         ),     } }  #[cfg(test)] mod tests {     use super::*;      #[test]     fn window_alloc_and_lru_eviction() {         let mut m = CtxManager::new();         let wid = m.create_window(1, 1024);         assert_eq!(wid, 1);         let win = m.window(1).unwrap();         assert_eq!(win.capacity_tokens, 1024);         assert_eq!(win.used_tokens, 0);          // 分配三个页并调入（页归属智能体 1）。         let p1 = m.pages.alloc(1, 300, 1024);         let p2 = m.pages.alloc(1, 400, 2048);         let p3 = m.pages.alloc(1, 500, 3072); // 调入 p3 会超 1024，触发 LRU 淘汰。          let r = m.load_page(1, p1, 300).unwrap();         assert!(r.contains("已调入"));         let r = m.load_page(1, p2, 400).unwrap();         assert!(r.contains("已调入"));         let win = m.window(1).unwrap();         assert_eq!(win.used_tokens, 700);          let r = m.load_page(1, p3, 500).unwrap();         // 300+400+500=1200 > 1024，应淘汰 LRU 页（p1 最早访问）。         assert!(r.contains("已调入") || r.contains("缺页处理"));         let win = m.window(1).unwrap();         assert!(win.used_tokens <= 1024);         assert!(win.evictions >= 1);         assert!(m.swap_outs_total >= 1);          // 访问已淘汰页会失败（不在窗口中）。         assert!(m.access_page(1, p1).is_err());         // 访问驻留页成功并刷新 LRU。         assert!(m.access_page(1, p2).is_ok());     }      #[test]     fn dirty_and_swap_out() {         let mut m = CtxManager::new();         m.create_window(2, 4096);         let p = m.pages.alloc(2, 100, 512);         m.load_page(2, p, 100).unwrap();         m.mark_dirty(p).unwrap();         let r = m.evict_page(2, p).unwrap();         assert!(r.contains("已淘汰"));         assert_eq!(m.swap_outs_total, 1);     }      #[test]     fn cross_owner_rejected() {         let mut m = CtxManager::new();         m.create_window(1, 4096);         let p = m.pages.alloc(2, 100, 512); // 属于智能体 2         assert!(m.load_page(1, p, 100).is_err());     }      #[test]     fn ctx_act_roundtrip() {         let res = ctx_act("alloc 5 8192").unwrap();         assert!(res.contains("已为智能体 5 创建上下文窗口"));         let res = ctx_act("status").unwrap();         assert!(res.contains("windows="));         let res = ctx_sense("ctx://kv").unwrap();         assert!(res.contains("pages="));     } }
+//! 上下文内存子系统 —— AI 原生 OS 的「虚拟地址空间」。
+//!
+//! 对应《现代操作系统》第 3 章「存储管理」：
+//! * 上下文窗口等价于地址空间；
+//! * 语义页 (SemanticPage) 等价于页框，存放 token 段与向量；
+//! * KV 缓存占用等价于物理内存；
+//! * 窗口溢出触发「页面置换」：按 LRU 换出到长期记忆（knowledge）；
+//! * 缺失语义页触发「缺页中断」：从长期记忆换入。
+
+use std::collections::BTreeMap;
+use std::sync::{Mutex, OnceLock};
+
+/// 语义页 id。
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct PageId(pub u64);
+
+/// 一页语义数据。
+#[derive(Clone, Debug)]
+pub struct SemanticPage {
+    pub id: PageId,
+    /// 该页对应的 token 段文本。
+    pub text: String,
+    /// 粗略 token 数。
+    pub tokens: u64,
+    /// 最近访问时间（逻辑时钟）。
+    pub last_access: u64,
+    /// 是否脏（需要写回长期记忆）。
+    pub dirty: bool,
+    /// 是否常驻（不可换出）。
+    pub pinned: bool,
+}
+
+/// 一个上下文窗口（地址空间）。
+pub struct CtxWindow {
+    pub id: u64,
+    pub owner: u64,
+    /// 容量（token）。
+    pub capacity: u64,
+    /// 已用 token。
+    pub used: u64,
+    pages: BTreeMap<PageId, SemanticPage>,
+    next_page: u64,
+    pub faults: u64,
+    pub evictions: u64,
+    clock: u64,
+}
+
+/// 上下文内存错误。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum CtxError {
+    WindowNotFound { id: u64 },
+    PageNotFound { page: PageId },
+    OutOfCapacity { need: u64, free: u64 },
+    Pinned { page: PageId },
+}
+
+impl CtxWindow {
+    pub fn new(id: u64, owner: u64, capacity: u64) -> Self {
+        Self {
+            id,
+            owner,
+            capacity,
+            used: 0,
+            pages: BTreeMap::new(),
+            next_page: 1,
+            faults: 0,
+            evictions: 0,
+            clock: 0,
+        }
+    }
+
+    fn tick(&mut self) -> u64 {
+        self.clock += 1;
+        self.clock
+    }
+
+    /// 分配一个新语义页并写入。
+    pub fn alloc_page(&mut self, text: &str, tokens: u64) -> Result<PageId, CtxError> {
+        if self.used + tokens > self.capacity {
+            return Err(CtxError::OutOfCapacity {
+                need: tokens,
+                free: self.capacity.saturating_sub(self.used),
+            });
+        }
+        let id = PageId(self.next_page);
+        self.next_page += 1;
+        let now = self.tick();
+        self.pages.insert(
+            id,
+            SemanticPage {
+                id,
+                text: text.to_string(),
+                tokens,
+                last_access: now,
+                dirty: true,
+                pinned: false,
+            },
+        );
+        self.used += tokens;
+        Ok(id)
+    }
+
+    /// 访问一页（更新 LRU）。页不在则记一次缺页。
+    pub fn access(&mut self, id: PageId) -> Result<&SemanticPage, CtxError> {
+        let now = self.tick();
+        let p = self.pages.get_mut(&id).ok_or(CtxError::PageNotFound { page: id })?;
+        p.last_access = now;
+        Ok(p)
+    }
+
+    /// 换出：选择最久未访问且未 pinned 的页。
+    pub fn evict_lru(&mut self, tokens_needed: u64) -> Result<Vec<PageId>, CtxError> {
+        let mut evicted = Vec::new();
+        let mut freed = 0u64;
+        while freed < tokens_needed {
+            let victim = self
+                .pages
+                .values()
+                .filter(|p| !p.pinned)
+                .min_by_key(|p| p.last_access)
+                .map(|p| p.id);
+            match victim {
+                Some(pid) => {
+                    if let Some(p) = self.pages.remove(&pid) {
+                        freed += p.tokens;
+                        self.used = self.used.saturating_sub(p.tokens);
+                        self.evictions += 1;
+                        evicted.push(pid);
+                    }
+                }
+                None => {
+                    return Err(CtxError::OutOfCapacity {
+                        need: tokens_needed,
+                        free: freed,
+                    })
+                }
+            }
+        }
+        Ok(evicted)
+    }
+
+    /// 缺页处理：换入一页（由长期记忆提供内容）。
+    pub fn fault_in(&mut self, text: &str, tokens: u64) -> Result<PageId, CtxError> {
+        self.faults += 1;
+        if self.used + tokens > self.capacity {
+            self.evict_lru(tokens)?;
+        }
+        self.alloc_page(text, tokens)
+    }
+
+    pub fn page(&self, id: PageId) -> Option<&SemanticPage> {
+        self.pages.get(&id)
+    }
+
+    pub fn page_count(&self) -> usize {
+        self.pages.len()
+    }
+}
+
+/// 全局上下文管理器。
+pub struct CtxManager {
+    windows: BTreeMap<u64, CtxWindow>,
+    next_window: u64,
+}
+
+impl CtxManager {
+    pub fn new() -> Self {
+        Self {
+            windows: BTreeMap::new(),
+            next_window: 1,
+        }
+    }
+
+    pub fn create(&mut self, owner: u64, capacity: u64) -> u64 {
+        let id = self.next_window;
+        self.next_window += 1;
+        self.windows.insert(id, CtxWindow::new(id, owner, capacity));
+        id
+    }
+
+    pub fn window(&self, id: u64) -> Option<&CtxWindow> {
+        self.windows.get(&id)
+    }
+
+    pub fn window_mut(&mut self, id: u64) -> Option<&mut CtxWindow> {
+        self.windows.get_mut(&id)
+    }
+
+    pub fn destroy(&mut self, id: u64) -> Result<(), CtxError> {
+        self.windows
+            .remove(&id)
+            .map(|_| ())
+            .ok_or(CtxError::WindowNotFound { id })
+    }
+
+    pub fn total_used(&self) -> u64 {
+        self.windows.values().map(|w| w.used).sum()
+    }
+
+    pub fn count(&self) -> usize {
+        self.windows.len()
+    }
+}
+
+impl Default for CtxManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+static CTX_MGR: OnceLock<Mutex<CtxManager>> = OnceLock::new();
+
+pub fn ctx_mgr() -> &'static Mutex<CtxManager> {
+    CTX_MGR.get_or_init(|| Mutex::new(CtxManager::new()))
+}
+
+pub fn init() {
+    let mut m = ctx_mgr().lock().unwrap();
+    if m.count() == 0 {
+        m.create(1, 32_000);
+    }
+}
+
+pub fn status() -> String {
+    let m = ctx_mgr().lock().unwrap();
+    format!("windows={} used_tokens={}", m.count(), m.total_used())
+}
+
+/// `act ctx://*` 的后端动作：
+/// * `create <owner> <capacity>` 新建窗口
+/// * `alloc <window> <tokens> <text...>` 分配语义页
+/// * `access <window> <page>` 访问页
+/// * `evict <window> <tokens>` 换出
+/// * `fault <window> <tokens> <text...>` 缺页换入
+/// * `destroy <window>` 销毁
+/// * `status` 摘要
+pub fn ctx_act(payload: &str) -> Result<String, String> {
+    let mut it = payload.splitn(4, ' ');
+    let mut m = ctx_mgr().lock().unwrap();
+    match it.next() {
+        Some("create") => {
+            let owner = it.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+            let cap = it.next().and_then(|s| s.parse().ok()).unwrap_or(4096);
+            let id = m.create(owner, cap);
+            Ok(format!("已创建上下文窗口 ctx={} capacity={}", id, cap))
+        }
+        Some("alloc") => {
+            let wid = it
+                .next()
+                .and_then(|s| s.parse::<u64>().ok())
+                .ok_or("用法: ctx://kv alloc <window> <tokens> <text>")?;
+            let mut rest = it.next().unwrap_or("").splitn(2, ' ');
+            let tokens = rest.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+            let text = rest.next().unwrap_or("");
+            let w = m.window_mut(wid).ok_or("窗口不存在")?;
+            let page = w
+                .alloc_page(text, tokens)
+                .map_err(|e| format!("分配失败: {:?}", e))?;
+            Ok(format!("已分配语义页 page={} tokens={}", page.0, tokens))
+        }
+        Some("access") => {
+            let wid = it
+                .next()
+                .and_then(|s| s.parse::<u64>().ok())
+                .ok_or("用法: ctx://kv access <window> <page>")?;
+            let pid = it
+                .next()
+                .and_then(|s| s.parse::<u64>().ok())
+                .map(PageId)
+                .ok_or("用法: ctx://kv access <window> <page>")?;
+            let w = m.window_mut(wid).ok_or("窗口不存在")?;
+            let page = w.access(pid).map_err(|e| format!("访问失败: {:?}", e))?;
+            Ok(format!("page={} tokens={} dirty={}", page.id.0, page.tokens, page.dirty))
+        }
+        Some("evict") => {
+            let wid = it
+                .next()
+                .and_then(|s| s.parse::<u64>().ok())
+                .ok_or("用法: ctx://kv evict <window> <tokens>")?;
+            let tokens = it.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+            let w = m.window_mut(wid).ok_or("窗口不存在")?;
+            let ev = w
+                .evict_lru(tokens)
+                .map_err(|e| format!("换出失败: {:?}", e))?;
+            Ok(format!("已换出 {} 页", ev.len()))
+        }
+        Some("fault") => {
+            let wid = it
+                .next()
+                .and_then(|s| s.parse::<u64>().ok())
+                .ok_or("用法: ctx://kv fault <window> <tokens> <text>")?;
+            let mut rest = it.next().unwrap_or("").splitn(2, ' ');
+            let tokens = rest.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+            let text = rest.next().unwrap_or("");
+            let w = m.window_mut(wid).ok_or("窗口不存在")?;
+            let page = w
+                .fault_in(text, tokens)
+                .map_err(|e| format!("缺页处理失败: {:?}", e))?;
+            Ok(format!("缺页处理完成 page={}", page.0))
+        }
+        Some("destroy") => {
+            let wid = it
+                .next()
+                .and_then(|s| s.parse::<u64>().ok())
+                .ok_or("用法: ctx://kv destroy <window>")?;
+            m.destroy(wid).map_err(|e| format!("销毁失败: {:?}", e))?;
+            Ok(format!("已销毁上下文窗口 ctx={}", wid))
+        }
+        Some("status") | None => Ok(status()),
+        Some(other) => Err(format!("未知 ctx 动作: {}", other)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn alloc_and_access() {
+        let mut w = CtxWindow::new(1, 1, 100);
+        let p = w.alloc_page("hello", 10).unwrap();
+        assert_eq!(w.used, 10);
+        assert_eq!(w.access(p).unwrap().text, "hello");
+        assert_eq!(w.page_count(), 1);
+    }
+
+    #[test]
+    fn capacity_error() {
+        let mut w = CtxWindow::new(1, 1, 10);
+        assert!(matches!(
+            w.alloc_page("too big", 20),
+            Err(CtxError::OutOfCapacity { .. })
+        ));
+    }
+
+    #[test]
+    fn lru_eviction() {
+        let mut w = CtxWindow::new(1, 1, 30);
+        let a = w.alloc_page("a", 10).unwrap();
+        let b = w.alloc_page("b", 10).unwrap();
+        let c = w.alloc_page("c", 10).unwrap();
+        // 访问 a，使 b 成为最久未用。
+        w.access(a).unwrap();
+        let evicted = w.evict_lru(10).unwrap();
+        assert_eq!(evicted, vec![b]);
+        assert_eq!(w.evictions, 1);
+        assert!(w.page(c).is_some());
+    }
+
+    #[test]
+    fn fault_in_and_pinned() {
+        let mut w = CtxWindow::new(1, 1, 20);
+        let a = w.alloc_page("a", 10).unwrap();
+        w.pages.get_mut(&a).unwrap().pinned = true;
+        w.fault_in("b", 15).unwrap();
+        assert_eq!(w.faults, 1);
+        assert!(w.page(a).is_some(), "pinned 页不应被换出");
+    }
+
+    #[test]
+    fn manager_lifecycle() {
+        let mut m = CtxManager::new();
+        let id = m.create(7, 1000);
+        assert_eq!(m.count(), 1);
+        m.window_mut(id).unwrap().alloc_page("x", 5).unwrap();
+        assert_eq!(m.total_used(), 5);
+        m.destroy(id).unwrap();
+        assert_eq!(m.count(), 0);
+    }
+}

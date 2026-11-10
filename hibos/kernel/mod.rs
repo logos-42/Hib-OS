@@ -9,6 +9,7 @@
 //!    都是同构的感知通道，统一走 sense/act 抽象
 
 pub mod agent;
+pub mod ai_os;
 pub mod ai_token;
 pub mod belief;
 pub mod browser;
@@ -132,6 +133,7 @@ fn print_usage() {
 pub fn boot_subsystems() {
     gpu::init();
     ai_token::init();
+    ai_os::init();
     monitor::init();
     scheduler::init();
     syscall::init();

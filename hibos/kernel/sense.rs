@@ -12,6 +12,14 @@ use crate::monitor::get_time_ns;
 use crate::net::ETH_NAME;
 use crate::vfs::Vfs;
 
+use crate::ai_os::model::{status as model_status};
+use crate::ai_os::ctx_mem;
+use crate::ai_os::knowledge;
+use crate::ai_os::tool::{status as tool_status};
+use crate::ai_os::security;
+use crate::ai_os::deadlock;
+use crate::ai_os::container;
+use crate::ai_os::{status as ai_os_status};
 use crate::agent;
 use crate::belief::beliefs;
 use crate::browser::browser;
@@ -300,6 +308,24 @@ pub fn probe(name: &str) -> Option<String> {
         "pagetable://walk" => Some(pt_summary()),
         "slab://stats" => Some(slab_summary()),
         "buddy://stats" => Some(buddy_summary()),
+        // —— AI 原生 OS 通道：模型 / 上下文窗口 / 记忆 / 工具 / 安全 / 死锁 / 容器 / 总控 ——
+        "model://loader" => Some(model_status()),
+        "model://instances" => {
+            let r = crate::ai_os::model::model_registry().lock().unwrap();
+            Some(format!("{} instances", r.instances().len()))
+        }
+        "model://spec" => Some(model_status()),
+        "ctx://kv" => Some(ctx_mem::status()),
+        "ctx://window" => Some(ctx_mem::status()),
+        "knowledge://store" => Some(knowledge::status()),
+        "knowledge://query" => Some(knowledge::status()),
+        "tool://registry" => Some(tool_status()),
+        "aios://status" => Some(ai_os_status()),
+        "security://status" => Some(security::status()),
+        "sec://caps" => Some(caps().lock().unwrap().list()),
+        "deadlock://graph" => Some(deadlock::status()),
+        "deadlock://wait" => Some(deadlock::status()),
+        "container://status" => Some(container::status()),
         _ => None,
     }
 }
@@ -768,6 +794,25 @@ fn act_raw(name: &str, payload: &str) -> Option<Result<String, String>> {
         "pagetable://walk" => Some(act_pagetable(payload)),
         "slab://stats" => Some(act_slab(payload)),
         "buddy://stats" => Some(act_buddy(payload)),
+        // —— AI 原生 OS 通道：模型 / 上下文窗口 / 记忆 / 工具 / 安全 / 死锁 / 容器 / 总控 ——
+        "model://loader" | "model://instances" | "model://spec" => {
+            Some(Ok(crate::ai_os::model::status()))
+        }
+        "ctx://kv" | "ctx://window" => Some(Ok(ctx_mem::status())),
+        "knowledge://store" | "knowledge://query" => Some(Ok(knowledge::status())),
+        "tool://registry" | "tool://exec" => Some(Ok(tool_status())),
+        "aios://status" => {
+            Some(Ok(ai_os_status()))
+        }
+        "security://status" => {
+            Some(Ok(security::status()))
+        }
+        "deadlock://graph" | "deadlock://wait" => {
+            Some(Ok(deadlock::status()))
+        }
+        "container://status" => {
+            Some(Ok(container::status()))
+        }
         _ => None,
     }
 }

@@ -178,7 +178,7 @@ mod tests {
 
     #[test]
     fn arp_request_and_reply_roundtrip() {
-        let req = ArpPacket::request([0x02, 0, 0, 0, 0, 0, 1], [10, 0, 0, 2], [10, 0, 0, 3]);
+        let req = ArpPacket::request([0x02, 0, 0, 0, 0, 1], [10, 0, 0, 2], [10, 0, 0, 3]);
         let bytes = req.serialize();
         assert_eq!(bytes.len(), ArpPacket::LEN);
         let parsed = ArpPacket::parse(&bytes).unwrap();
@@ -190,7 +190,7 @@ mod tests {
                                    [0x02, 0x00, 0x00, 0x00, 0x00, 0x01], [10, 0, 0, 2]);
         let parsed = ArpPacket::parse(&rep.serialize()).unwrap();
         assert_eq!(parsed.op, ARP_OP_REPLY);
-        assert_eq!(parsed.target_mac, [0x02, 0, 0, 0, 0, 0, 1]);
+        assert_eq!(parsed.target_mac, [0x02, 0, 0, 0, 0, 1]);
     }
 
     #[test]

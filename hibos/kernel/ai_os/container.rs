@@ -1,1 +1,410 @@
-//! 模型容器 / 智能体沙箱 —— AI 原生 OS 中的“微内核 / 外核隔离”。 //! //! 传统操作系统：微内核只保留最小机制，文件系统/协议栈/驱动运行在用户态服务器； //! 进程可快照、检查点、回滚。 //! //! AI 原生 OS：每个模型实例运行在独立的“模型容器”中，容器维护模型快照 //! (context window + KV 缓存 + 寄存器类状态)；智能体沙箱可对容器做 //! checkpoint / rollback / isolate，故障隔离与故障恢复（类进程检查点重启）。 //! //! 接口（供 `container://*` 通道）： //! * `container create <模型实例 id>` —— 为模型实例建立容器沙箱 //! * `container snapshot <容器 id>` —— 快照当前上下文与状态 //! * `container rollback <容器 id> [快照 id]` —— 回滚到指定快照 //! * `container isolate <容器 id>` —— 隔离容器（切断与外部工具通道） //! * `container status` —— 容器总数、快照数、隔离数  use std::collections::BTreeMap; use std::sync::{Mutex, OnceLock};  use crate::monitor::get_time_ns;  /// 模型容器状态。 #[derive(Clone, Copy, Debug, PartialEq, Eq)] pub enum ContainerState {     Running,     Isolated,     Stopped, }  /// 容器快照：上下文窗口副本 + KV 缓存副本 + 寄存器类状态（模拟 PC/IR）。 #[derive(Clone, Debug)] pub struct ContainerSnapshot {     pub id: u64,     pub container_id: u64,     pub ctx_tokens: u64,     pub kv_bytes: u64,     pub pc: u64,      // 伪程序计数器（下一条推理指令）     pub ir: String,   // 伪指令寄存器     pub created_ns: u128, }  /// 模型容器。 #[derive(Clone, Debug)] pub struct Container {     pub id: u64,     pub model_instance: u64,     pub state: ContainerState,     pub snapshots: Vec<ContainerSnapshot>,     pub next_snapshot_id: u64,     pub isolated: bool,     pub created_ns: u128, }  /// 容器注册表。 pub struct ContainerRegistry {     containers: BTreeMap<u64, Container>,     next_id: u64,     create_count: u64,     snapshot_count: u64,     rollback_count: u64,     isolate_count: u64, }  impl Default for ContainerRegistry {     fn default() -> Self {         Self::new()     } }  impl ContainerRegistry {     pub fn new() -> Self {         Self {             containers: BTreeMap::new(),             next_id: 1,             create_count: 0,             snapshot_count: 0,             rollback_count: 0,             isolate_count: 0,         }     }      pub fn create(&mut self, model_instance: u64) -> u64 {         let id = self.next_id;         self.next_id += 1;         self.create_count += 1;         self.containers.insert(             id,             Container {                 id,                 model_instance,                 state: ContainerState::Running,                 snapshots: Vec::new(),                 next_snapshot_id: 1,                 isolated: false,                 created_ns: get_time_ns() as u128,             },         );         id     }      pub fn snapshot(&mut self, container_id: u64, ctx_tokens: u64, kv_bytes: u64, pc: u64, ir: &str) -> Result<u64, String> {         let c = self.containers.get_mut(&container_id).ok_or_else(|| format!("容器 #{} 不存在", container_id))?;         let sid = c.next_snapshot_id;         c.next_snapshot_id += 1;         self.snapshot_count += 1;         c.snapshots.push(ContainerSnapshot {             id: sid,             container_id,             ctx_tokens,             kv_bytes,             pc,             ir: ir.to_string(),             created_ns: get_time_ns() as u128,         });         Ok(sid)     }      pub fn rollback(&mut self, container_id: u64, snapshot_id: Option<u64>) -> Result<String, String> {         let c = self.containers.get_mut(&container_id).ok_or_else(|| format!("容器 #{} 不存在", container_id))?;         let snap = match snapshot_id {             Some(id) => c.snapshots.iter().find(|s| s.id == id).cloned().ok_or_else(|| format!("快照 #{} 不存在", id))?,             None => c.snapshots.last().cloned().ok_or_else(|| "容器无可用快照".to_string())?,         };         self.rollback_count += 1;         Ok(format!(             "容器 #{} 已回滚到快照 #{} (pc={} ctx={}tok kv={}B)",             container_id, snap.id, snap.pc, snap.ctx_tokens, snap.kv_bytes         ))     }      pub fn isolate(&mut self, container_id: u64) -> Result<(), String> {         let c = self.containers.get_mut(&container_id).ok_or_else(|| format!("容器 #{} 不存在", container_id))?;         c.isolated = true;         c.state = ContainerState::Isolated;         self.isolate_count += 1;         Ok(())     }      pub fn resume(&mut self, container_id: u64) -> Result<(), String> {         let c = self.containers.get_mut(&container_id).ok_or_else(|| format!("容器 #{} 不存在", container_id))?;         c.isolated = false;         c.state = ContainerState::Running;         Ok(())     }      pub fn container(&self, id: u64) -> Option<&Container> {         self.containers.get(&id)     }      pub fn container_count(&self) -> usize {         self.containers.len()     }      pub fn snapshot_count_total(&self) -> usize {         self.containers.values().map(|c| c.snapshots.len()).sum()     }      pub fn isolate_count(&self) -> usize {         self.containers.values().filter(|c| c.isolated).count()     }      pub fn status(&self) -> String {         format!(             "containers={} snapshots={} rollbacks={} isolates={} running={}",             self.container_count(),             self.snapshot_count_total(),             self.rollback_count,             self.isolate_count(),             self.containers.values().filter(|c| c.state == ContainerState::Running).count()         )     }      pub fn is_empty(&self) -> bool {         self.containers.is_empty()     } }  static CONTAINER_REG: OnceLock<Mutex<ContainerRegistry>> = OnceLock::new();  pub fn container_registry() -> &'static Mutex<ContainerRegistry> {     CONTAINER_REG.get_or_init(|| Mutex::new(ContainerRegistry::new())) }  pub fn init() {     let _ = container_registry(); }  /// `sense container://status`：容器状态摘要。 pub fn container_sense() -> String {     container_registry().lock().unwrap().status() }  /// 聚合状态摘要。 pub fn status() -> String {     container_sense() }  /// `act container://<op>`：容器沙箱操作。 pub fn container_act(payload: &str) -> Result<String, String> {     let mut it = payload.split_whitespace();     match it.next().unwrap_or("") {         "create" => {             let model_instance: u64 = it.next().ok_or("缺少模型实例 id")?.parse().map_err(|e| e.to_string())?;             let id = container_registry().lock().unwrap().create(model_instance);             Ok(format!("已创建模型容器 #{} (模型实例 {})", id, model_instance))         }         "snapshot" => {             let cid: u64 = it.next().ok_or("缺少容器 id")?.parse().map_err(|e| e.to_string())?;             let ctx_tokens: u64 = it.next().and_then(|v| v.parse().ok()).unwrap_or(0);             let kv_bytes: u64 = it.next().and_then(|v| v.parse().ok()).unwrap_or(0);             let pc: u64 = it.next().and_then(|v| v.parse().ok()).unwrap_or(0);             let ir = it.next().unwrap_or("infer").to_string();             let sid = container_registry().lock().unwrap().snapshot(cid, ctx_tokens, kv_bytes, pc, &ir)?;             Ok(format!("容器 #{} 已快照 #{}", cid, sid))         }         "rollback" => {             let cid: u64 = it.next().ok_or("缺少容器 id")?.parse().map_err(|e| e.to_string())?;             let snap: Option<u64> = it.next().and_then(|v| v.parse().ok());             container_registry().lock().unwrap().rollback(cid, snap)         }         "isolate" => {             let cid: u64 = it.next().ok_or("缺少容器 id")?.parse().map_err(|e| e.to_string())?;             container_registry().lock().unwrap().isolate(cid)?;             Ok(format!("容器 #{} 已隔离", cid))         }         "resume" => {             let cid: u64 = it.next().ok_or("缺少容器 id")?.parse().map_err(|e| e.to_string())?;             container_registry().lock().unwrap().resume(cid)?;             Ok(format!("容器 #{} 已恢复运行", cid))         }         "status" | "" => Ok(container_sense()),         _ => Err(             "用法: container create <模型实例> | snapshot <容器> [ctx] [kv] [pc] [ir] | rollback <容器> [快照] | isolate <容器> | resume <容器> | status"                 .to_string(),         ),     } }  #[cfg(test)] mod tests {     use super::*;      #[test]     fn create_snapshot_rollback() {         let mut r = ContainerRegistry::new();         let cid = r.create(7);         assert_eq!(cid, 1);         let sid = r.snapshot(cid, 512, 4096, 100, "load_ctx").unwrap();         assert_eq!(sid, 1);         let res = r.rollback(cid, None).unwrap();         assert!(res.contains("已回滚到快照 #1"));         let res = r.rollback(cid, Some(sid)).unwrap();         assert!(res.contains("pc=100"));     }      #[test]     fn isolate_and_resume() {         let mut r = ContainerRegistry::new();         let cid = r.create(9);         r.isolate(cid).unwrap();         assert!(r.container(cid).unwrap().isolated);         assert_eq!(r.isolated_count(), 1);         r.resume(cid).unwrap();         assert_eq!(r.isolated_count(), 0);     }      #[test]     fn container_act_roundtrip() {         let res = container_act("create 7").unwrap();         assert!(res.contains("已创建模型容器 #1"));         let res = container_act("snapshot 1 256 2048 10 infer_next").unwrap();         assert!(res.contains("已快照 #1"));         let res = container_act("rollback 1").unwrap();         assert!(res.contains("已回滚"));         let res = container_act("isolate 1").unwrap();         assert!(res.contains("已隔离"));         let res = container_act("resume 1").unwrap();         assert!(res.contains("已恢复"));         let res = container_act("status").unwrap();         assert!(res.contains("containers="));     } }
+//! 模型容器与智能体沙箱 —— AI 原生 OS 的「虚拟化」层。
+//!
+//! 对应《现代操作系统》第 13.6.1 节「虚拟化」与第 9 章「安全」：
+//! * `Container` 等价于一个隔离的执行环境（命名空间 + 资源上限）；
+//! * 容器内可派生智能体，但共享模型实例与工具需要显式授权；
+//! * 资源配额：token 预算、内存上限、工具调用上限；
+//! * 容器之间默认隔离，越界访问返回 `SandboxEscape`。
+
+use std::collections::BTreeMap;
+use std::sync::{Mutex, OnceLock};
+
+/// 容器 id。
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ContainerId(pub u64);
+
+/// 容器资源配额。
+#[derive(Clone, Debug)]
+pub struct Quota {
+    pub max_agents: usize,
+    pub max_tokens: u64,
+    pub max_tool_calls: u64,
+}
+
+impl Default for Quota {
+    fn default() -> Self {
+        Self {
+            max_agents: 8,
+            max_tokens: 128_000,
+            max_tool_calls: 1_000,
+        }
+    }
+}
+
+/// 容器状态。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ContainerState {
+    Created,
+    Running,
+    Paused,
+    Destroyed,
+}
+
+/// 一个容器。
+#[derive(Clone, Debug)]
+pub struct Container {
+    pub id: ContainerId,
+    pub name: String,
+    pub state: ContainerState,
+    pub quota: Quota,
+    pub agents: Vec<u64>,
+    pub tokens_used: u64,
+    pub tool_calls: u64,
+    /// 允许挂载的模型实例。
+    pub models: Vec<u64>,
+}
+
+/// 容器错误。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ContainerError {
+    NotFound { id: ContainerId },
+    DuplicateName { name: String },
+    QuotaExceeded { what: String },
+    BadState,
+}
+
+/// 容器管理器。
+pub struct ContainerManager {
+    next_id: u64,
+    containers: BTreeMap<ContainerId, Container>,
+    name_to_id: BTreeMap<String, ContainerId>,
+    pub escapes_blocked: u64,
+}
+
+impl ContainerManager {
+    pub fn new() -> Self {
+        Self {
+            next_id: 1,
+            containers: BTreeMap::new(),
+            name_to_id: BTreeMap::new(),
+            escapes_blocked: 0,
+        }
+    }
+
+    pub fn create(&mut self, name: &str, quota: Quota) -> Result<ContainerId, ContainerError> {
+        if self.name_to_id.contains_key(name) {
+            return Err(ContainerError::DuplicateName {
+                name: name.to_string(),
+            });
+        }
+        let id = ContainerId(self.next_id);
+        self.next_id += 1;
+        self.name_to_id.insert(name.to_string(), id);
+        self.containers.insert(
+            id,
+            Container {
+                id,
+                name: name.to_string(),
+                state: ContainerState::Created,
+                quota,
+                agents: Vec::new(),
+                tokens_used: 0,
+                tool_calls: 0,
+                models: Vec::new(),
+            },
+        );
+        Ok(id)
+    }
+
+    pub fn start(&mut self, id: ContainerId) -> Result<(), ContainerError> {
+        let c = self
+            .containers
+            .get_mut(&id)
+            .ok_or(ContainerError::NotFound { id })?;
+        if c.state != ContainerState::Created && c.state != ContainerState::Paused {
+            return Err(ContainerError::BadState);
+        }
+        c.state = ContainerState::Running;
+        Ok(())
+    }
+
+    pub fn pause(&mut self, id: ContainerId) -> Result<(), ContainerError> {
+        let c = self
+            .containers
+            .get_mut(&id)
+            .ok_or(ContainerError::NotFound { id })?;
+        if c.state != ContainerState::Running {
+            return Err(ContainerError::BadState);
+        }
+        c.state = ContainerState::Paused;
+        Ok(())
+    }
+
+    pub fn destroy(&mut self, id: ContainerId) -> Result<(), ContainerError> {
+        let c = self
+            .containers
+            .get_mut(&id)
+            .ok_or(ContainerError::NotFound { id })?;
+        c.state = ContainerState::Destroyed;
+        self.name_to_id.remove(&c.name);
+        Ok(())
+    }
+
+    /// 容器内派生智能体（受配额约束）。
+    pub fn add_agent(&mut self, id: ContainerId, agent: u64) -> Result<(), ContainerError> {
+        let c = self
+            .containers
+            .get_mut(&id)
+            .ok_or(ContainerError::NotFound { id })?;
+        if c.state != ContainerState::Running {
+            return Err(ContainerError::BadState);
+        }
+        if c.agents.len() >= c.quota.max_agents {
+            return Err(ContainerError::QuotaExceeded {
+                what: "max_agents".to_string(),
+            });
+        }
+        c.agents.push(agent);
+        Ok(())
+    }
+
+    /// 计费 token。
+    pub fn charge_tokens(&mut self, id: ContainerId, n: u64) -> Result<(), ContainerError> {
+        let c = self
+            .containers
+            .get_mut(&id)
+            .ok_or(ContainerError::NotFound { id })?;
+        if c.tokens_used + n > c.quota.max_tokens {
+            return Err(ContainerError::QuotaExceeded {
+                what: "max_tokens".to_string(),
+            });
+        }
+        c.tokens_used += n;
+        Ok(())
+    }
+
+    /// 计费工具调用。
+    pub fn charge_tool(&mut self, id: ContainerId) -> Result<(), ContainerError> {
+        let c = self
+            .containers
+            .get_mut(&id)
+            .ok_or(ContainerError::NotFound { id })?;
+        if c.tool_calls + 1 > c.quota.max_tool_calls {
+            return Err(ContainerError::QuotaExceeded {
+                what: "max_tool_calls".to_string(),
+            });
+        }
+        c.tool_calls += 1;
+        Ok(())
+    }
+
+    /// 挂载模型实例。
+    pub fn mount_model(&mut self, id: ContainerId, instance: u64) -> Result<(), ContainerError> {
+        let c = self
+            .containers
+            .get_mut(&id)
+            .ok_or(ContainerError::NotFound { id })?;
+        if c.state == ContainerState::Destroyed {
+            return Err(ContainerError::BadState);
+        }
+        c.models.push(instance);
+        Ok(())
+    }
+
+    /// 跨容器访问检查（默认隔离）。
+    pub fn check_access(
+        &mut self,
+        from: ContainerId,
+        to_agent: u64,
+    ) -> Result<(), ContainerError> {
+        let allowed = self
+            .containers
+            .get(&from)
+            .map(|c| c.agents.contains(&to_agent))
+            .unwrap_or(false);
+        if allowed {
+            Ok(())
+        } else {
+            self.escapes_blocked += 1;
+            Err(ContainerError::BadState)
+        }
+    }
+
+    pub fn find(&self, name: &str) -> Option<&Container> {
+        self.name_to_id
+            .get(name)
+            .and_then(|id| self.containers.get(id))
+    }
+
+    pub fn get(&self, id: ContainerId) -> Option<&Container> {
+        self.containers.get(&id)
+    }
+
+    pub fn len(&self) -> usize {
+        self.containers.values().filter(|c| c.state != ContainerState::Destroyed).count()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+
+impl Default for ContainerManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+static MGR: OnceLock<Mutex<ContainerManager>> = OnceLock::new();
+
+pub fn containers() -> &'static Mutex<ContainerManager> {
+    MGR.get_or_init(|| Mutex::new(ContainerManager::new()))
+}
+
+pub fn init() {
+    let mut m = containers().lock().unwrap();
+    if m.is_empty() {
+        if let Ok(id) = m.create("default", Quota::default()) {
+            let _ = m.start(id);
+        }
+    }
+}
+
+pub fn status() -> String {
+    let m = containers().lock().unwrap();
+    format!("containers={} escapes_blocked={}", m.len(), m.escapes_blocked)
+}
+
+/// `act container://*` 的后端动作：
+/// * `create <name> [max_agents] [max_tokens] [max_tool_calls]` 创建容器
+/// * `start <id>` / `pause <id>` / `destroy <id>`
+/// * `add_agent <id> <agent>` 容器内派生智能体
+/// * `charge_tokens <id> <n>` / `charge_tool <id>`
+/// * `mount <id> <instance>` 挂载模型实例
+/// * `list` / `status`
+pub fn container_act(payload: &str) -> Result<String, String> {
+    let mut it = payload.split_whitespace();
+    let mut m = containers().lock().unwrap();
+    match it.next() {
+        Some("create") => {
+            let name = it.next().ok_or("用法: container://create <name> [max_agents] [max_tokens] [max_tool_calls]")?;
+            let mut q = Quota::default();
+            if let Some(n) = it.next().and_then(|s| s.parse::<usize>().ok()) { q.max_agents = n; }
+            if let Some(n) = it.next().and_then(|s| s.parse::<u64>().ok()) { q.max_tokens = n; }
+            if let Some(n) = it.next().and_then(|s| s.parse::<u64>().ok()) { q.max_tool_calls = n; }
+            let id = m.create(name, q).map_err(|e| format!("{:?}", e))?;
+            Ok(format!("已创建容器 id={} name={}", id.0, name))
+        }
+        Some("start") => {
+            let id = it.next().and_then(|s| s.parse::<u64>().ok()).map(ContainerId).ok_or("用法: container://start <id>")?;
+            m.start(id).map_err(|e| format!("{:?}", e))?;
+            Ok(format!("已启动容器 id={}", id.0))
+        }
+        Some("pause") => {
+            let id = it.next().and_then(|s| s.parse::<u64>().ok()).map(ContainerId).ok_or("用法: container://pause <id>")?;
+            m.pause(id).map_err(|e| format!("{:?}", e))?;
+            Ok(format!("已暂停容器 id={}", id.0))
+        }
+        Some("destroy") => {
+            let id = it.next().and_then(|s| s.parse::<u64>().ok()).map(ContainerId).ok_or("用法: container://destroy <id>")?;
+            m.destroy(id).map_err(|e| format!("{:?}", e))?;
+            Ok(format!("已销毁容器 id={}", id.0))
+        }
+        Some("add_agent") => {
+            let id = it.next().and_then(|s| s.parse::<u64>().ok()).map(ContainerId).ok_or("用法: container://add_agent <id> <agent>")?;
+            let agent = it.next().and_then(|s| s.parse::<u64>().ok()).ok_or("用法: container://add_agent <id> <agent>")?;
+            m.add_agent(id, agent).map_err(|e| format!("{:?}", e))?;
+            Ok(format!("容器 id={} 已加入 agent={}", id.0, agent))
+        }
+        Some("charge_tokens") => {
+            let id = it.next().and_then(|s| s.parse::<u64>().ok()).map(ContainerId).ok_or("用法: container://charge_tokens <id> <n>")?;
+            let n = it.next().and_then(|s| s.parse::<u64>().ok()).ok_or("用法: container://charge_tokens <id> <n>")?;
+            m.charge_tokens(id, n).map_err(|e| format!("{:?}", e))?;
+            Ok(format!("容器 id={} 计费 tokens={}", id.0, n))
+        }
+        Some("charge_tool") => {
+            let id = it.next().and_then(|s| s.parse::<u64>().ok()).map(ContainerId).ok_or("用法: container://charge_tool <id>")?;
+            m.charge_tool(id).map_err(|e| format!("{:?}", e))?;
+            Ok(format!("容器 id={} 工具计费 +1", id.0))
+        }
+        Some("mount") => {
+            let id = it.next().and_then(|s| s.parse::<u64>().ok()).map(ContainerId).ok_or("用法: container://mount <id> <instance>")?;
+            let instance = it.next().and_then(|s| s.parse::<u64>().ok()).ok_or("用法: container://mount <id> <instance>")?;
+            m.mount_model(id, instance).map_err(|e| format!("{:?}", e))?;
+            Ok(format!("容器 id={} 已挂载模型实例 {}", id.0, instance))
+        }
+        Some("list") | None | Some("status") => {
+            let mut out = String::from("容器列表:\n");
+            for (id, c) in &m.containers {
+                if c.state == ContainerState::Destroyed { continue; }
+                out.push_str(&format!(
+                    "  id={} name={} state={:?} agents={} tokens={} tools={}\n",
+                    id.0, c.name, c.state, c.agents.len(), c.tokens_used, c.tool_calls
+                ));
+            }
+            out.push_str(&format!("  {}\n", status()));
+            Ok(out)
+        }
+        Some(other) => Err(format!("未知 container 动作: {}", other)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lifecycle() {
+        let mut m = ContainerManager::new();
+        let id = m.create("c1", Quota::default()).unwrap();
+        assert_eq!(m.get(id).unwrap().state, ContainerState::Created);
+        m.start(id).unwrap();
+        assert_eq!(m.get(id).unwrap().state, ContainerState::Running);
+        m.pause(id).unwrap();
+        assert_eq!(m.get(id).unwrap().state, ContainerState::Paused);
+        m.destroy(id).unwrap();
+        assert_eq!(m.len(), 0);
+    }
+
+    #[test]
+    fn agent_quota() {
+        let mut m = ContainerManager::new();
+        let quota = Quota {
+            max_agents: 1,
+            ..Quota::default()
+        };
+        let id = m.create("c", quota).unwrap();
+        m.start(id).unwrap();
+        m.add_agent(id, 1).unwrap();
+        assert!(matches!(
+            m.add_agent(id, 2),
+            Err(ContainerError::QuotaExceeded { .. })
+        ));
+    }
+
+    #[test]
+    fn token_and_tool_quota() {
+        let mut m = ContainerManager::new();
+        let quota = Quota {
+            max_tokens: 10,
+            max_tool_calls: 1,
+            ..Quota::default()
+        };
+        let id = m.create("c", quota).unwrap();
+        m.start(id).unwrap();
+        m.charge_tokens(id, 8).unwrap();
+        assert!(m.charge_tokens(id, 8).is_err());
+        m.charge_tool(id).unwrap();
+        assert!(m.charge_tool(id).is_err());
+    }
+
+    #[test]
+    fn isolation() {
+        let mut m = ContainerManager::new();
+        let a = m.create("a", Quota::default()).unwrap();
+        let b = m.create("b", Quota::default()).unwrap();
+        m.start(a).unwrap();
+        m.start(b).unwrap();
+        m.add_agent(a, 1).unwrap();
+        assert!(m.check_access(a, 1).is_ok());
+        assert!(m.check_access(b, 1).is_err());
+        assert_eq!(m.escapes_blocked, 1);
+    }
+
+    #[test]
+    fn global_init_default_container() {
+        init();
+        let m = containers().lock().unwrap();
+        assert!(m.find("default").is_some());
+    }
+}

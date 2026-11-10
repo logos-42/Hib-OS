@@ -1,1 +1,427 @@
-//! 模型原语 —— 模型是 AI 原生 OS 中的“地址空间 / 代码段”。 //! //! 在传统操作系统里，进程拥有独立的虚拟地址空间、页表与代码段； //! 在 AI 原生 OS 里，**模型 (Model)** 承担这一角色：模型权重即代码段， //! 模型实例 (ModelInstance) 承载运行时推理上下文与 KV 缓存，每个智能体 //! 绑定一个模型实例作为自己的“地址空间”。 //! //! 接口（供 `model://*` 通道与 `act` 调用）： //! * `model load <路径> [gguf|onnx|raw]` —— 注册并加载模型元数据（不真正推理，内存模拟） //! * `model spec <id>` —— 查看模型规格（参数量、上下文窗口、量化、显存占用） //! * `model instantiate <id> <智能体> [窗口tokens]` —— 为智能体实例化模型（分配地址空间等价物） //! * `model unload <id>` —— 卸载模型，收回所有实例 //! * `model instances` —— 列出全部模型实例  use std::collections::{BTreeMap, BTreeSet}; use std::sync::{Mutex, OnceLock};  use crate::monitor::get_time_ns;  /// 模型文件格式。 #[derive(Clone, Copy, Debug, PartialEq, Eq)] pub enum ModelFormat {     GGUF,     ONNX,     RawTensor, }  impl ModelFormat {     pub fn name(self) -> &'static str {         match self {             ModelFormat::GGUF => "gguf",             ModelFormat::ONNX => "onnx",             ModelFormat::RawTensor => "raw",         }     } }  /// 模型规格：参数量、上下文窗口、量化、显存占用。 #[derive(Clone, Debug)] pub struct ModelSpec {     pub id: ModelId,     pub path: String,     pub format: ModelFormat,     pub parameter_count: u64,     pub context_window: u64,   // token 数，即“虚拟地址空间”大小     pub quantization: &'static str,     pub vram_usage: u64,       // 字节     pub loaded: bool, }  pub type ModelId = u64;  /// 模型实例状态（等价于进程的地址空间生命周期）。 #[derive(Clone, Copy, Debug, PartialEq, Eq)] pub enum ModelInstanceState {     Unloaded,     Loaded,     Active,   // 正在为某智能体服务     Error, }  /// 模型实例：一个已加载模型在特定智能体上的运行态地址空间。 #[derive(Clone, Debug)] pub struct ModelInstance {     pub id: InstanceId,     pub spec_id: ModelId,     pub agent_id: Option<AgentId>,     pub state: ModelInstanceState,     pub kv_cache_used: u64,   // 已用 KV 缓存字节     pub kv_cache_quota: u64,  // KV 缓存配额字节     pub context_tokens: u64,  // 当前占用上下文窗口 token 数     pub created_ns: u128,     pub last_active_ns: u128, }  pub type InstanceId = u64; pub type AgentId = u64;  /// 已加载模型注册表（元数据层，不持真张量；与 `kernel/ai/model_loader` 互补）。 pub struct ModelRegistry {     specs: BTreeMap<ModelId, ModelSpec>,     instances: BTreeMap<InstanceId, ModelInstance>,     next_spec_id: ModelId,     next_instance_id: InstanceId,     load_count: u64,     instantiate_count: u64, }  impl Default for ModelRegistry {     fn default() -> Self {         Self::new()     } }  impl ModelRegistry {     pub fn new() -> Self {         Self {             specs: BTreeMap::new(),             instances: BTreeMap::new(),             next_spec_id: 1,             next_instance_id: 1,             load_count: 0,             instantiate_count: 0,         }     }      pub fn load(         &mut self,         path: &str,         format: ModelFormat,         parameter_count: u64,         context_window: u64,         quantization: &'static str,         vram_usage: u64,     ) -> ModelId {         let id = self.next_spec_id;         self.next_spec_id += 1;         self.load_count += 1;         let spec = ModelSpec {             id,             path: path.to_string(),             format,             parameter_count,             context_window,             quantization,             vram_usage,             loaded: true,         };         self.specs.insert(id, spec);         id     }      pub fn unload(&mut self, spec_id: ModelId) -> bool {         if self.specs.remove(&spec_id).is_some() {             // 卸载模型时，所有引用它的实例降为错误态。             for inst in self.instances.values_mut() {                 if inst.spec_id == spec_id {                     inst.state = ModelInstanceState::Error;                     inst.agent_id = None;                 }             }             true         } else {             false         }     }      pub fn spec(&self, spec_id: ModelId) -> Option<&ModelSpec> {         self.specs.get(&spec_id)     }      pub fn instantiate(         &mut self,         spec_id: ModelId,         agent_id: AgentId,         context_window: Option<u64>,     ) -> Result<InstanceId, String> {         let spec = self             .specs             .get(&spec_id)             .ok_or_else(|| format!("模型规格 #{} 不存在", spec_id))?;         let id = self.next_instance_id;         self.next_instance_id += 1;         self.instantiate_count += 1;         let inst = ModelInstance {             id,             spec_id,             agent_id: Some(agent_id),             state: ModelInstanceState::Active,             kv_cache_used: 0,             kv_cache_quota: spec.vram_usage / 4, // KV 缓存默认按 1/4 模型大小配额             context_tokens: context_window.unwrap_or(spec.context_window).min(spec.context_window),             created_ns: get_time_ns() as u128,             last_active_ns: get_time_ns() as u128,         };         self.instances.insert(id, inst);         Ok(id)     }      pub fn instance(&self, inst_id: InstanceId) -> Option<&ModelInstance> {         self.instances.get(&inst_id)     }      pub fn instances_by_agent(&self, agent_id: AgentId) -> Vec<&ModelInstance> {         self.instances             .values()             .filter(|i| i.agent_id == Some(agent_id))             .collect()     }      pub fn set_active(&mut self, inst_id: InstanceId) -> Result<(), String> {         let inst = self             .instances             .get_mut(&inst_id)             .ok_or_else(|| format!("模型实例 #{} 不存在", inst_id))?;         inst.state = ModelInstanceState::Active;         inst.last_active_ns = get_time_ns() as u128;         Ok(())     }      pub fn set_kv_used(&mut self, inst_id: InstanceId, bytes: u64) -> Result<(), String> {         let inst = self             .instances             .get_mut(&inst_id)             .ok_or_else(|| format!("模型实例 #{} 不存在", inst_id))?;         inst.kv_cache_used = bytes.min(inst.kv_cache_quota);         Ok(())     }      pub fn spec_count(&self) -> usize {         self.specs.len()     }      pub fn instance_count(&self) -> usize {         self.instances.len()     }      pub fn active_instance_count(&self) -> usize {         self.instances             .values()             .filter(|i| i.state == ModelInstanceState::Active)             .count()     }      pub fn total_vram_usage(&self) -> u64 {         self.specs.values().filter(|s| s.loaded).map(|s| s.vram_usage).sum()     }      pub fn is_empty(&self) -> bool {         self.specs.is_empty() && self.instances.is_empty()     } }  static MODEL_REG: OnceLock<Mutex<ModelRegistry>> = OnceLock::new();  pub fn model_registry() -> &'static Mutex<ModelRegistry> {     MODEL_REG.get_or_init(|| Mutex::new(ModelRegistry::new())) }  pub fn init() {     let _ = model_registry(); }  /// `sense model://loader`：模型加载器状态摘要。 pub fn model_loader_sense() -> String {     let r = model_registry().lock().unwrap();     format!(         "specs={} instances={} active={} vram={}B load_count={} inst_count={}",         r.spec_count(),         r.instance_count(),         r.active_instance_count(),         r.total_vram_usage(),         r.load_count,         r.instantiate_count     ) }  /// 聚合状态摘要。 pub fn status() -> String {     model_loader_sense() }  /// `act model://<op>`：对模型原语执行行动。 pub fn model_act(payload: &str) -> Result<String, String> {     let mut it = payload.split_whitespace();     match it.next().unwrap_or("") {         "load" => {             let path = it.next().ok_or("缺少路径")?;             let fmt = match it.next().unwrap_or("raw") {                 "gguf" => ModelFormat::GGUF,                 "onnx" => ModelFormat::ONNX,                 _ => ModelFormat::RawTensor,             };             let params: u64 = it.next().and_then(|v| v.parse().ok()).unwrap_or(1_000_000_000);             let ctx: u64 = it.next().and_then(|v| v.parse().ok()).unwrap_or(131_072);             let quant = it.next().unwrap_or("q4_0");             let vram: u64 = it.next().and_then(|v| v.parse().ok()).unwrap_or(params * 2);             let id = model_registry()                 .lock()                 .unwrap()                 .load(path, fmt, params, ctx, quant, vram);             Ok(format!("已加载模型规格 #{} path={} ctx={}tokens vram={}B", id, path, ctx, vram))         }         "spec" => {             let id: u64 = it.next().ok_or("缺少 id")?.parse().map_err(|e| e.to_string())?;             let r = model_registry().lock().unwrap();             match r.spec(id) {                 Some(s) => Ok(format!(                     "模型 #{} {} fmt={} params={} ctx={}tokens quant={} vram={}B loaded={}",                     id,                     s.path,                     s.format.name(),                     s.param_count_str(),                     s.context_window,                     s.quantization,                     s.vram_usage,                     s.loaded                 )),                 None => Err(format!("模型规格 #{} 不存在", id)),             }         }         "instantiate" => {             let spec_id: u64 = it.next().ok_or("缺少 spec id")?.parse().map_err(|e| e.to_string())?;             let agent_id: u64 = it.next().ok_or("缺少智能体 id")?.parse().map_err(|e| e.to_string())?;             let ctx = it.next().and_then(|v| v.parse().ok());             let id = model_registry().lock().unwrap().instantiate(spec_id, agent_id, ctx)?;             Ok(format!("已实例化模型实例 #{} 绑定智能体 {}", id, agent_id))         }         "unload" => {             let id: u64 = it.next().ok_or("缺少 id")?.parse().map_err(|e| e.to_string())?;             if model_registry().lock().unwrap().unload(id) {                 Ok(format!("已卸载模型 #{}", id))             } else {                 Err(format!("模型 #{} 不存在", id))             }         }         "instances" => Ok(model_registry().lock().unwrap().instances_status()),         "status" => Ok(model_loader_sense()),         _ => Err(             "用法: model load|spec|instantiate|unload|instances|status".to_string(),         ),     } }  impl ModelRegistry {     pub fn instances_status(&self) -> String {         if self.instances.is_empty() {             return "（无模型实例）".to_string();         }         let mut out = String::new();         for i in self.instances.values() {             out.push_str(&format!(                 "inst={} spec={} agent={:?} state={:?} kv={}/{}B ctx={}tok\n",                 i.id,                 i.spec_id,                 i.agent_id,                 format!("{:?}", i.state),                 i.kv_cache_used,                 i.kv_cache_quota,                 i.context_tokens             ));         }         out.trim_end().to_string()     } }  impl ModelSpec {     pub fn param_count_str(&self) -> String {         let n = self.parameter_count as f64;         if n >= 1e9 {             format!("{:.2}B", n / 1e9)         } else if n >= 1e6 {             format!("{:.2}M", n / 1e6)         } else {             format!("{}", self.parameter_count)         }     } }  #[cfg(test)] mod tests {     use super::*;      #[test]     fn load_spec_unload() {         let mut r = ModelRegistry::new();         let id = r.load("/tmp/model.gguf", ModelFormat::GGUF, 7_000_000_000, 131_072, "q4_0", 14 * 1024 * 1024 * 1024);         assert!(id > 0);         let s = r.spec(id).unwrap();         assert!(s.param_count_str().contains("B"));         assert_eq!(r.spec_count(), 1);         assert!(r.unload(id));         assert_eq!(r.spec_count(), 0);     }      #[test]     fn instantiate_and_agent_instances() {         let mut r = ModelRegistry::new();         let sid = r.load("/tmp/m.bin", ModelFormat::RawTensor, 1_000_000, 4096, "fp16", 2 * 1024 * 1024);         let iid = r.instantiate(sid, 42, None).unwrap();         let inst = r.instance(iid).unwrap();         assert_eq!(inst.agent_id, Some(42));         assert_eq!(inst.state, ModelInstanceState::Active);         let v = r.instances_by_agent(42);         assert_eq!(v.len(), 1);         assert!(r.active_instance_count() >= 1);     }      #[test]     fn unload_marks_instances_error() {         let mut r = ModelRegistry::new();         let sid = r.load("/tmp/m.bin", ModelFormat::RawTensor, 1_000, 1024, "fp16", 1024);         let _iid = r.instantiate(sid, 7, None).unwrap();         assert!(r.unload(sid));         let inst = r.instances.values().next().unwrap();         assert_eq!(inst.state, ModelInstanceState::Error);     }      #[test]     fn model_act_roundtrip() {         let reg = model_registry();         let mut g = reg.lock().unwrap();         g.load("/tmp/a.gguf", ModelFormat::GGUF, 1_000_000, 2048, "q4_0", 512);         drop(g);         let res = model_act("load /tmp/b.onnx onnx 2_000_000_000 8192 q8_0 4096").unwrap();         assert!(res.contains("已加载模型规格"));         let res = model_act("spec 2").unwrap();         assert!(res.contains("2.00B"));         let res = model_act("instantiate 2 9 4096").unwrap();         assert!(res.contains("已实例化模型实例"));         let res = model_act("instances").unwrap();         assert!(res.contains("inst="));         let res = model_act("unload 2").unwrap();         assert!(res.contains("已卸载模型"));     } }
+//! 模型子系统 —— AI 原生 OS 的「可执行镜像」。
+//!
+//! 对应《现代操作系统》中的**可执行文件与进程映像**：模型文件之于智能体，
+//! 如同 ELF 之于进程。模型注册表等价于内核的二进制格式注册表。
+//!
+//! 设计要点：
+//! * `ModelFormat`：RawTensor / GGUF / ONNX / SafeTensors；
+//! * `ModelInstance`：一次加载产生的可执行实例（占用 VRAM、上下文窗口、KV 缓存）；
+//! * `ModelRegistry`：加载、卸载、按名查找、实例化（类似 fork/exec 的 exec 部分）；
+//! * 量化信息与内存账本，便于内存管理器统一核算；
+//! * 纯内存原型，无外部依赖。
+
+use std::collections::BTreeMap;
+use std::sync::{Mutex, OnceLock};
+
+/// 模型格式。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ModelFormat {
+    RawTensor,
+    Gguf,
+    Onnx,
+    SafeTensors,
+}
+
+impl ModelFormat {
+    pub fn name(self) -> &'static str {
+        match self {
+            ModelFormat::RawTensor => "raw",
+            ModelFormat::Gguf => "gguf",
+            ModelFormat::Onnx => "onnx",
+            ModelFormat::SafeTensors => "safetensors",
+        }
+    }
+}
+
+/// 模型元数据。
+#[derive(Clone, Debug)]
+pub struct ModelMeta {
+    pub path: String,
+    pub format: ModelFormat,
+    pub params: u64,
+    pub ctx_window: u64,
+    pub dtype: String,
+    pub vram_bytes: u64,
+}
+
+/// 模型实例 id。
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct InstanceId(pub u64);
+
+/// 一个模型实例：可被智能体认领执行。
+#[derive(Clone, Debug)]
+pub struct ModelInstance {
+    pub id: InstanceId,
+    pub model: String,
+    pub loaded_at: u64,
+    /// 已分配的 KV 缓存 token 数。
+    pub kv_used: u64,
+    /// 当前持有者（智能体 id），None 表示空闲。
+    pub owner: Option<u64>,
+}
+
+/// 模型注册表错误。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ModelError {
+    AlreadyLoaded { path: String },
+    NotFound { name: String },
+    NoSuchInstance { id: InstanceId },
+    Busy { id: InstanceId },
+    VramExhausted,
+}
+
+/// 模型注册表。
+pub struct ModelRegistry {
+    next_instance: u64,
+    models: BTreeMap<String, ModelMeta>,
+    instances: BTreeMap<InstanceId, ModelInstance>,
+    /// VRAM 预算（字节）。
+    pub vram_budget: u64,
+    pub vram_used: u64,
+}
+
+impl ModelRegistry {
+    pub fn new() -> Self {
+        Self {
+            next_instance: 1,
+            models: BTreeMap::new(),
+            instances: BTreeMap::new(),
+            vram_budget: 8 << 30,
+            vram_used: 0,
+        }
+    }
+
+    /// 加载模型元数据（不实例化）。重复加载同一路径返回错误。
+    pub fn load(
+        &mut self,
+        path: &str,
+        format: ModelFormat,
+        params: u64,
+        ctx_window: u64,
+        dtype: &str,
+        vram_bytes: u64,
+    ) -> Result<String, ModelError> {
+        if self.models.contains_key(path) {
+            return Err(ModelError::AlreadyLoaded {
+                path: path.to_string(),
+            });
+        }
+        if self.vram_used + vram_bytes > self.vram_budget {
+            return Err(ModelError::VramExhausted);
+        }
+        self.models.insert(
+            path.to_string(),
+            ModelMeta {
+                path: path.to_string(),
+                format,
+                params,
+                ctx_window,
+                dtype: dtype.to_string(),
+                vram_bytes,
+            },
+        );
+        Ok(path.to_string())
+    }
+
+    /// 卸载模型（有实例仍持有则拒绝）。
+    pub fn unload(&mut self, name: &str) -> Result<(), ModelError> {
+        if self.instances.values().any(|i| i.model == name) {
+            return Err(ModelError::Busy {
+                id: InstanceId(0),
+            });
+        }
+        if self.models.remove(name).is_none() {
+            return Err(ModelError::NotFound {
+                name: name.to_string(),
+            });
+        }
+        Ok(())
+    }
+
+    /// 实例化：为模型创建可执行实例。
+    pub fn instantiate(
+        &mut self,
+        model: &str,
+        kv_tokens: u64,
+        owner: Option<u64>,
+    ) -> Result<InstanceId, ModelError> {
+        let meta = self
+            .models
+            .get(model)
+            .ok_or_else(|| ModelError::NotFound {
+                name: model.to_string(),
+            })?
+            .clone();
+        if self.vram_used + meta.vram_bytes > self.vram_budget {
+            return Err(ModelError::VramExhausted);
+        }
+        let id = InstanceId(self.next_instance);
+        self.next_instance += 1;
+        self.vram_used += meta.vram_bytes;
+        self.instances.insert(
+            id,
+            ModelInstance {
+                id,
+                model: model.to_string(),
+                loaded_at: 0,
+                kv_used: kv_tokens.min(meta.ctx_window),
+                owner,
+            },
+        );
+        Ok(id)
+    }
+
+    /// 释放实例，回收 VRAM。
+    pub fn destroy(&mut self, id: InstanceId) -> Result<(), ModelError> {
+        let inst = self
+            .instances
+            .remove(&id)
+            .ok_or(ModelError::NoSuchInstance { id })?;
+        if let Some(meta) = self.models.get(&inst.model) {
+            self.vram_used = self.vram_used.saturating_sub(meta.vram_bytes);
+        }
+        Ok(())
+    }
+
+    /// 按名查找元数据。
+    pub fn find(&self, name: &str) -> Option<&ModelMeta> {
+        self.models.get(name)
+    }
+
+    /// 绑定实例到所有者。
+    pub fn bind(&mut self, id: InstanceId, owner: u64) -> Result<(), ModelError> {
+        let inst = self
+            .instances
+            .get_mut(&id)
+            .ok_or(ModelError::NoSuchInstance { id })?;
+        if let Some(cur) = inst.owner {
+            if cur != owner {
+                return Err(ModelError::Busy { id });
+            }
+        }
+        inst.owner = Some(owner);
+        Ok(())
+    }
+
+    pub fn models(&self) -> &BTreeMap<String, ModelMeta> {
+        &self.models
+    }
+
+    pub fn instances(&self) -> &BTreeMap<InstanceId, ModelInstance> {
+        &self.instances
+    }
+}
+
+impl Default for ModelRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+static REGISTRY: OnceLock<Mutex<ModelRegistry>> = OnceLock::new();
+
+/// 全局模型注册表。
+pub fn model_registry() -> &'static Mutex<ModelRegistry> {
+    REGISTRY.get_or_init(|| Mutex::new(ModelRegistry::new()))
+}
+
+/// 初始化：预装文本/多模态模型描述。
+pub fn init() {
+    let mut reg = model_registry().lock().unwrap();
+    if !reg.models().is_empty() {
+        return;
+    }
+    let _ = reg.load(
+        "memory://hibos-core-7b",
+        ModelFormat::RawTensor,
+        7_000_000_000,
+        32_000,
+        "fp16",
+        (7u64 << 30) / 2,
+    );
+    let _ = reg.load(
+        "memory://hibos-vision",
+        ModelFormat::Gguf,
+        2_000_000_000,
+        8_192,
+        "q4",
+        (2u64 << 30) / 4,
+    );
+}
+
+/// 状态摘要，供 `sense model://status` 使用。
+pub fn status() -> String {
+    let reg = model_registry().lock().unwrap();
+    format!(
+        "{} model(s), {} instance(s), vram={}/{}MiB",
+        reg.models().len(),
+        reg.instances().len(),
+        reg.vram_used >> 20,
+        reg.vram_budget >> 20
+    )
+}
+
+impl ModelRegistry {
+    /// 实例列表摘要，供 `sense model://instances` 使用。
+    pub fn instances_status(&self) -> String {
+        let mut out = String::from("模型实例:\n");
+        for (id, inst) in &self.instances {
+            out.push_str(&format!(
+                "  inst={} model={} kv={} owner={:?}\n",
+                id.0, inst.model, inst.kv_used, inst.owner
+            ));
+        }
+        if self.instances.is_empty() {
+            out.push_str("  （无）\n");
+        }
+        out
+    }
+}
+
+/// `sense model://loader` —— 模型加载器视角的摘要。
+pub fn model_loader_sense() -> String {
+    let reg = model_registry().lock().unwrap();
+    let mut out = String::from("模型加载器:\n");
+    for (path, meta) in reg.models() {
+        out.push_str(&format!(
+            "  {} fmt={} params={} ctx={} dtype={} vram={}KiB\n",
+            path,
+            meta.format.name(),
+            meta.params,
+            meta.ctx_window,
+            meta.dtype,
+            meta.vram_bytes >> 10
+        ));
+    }
+    if reg.models().is_empty() {
+        out.push_str("  （未加载任何模型）\n");
+    }
+    out
+}
+
+/// `act model://*` 的后端动作：
+/// * `load <path> <format> <params> <ctx> <dtype> <vram>` 加载元数据
+/// * `instantiate <path> [kv_tokens]` 实例化
+/// * `destroy <instance>` 释放
+/// * `bind <instance> <owner>` 绑定所有者
+/// * `unload <path>` 卸载
+/// * `status` 摘要
+pub fn model_act(payload: &str) -> Result<String, String> {
+    let mut it = payload.split_whitespace();
+    let mut reg = model_registry().lock().unwrap();
+    match it.next() {
+        Some("load") => {
+            let path = it.next().ok_or("用法: model://loader load <path> <format> <params> <ctx> <dtype> <vram>")?;
+            let fmt = match it.next().unwrap_or("raw").to_ascii_lowercase().as_str() {
+                "gguf" => ModelFormat::Gguf,
+                "onnx" => ModelFormat::Onnx,
+                "safetensors" | "st" => ModelFormat::SafeTensors,
+                _ => ModelFormat::RawTensor,
+            };
+            let params = it.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+            let ctx = it.next().and_then(|s| s.parse().ok()).unwrap_or(4096);
+            let dtype = it.next().unwrap_or("fp16");
+            let vram = it.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+            let name = reg
+                .load(path, fmt, params, ctx, dtype, vram)
+                .map_err(|e| format!("加载失败: {:?}", e))?;
+            Ok(format!("已加载模型 {}", name))
+        }
+        Some("instantiate") => {
+            let path = it.next().ok_or("用法: model://instances instantiate <path> [kv_tokens]")?;
+            let kv = it.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+            let id = reg
+                .instantiate(path, kv, None)
+                .map_err(|e| format!("实例化失败: {:?}", e))?;
+            Ok(format!("已创建实例 inst={}", id.0))
+        }
+        Some("destroy") => {
+            let id = it
+                .next()
+                .and_then(|s| s.parse::<u64>().ok())
+                .map(InstanceId)
+                .ok_or("用法: model://instances destroy <instance>")?;
+            reg.destroy(id).map_err(|e| format!("释放失败: {:?}", e))?;
+            Ok(format!("已释放实例 inst={}", id.0))
+        }
+        Some("bind") => {
+            let id = it
+                .next()
+                .and_then(|s| s.parse::<u64>().ok())
+                .map(InstanceId)
+                .ok_or("用法: model://instances bind <instance> <owner>")?;
+            let owner = it
+                .next()
+                .and_then(|s| s.parse::<u64>().ok())
+                .ok_or("用法: model://instances bind <instance> <owner>")?;
+            reg.bind(id, owner)
+                .map_err(|e| format!("绑定失败: {:?}", e))?;
+            Ok(format!("实例 inst={} 已绑定 owner={}", id.0, owner))
+        }
+        Some("unload") => {
+            let path = it.next().ok_or("用法: model://loader unload <path>")?;
+            reg.unload(path).map_err(|e| format!("卸载失败: {:?}", e))?;
+            Ok(format!("已卸载模型 {}", path))
+        }
+        Some("status") | None => Ok(status()),
+        Some(other) => Err(format!("未知 model 动作: {}", other)),
+    }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn load_and_instantiate() {
+        let mut reg = ModelRegistry::new();
+        reg.load("/m.bin", ModelFormat::RawTensor, 1_000, 1024, "fp16", 1024)
+            .unwrap();
+        let id = reg.instantiate("/m.bin", 128, None).unwrap();
+        assert_eq!(reg.instances().len(), 1);
+        assert_eq!(reg.vram_used, 1024);
+        reg.destroy(id).unwrap();
+        assert_eq!(reg.vram_used, 0);
+    }
+
+    #[test]
+    fn duplicate_load_rejected() {
+        let mut reg = ModelRegistry::new();
+        reg.load("/m.bin", ModelFormat::Gguf, 1, 1, "q4", 1)
+            .unwrap();
+        assert_eq!(
+            reg.load("/m.bin", ModelFormat::Gguf, 1, 1, "q4", 1)
+                .unwrap_err(),
+            ModelError::AlreadyLoaded {
+                path: "/m.bin".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn unload_busy_rejected() {
+        let mut reg = ModelRegistry::new();
+        reg.load("/m.bin", ModelFormat::Onnx, 1, 1, "fp32", 1)
+            .unwrap();
+        reg.instantiate("/m.bin", 0, Some(9)).unwrap();
+        assert!(matches!(reg.unload("/m.bin"), Err(ModelError::Busy { .. })));
+    }
+
+    #[test]
+    fn bind_conflict() {
+        let mut reg = ModelRegistry::new();
+        reg.load("/m.bin", ModelFormat::Onnx, 1, 1, "fp32", 1)
+            .unwrap();
+        let id = reg.instantiate("/m.bin", 0, Some(1)).unwrap();
+        assert!(reg.bind(id, 1).is_ok());
+        assert!(matches!(reg.bind(id, 2), Err(ModelError::Busy { .. })));
+    }
+
+    #[test]
+    fn global_init_and_status() {
+        init();
+        init();
+        assert!(status().contains("model(s)"));
+    }
+}

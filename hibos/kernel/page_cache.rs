@@ -818,7 +818,7 @@ mod tests {
         let _ = flush_dirty_pages();
         let _ = evict_lru_pages();
         let _rate = page_cache_hit_rate();
-        let _ = rate;
+        let _ = _rate;
     }
 
     #[test]
@@ -828,6 +828,6 @@ mod tests {
         assert!(bwrite(idx).is_ok());
         let _ = buffer_sync();
         let _rate = buffer_cache().lock().unwrap().cache_hit_rate();
-        let _ = rate;
+        let _ = _rate;
     }
 }

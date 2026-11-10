@@ -10,6 +10,7 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::{Mutex, OnceLock};
+use std::sync::atomic::Ordering;
 
 // =====================================================================================
 // 信号枚举
@@ -474,6 +475,13 @@ impl SignalHandler {
     /// 返回总发送次数。
     pub fn total_sent(&self) -> u64 {
         self.total_sent
+    }
+
+    /// 返回指定进程对指定信号的发送次数。
+    pub fn sent_count(&self, pid: Pid, signal: Signal) -> u64 {
+        self.process_state(pid)
+            .map(|s| s.sent_count(signal))
+            .unwrap_or(0)
     }
 
     /// 返回总投递次数。

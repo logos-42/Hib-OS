@@ -865,7 +865,7 @@ mod tests {
         f.extend_from_slice(&0u16.to_le_bytes());
         // 程序头 (PT_LOAD) at offset 64, 56 bytes
         // p_type=PT_LOAD, p_flags=PF_R|PF_X, p_offset=0x1000, p_vaddr=vaddr
-        f.extend_from_slice(&PT_LOADu32.to_le_bytes());
+        f.extend_from_slice(&PT_LOAD.to_le_bytes());
         f.extend_from_slice(&(PF_R | PF_X as u32).to_le_bytes());
         f.extend_from_slice(&0x1000u64.to_le_bytes());
         f.extend_from_slice(&vaddr.to_le_bytes());
@@ -889,9 +889,9 @@ mod tests {
         assert_eq!(header.magic, ELF_MAGIC);
         assert_eq!(header.class, ELF_CLASS_64);
         assert_eq!(header.endian, ELF_DATA_LITTLE);
-        assert_eq!(header.bitness(), 64);
-        assert!(header.is_little_endian());
-        assert!(header.is_loadable());
+        assert_eq!(header.clone().bitness(), 64);
+        assert!(header.clone().is_little_endian());
+        assert!(header.clone().is_loadable());
         assert_eq!(header.entry, entry);
         assert_eq!(header.phoff, 64);
         assert_eq!(header.phnum, 1);
@@ -967,7 +967,7 @@ mod tests {
         f.extend_from_slice(&0u16.to_le_bytes());
         let seg_content = b"AAAA";
         // 段1: vaddr 0x401000, filesz 4, 放文件偏调 0x1000
-        f.extend_from_slice(&PT_LOADu32.to_le_bytes());
+        f.extend_from_slice(&PT_LOAD.to_le_bytes());
         f.extend_from_slice(&(PF_R | PF_X as u32).to_le_bytes());
         f.extend_from_slice(&0x1000u64.to_le_bytes());
         f.extend_from_slice(&0x401000u64.to_le_bytes());
@@ -976,7 +976,7 @@ mod tests {
         f.extend_from_slice(&4u64.to_le_bytes());
         f.extend_from_slice(&4096u64.to_le_bytes());
         // 段2: vaddr 0x401002 (与段1重叠), filesz 4, 放文件偏调 0x2000
-        f.extend_from_slice(&PT_LOADu32.to_le_bytes());
+        f.extend_from_slice(&PT_LOAD.to_le_bytes());
         f.extend_from_slice(&(PF_R | PF_W as u32).to_le_bytes());
         f.extend_from_slice(&0x2000u64.to_le_bytes());
         f.extend_from_slice(&0x401002u64.to_le_bytes());

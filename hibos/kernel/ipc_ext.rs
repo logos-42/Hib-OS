@@ -966,16 +966,16 @@ mod tests {
         let mut shm = SharedMemoryManager::new();
         let _ = shm.create("s1", 100);
         let _s = shm.summary();
-        let _ = s;
+        let _ = _s;
 
         let mut mq = MessageQueueManager::new();
         let _ = mq.create("q1", 5, 32);
         let _s = mq.summary();
-        let _ = s;
+        let _ = _s;
 
         let mut pm = PipeManager::new();
         let _ = pm.create(16);
         let _s = pm.summary();
-        let _ = s;
+        let _ = _s;
     }
 }

@@ -620,8 +620,8 @@ mod tests {
         assert_eq!(Verdict::Drop.name(), "DROP");
         assert!(Verdict::Drop.is_terminal());
         assert!(!Verdict::Accept.is_terminal());
-        assert!(!Verdict::Log.is_terminal()); // Log 是动作不是 verdict；此处测试 name。
-        let _ = Verdict::Log;
+        assert!(!Verdict::NfRepeat.is_terminal()); // 非终结 verdict；此处测试 name。
+        let _ = Verdict::NfRepeat;
     }
 
     #[test]

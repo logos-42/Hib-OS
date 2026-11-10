@@ -288,6 +288,14 @@ impl AIConsciousness {
             ChannelKind::PageTable => ComputePattern::Custom(format!("pagetable_{}", name)),
             ChannelKind::Slab => ComputePattern::Custom(format!("slab_{}", name)),
             ChannelKind::Buddy => ComputePattern::Custom(format!("buddy_{}", name)),
+            ChannelKind::Model => ComputePattern::Custom(format!("model_{}", name)),
+            ChannelKind::Ctx => ComputePattern::Custom(format!("ctx_{}", name)),
+            ChannelKind::Knowledge => ComputePattern::Custom(format!("knowledge_{}", name)),
+            ChannelKind::Tool => ComputePattern::Custom(format!("tool_{}", name)),
+            ChannelKind::Aios => ComputePattern::Custom(format!("aios_{}", name)),
+            ChannelKind::Security => ComputePattern::Custom(format!("security_{}", name)),
+            ChannelKind::Deadlock => ComputePattern::Custom(format!("deadlock_{}", name)),
+            ChannelKind::Container => ComputePattern::Custom(format!("container_{}", name)),
         };
         let policy = match kind {
             ChannelKind::Gpu => SchedulePolicy::HighThroughput,

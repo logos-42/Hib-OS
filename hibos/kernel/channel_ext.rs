@@ -772,40 +772,40 @@ mod tests {
     #[test]
     fn lease_ext_renew_and_force_release() {
         let ch = "unittest://leaseext/renew";
-        let owner = ExecId(701);
+        let owner = 701u64;
         // 获取租约
         assert!(lease::acquire(ch, owner, None).is_ok());
         // 续约（同一持有者）应成功
         let ep = LeaseExt::renew(ch, owner).unwrap();
         assert!(ep > 0);
         // 非持有者续约应失败
-        let err = LeaseExt::renew(ch, ExecId(702)).unwrap_err();
+        let err = LeaseExt::renew(ch, 702u64).unwrap_err();
         assert_eq!(err, LeaseExtError::Conflict);
         // 强制释放
         assert!(LeaseExt::force_release(ch).is_ok());
         // 释放后其他人可获取
-        assert!(lease::acquire(ch, ExecId(702), None).is_ok());
-        let _ = lease::release(ch, ExecId(702));
+        assert!(lease::acquire(ch, 702u64, None).is_ok());
+        let _ = lease::release(ch, 702u64);
     }
 
     #[test]
     fn lease_ext_wait_for_lease_acquires() {
         let ch = "unittest://leaseext/wait";
         // 确保无人持有
-        let _ = lease::release(ch, ExecId(801));
-        let ep = LeaseExt::wait_for_lease(ch, ExecId(801), Duration::from_secs(1)).unwrap();
+        let _ = lease::release(ch, 801u64);
+        let ep = LeaseExt::wait_for_lease(ch, 801u64, Duration::from_secs(1)).unwrap();
         assert!(ep >= 0);
-        let _ = lease::release(ch, ExecId(801));
+        let _ = lease::release(ch, 801u64);
     }
 
     #[test]
     fn lease_ext_wait_for_lease_timeout() {
         let ch = "unittest://leaseext/timeout";
         // 他人持有租约
-        assert!(lease::acquire(ch, ExecId(901), None).is_ok());
-        let err = LeaseExt::wait_for_lease(ch, ExecId(902), Duration::from_millis(50)).unwrap_err();
+        assert!(lease::acquire(ch, 901u64, None).is_ok());
+        let err = LeaseExt::wait_for_lease(ch, 902u64, Duration::from_millis(50)).unwrap_err();
         assert_eq!(err, LeaseExtError::Timeout);
-        let _ = lease::release(ch, ExecId(901));
+        let _ = lease::release(ch, 901u64);
     }
 
     #[test]

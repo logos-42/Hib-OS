@@ -65,6 +65,22 @@ pub enum ChannelKind {
     Slab,
     /// 伙伴系统页框分配器
     Buddy,
+    /// AI 原生：模型原语（model://*）
+    Model,
+    /// AI 原生：上下文窗口/KV 缓存（ctx://*）
+    Ctx,
+    /// AI 原生：记忆文件系统/长期记忆（knowledge://*）
+    Knowledge,
+    /// AI 原生：工具调用层（tool://*）
+    Tool,
+    /// AI 原生：AI 原生 OS 总控状态（aios://*）
+    Aios,
+    /// AI 原生：安全沙箱与提示词注入防护（security://*）
+    Security,
+    /// AI 原生：死锁检测图（deadlock://*）
+    Deadlock,
+    /// AI 原生：模型容器沙箱（container://*）
+    Container,
 }
 
 impl ChannelKind {
@@ -96,6 +112,14 @@ impl ChannelKind {
             ChannelKind::PageTable => "pagetable",
             ChannelKind::Slab => "slab",
             ChannelKind::Buddy => "buddy",
+            ChannelKind::Model => "model",
+            ChannelKind::Ctx => "ctx",
+            ChannelKind::Knowledge => "knowledge",
+            ChannelKind::Tool => "tool",
+            ChannelKind::Aios => "aios",
+            ChannelKind::Security => "security",
+            ChannelKind::Deadlock => "deadlock",
+            ChannelKind::Container => "container",
         }
     }
 }
@@ -402,6 +426,22 @@ pub fn bootstrap() -> ChannelRegistry {
         (ChannelKind::Action, "sched://domains", Access::Read),
         // —— 统一灵感核心：五个相位归于一个调度意志 ——
         (ChannelKind::Action, "sched://inspiration", Access::ReadWrite),
+        // —— AI 原生 OS 通道：模型 / 上下文窗口 / 记忆 / 工具 / 安全 / 死锁 / 容器 / 总控 ——
+        (ChannelKind::Model, "model://loader", Access::ReadWrite),
+        (ChannelKind::Model, "model://instances", Access::Read),
+        (ChannelKind::Model, "model://spec", Access::Read),
+        (ChannelKind::Ctx, "ctx://kv", Access::Read),
+        (ChannelKind::Ctx, "ctx://window", Access::Read),
+        (ChannelKind::Knowledge, "knowledge://store", Access::ReadWrite),
+        (ChannelKind::Knowledge, "knowledge://query", Access::Read),
+        (ChannelKind::Tool, "tool://registry", Access::Read),
+        (ChannelKind::Tool, "tool://exec", Access::Write),
+        (ChannelKind::Aios, "aios://status", Access::Read),
+        (ChannelKind::Security, "security://status", Access::Read),
+        (ChannelKind::Security, "sec://caps", Access::ReadWrite),
+        (ChannelKind::Deadlock, "deadlock://graph", Access::Read),
+        (ChannelKind::Deadlock, "deadlock://wait", Access::ReadWrite),
+        (ChannelKind::Container, "container://status", Access::Read),
     ];
     for (kind, name, access) in defaults {
         let _ = reg.open(kind, name, access);
@@ -416,7 +456,7 @@ mod tests {
     #[test]
     fn bootstrap_opens_all_channels() {
         let reg = bootstrap();
-        assert_eq!(reg.len(), 107);
+        assert_eq!(reg.len(), 121);
         assert_eq!(reg.of_kind(ChannelKind::Net).count(), 5);
         assert_eq!(reg.of_kind(ChannelKind::Will).count(), 4);
         assert_eq!(reg.of_kind(ChannelKind::Context).count(), 2);
@@ -431,11 +471,27 @@ mod tests {
         assert_eq!(reg.of_kind(ChannelKind::Browser).count(), 1);
         assert_eq!(reg.of_kind(ChannelKind::Driver).count(), 2);
         assert_eq!(reg.of_kind(ChannelKind::Plugin).count(), 2);
+        assert_eq!(reg.of_kind(ChannelKind::Model).count(), 3);
+        assert_eq!(reg.of_kind(ChannelKind::Ctx).count(), 2);
+        assert_eq!(reg.of_kind(ChannelKind::Knowledge).count(), 2);
+        assert_eq!(reg.of_kind(ChannelKind::Tool).count(), 2);
+        assert_eq!(reg.of_kind(ChannelKind::Aios).count(), 1);
+        assert_eq!(reg.of_kind(ChannelKind::Security).count(), 1);
+        assert_eq!(reg.of_kind(ChannelKind::Deadlock).count(), 2);
+        assert_eq!(reg.of_kind(ChannelKind::Container).count(), 1);
         assert!(reg.find("file://vfs").is_some());
         assert!(reg.find("desktop://screen").is_some());
         assert!(reg.find("trace://exec").is_some());
         assert!(reg.find("mem://system").is_some());
         assert!(reg.find("nope://none").is_none());
+        assert!(reg.find("model://loader").is_some());
+        assert!(reg.find("ctx://kv").is_some());
+        assert!(reg.find("knowledge://store").is_some());
+        assert!(reg.find("tool://registry").is_some());
+        assert!(reg.find("aios://status").is_some());
+        assert!(reg.find("security://status").is_some());
+        assert!(reg.find("deadlock://graph").is_some());
+        assert!(reg.find("container://status").is_some());
     }
 
     #[test]

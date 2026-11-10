@@ -863,11 +863,12 @@ mod tests {
         t1.vruntime = 100;
         let mut t2 = Task::new("t2", 0);
         t2.vruntime = 50;
+        let t2_id = t2.id;
         rq.enqueue(t1);
         rq.enqueue(t2);
         // vruntime 最小的 t2 应先被选中
         let next = rq.pick_next().unwrap();
-        assert_eq!(next, t2.id);
+        assert_eq!(next, t2_id);
     }
 
     #[test]
@@ -913,10 +914,11 @@ mod tests {
         t1.deadline = 200;
         let mut t2 = Task::new("t2", 0);
         t2.deadline = 100;
+        let t2_id = t2.id;
         rq.enqueue(t1);
         rq.enqueue(t2);
         let next = rq.pick_next().unwrap();
-        assert_eq!(next, t2.id); // deadline 更小者先
+        assert_eq!(next, t2_id); // deadline 更小者先
     }
 
     #[test]
@@ -1004,9 +1006,9 @@ mod tests {
         sched_tick(0, tid, false, 500_000);
         let _ = sched_load_balance();
         let _ready = sched_total_ready();
-        let _ = ready;
+        let _ = _ready;
         let _s = sched_summary();
-        let _ = s;
+        let _ = _s;
     }
 
     #[test]

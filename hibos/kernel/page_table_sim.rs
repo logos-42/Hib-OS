@@ -1006,9 +1006,9 @@ mod tests {
         pt_flush_tlb(0x2000);
         pt_flush_all_tlb();
         let _rate = pt_tlb_hit_rate();
-        let _ = rate;
+        let _ = _rate;
         let _s = pt_summary();
-        let _ = s;
+        let _ = _s;
     }
 
     #[test]

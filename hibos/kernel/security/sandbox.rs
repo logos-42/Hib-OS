@@ -862,7 +862,7 @@ mod tests {
 
     #[test]
     fn process_not_sandboxed_is_unrestricted() {
-        let m = SandboxManager::new();
+        let mut m = SandboxManager::new();
         assert!(m.check_syscall(9999, 123));
         assert!(m.check_file_access(9999, "/anything", 0));
         assert!(m.check_net_access(9999, "1.2.3.4", 443));

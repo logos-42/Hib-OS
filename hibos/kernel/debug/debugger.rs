@@ -690,7 +690,7 @@ mod tests {
         let mut buf = [0u8; 16];
         let n = dbg.read_mem(0x10000, &mut buf).unwrap();
         assert_eq!(n, 16);
-        assert_eq!(&buf, data);
+        assert_eq!(&buf, &data[..16]);
         // 读取未映射地址应为 0。
         let mut buf2 = [0u8; 4];
         dbg.read_mem(0x90000, &mut buf2).unwrap();

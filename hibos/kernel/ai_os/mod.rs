@@ -1,1 +1,75 @@
-//! AI 原生操作系统内核层 —— 以“模型 (Model)”与“智能体 (Agent)”为核心。 //! //! 本层把 Tanenbaum《现代操作系统》的经典要点重新映射到 AI 原生抽象： //! //! * 进程/线程 → 智能体 (Agent)，每个智能体拥有独立 PCB 状态、模型实例、上下文窗口、能力位； //! * 地址空间/页表/TLB → 模型上下文窗口 + KV 缓存，语义页将 token 映射到向量； //! * 缺页中断/页面置换 → 上下文窗口溢出，旧页面被摘要后换出到长期记忆 (Swap/Knowledge)； //! * 文件系统/inode/目录 → 记忆文件系统 (Knowledge)，语义/向量检索取代路径查找； //! * I/O 设备/驱动/中断 → 工具调用 (Tool Use，MCP 风格注册表)，多模态感知即中断事件； //! * 死锁 (资源图/银行家算法) → 智能体对模型实例/工具租约/上下文窗口的等待图环路检测与恢复； //! * 安全 (ACL/能力/TCB) → 能力沙箱 + 提示词注入防护 + 模型输出策略网关； //! * 多处理机/调度/亲和性 → 多智能体并行、多调度域、模型实例亲和与负载均衡； //! * 微内核/外核 → 模型容器与智能体沙箱，内核只保留通道调度与能力核。 //! //! 所有子系统通过 `aios://*`、`model://*`、`ctx://*`、`knowledge://*`、`tool://*` 通道 //! 接入 Hib OS 的统一 `sense`/`act` 感知层，并沿用 `lease.rs` 的单写者租约 + epoch //! 乐观 CAS 与 `caps.rs` 的能力位权限模型。  pub mod model; pub mod agent_proc; pub mod sched_ai; pub mod ctx_mem; pub mod knowledge; pub mod tool; pub mod deadlock; pub mod security; pub mod container;  /// AI 原生子系统初始化：在 `kernel::boot_subsystems` 或 shell 启动时调用一次。 pub fn init() {     model::init();     agent_proc::init();     sched_ai::init();     ctx_mem::init();     knowledge::init();     tool::init();     deadlock::init();     security::init();     container::init(); }  /// 聚合状态摘要，供 `sense aios://status` 使用。 pub fn status() -> String {     let mut lines = Vec::new();     lines.push(format!("models={}", model::status()));     lines.push(format!("agents={}", agent_proc::status()));     lines.push(format!("sched={}", sched_ai::status()));     lines.push(format!("ctx={}", ctx_mem::status()));     lines.push(format!("knowledge={}", knowledge::status()));     lines.push(format!("tools={}", tool::status()));     lines.push(format!("deadlock={}", deadlock::status()));     lines.push(format!("security={}", security::status()));     lines.push(format!("container={}", container::status()));     lines.join(" | ") }  #[cfg(test)] mod tests {     use super::*;      #[test]     fn init_and_status_are_sane() {         init();         let s = status();         assert!(s.contains("models="));         assert!(s.contains("agents="));         assert!(s.contains("sched="));         assert!(s.contains("ctx="));         assert!(s.contains("knowledge="));         assert!(s.contains("tools="));         assert!(s.contains("deadlock="));         assert!(s.contains("security="));         assert!(s.contains("container="));     } }
+//! AI 原生操作系统内核层 —— 以“模型 (Model)”与“智能体 (Agent)”为核心。
+//!
+//! 本层把 Tanenbaum《现代操作系统》的经典要点重新映射到 AI 原生抽象：
+//!
+//! * 进程/线程 → 智能体 (Agent)，每个智能体拥有独立 PCB 状态、模型实例、上下文窗口、能力位；
+//! * 地址空间/页表/TLB → 模型上下文窗口 + KV 缓存，语义页将 token 映射到向量；
+//! * 缺页中断/页面置换 → 上下文窗口溢出，旧页面被摘要后换出到长期记忆 (Swap/Knowledge)；
+//! * 文件系统/inode/目录 → 记忆文件系统 (Knowledge)，语义/向量检索取代路径查找；
+//! * I/O 设备/驱动/中断 → 工具调用 (Tool Use，MCP 风格注册表)，多模态感知即中断事件；
+//! * 死锁 (资源图/银行家算法) → 智能体对模型实例/工具租约/上下文窗口的等待图环路检测与恢复；
+//! * 安全 (ACL/能力/TCB) → 能力沙箱 + 提示词注入防护 + 模型输出策略网关；
+//! * 多处理机/调度/亲和性 → 多智能体并行、多调度域、模型实例亲和与负载均衡；
+//! * 微内核/外核 → 模型容器与智能体沙箱，内核只保留通道调度与能力核。
+//!
+//! 所有子系统通过 `aios://*`、`model://*`、`ctx://*`、`knowledge://*`、`tool://*` 通道
+//! 接入 Hib OS 的统一 `sense`/`act` 感知层，并沿用 `lease.rs` 的单写者租约 + epoch
+//! 乐观 CAS 与 `caps.rs` 的能力位权限模型。
+
+pub mod model;
+pub mod agent_proc;
+pub mod sched_ai;
+pub mod ctx_mem;
+pub mod knowledge;
+pub mod tool;
+pub mod deadlock;
+pub mod security;
+pub mod container;
+
+/// AI 原生子系统初始化：在 `kernel::boot_subsystems` 或 shell 启动时调用一次。
+pub fn init() {
+    model::init();
+    agent_proc::init();
+    sched_ai::init();
+    ctx_mem::init();
+    knowledge::init();
+    tool::init();
+    deadlock::init();
+    security::init();
+    container::init();
+}
+
+/// 聚合状态摘要，供 `sense aios://status` 使用。
+pub fn status() -> String {
+    let mut lines = Vec::new();
+    lines.push(format!("models={}", model::status()));
+    lines.push(format!("agents={}", agent_proc::status()));
+    lines.push(format!("sched={}", sched_ai::status()));
+    lines.push(format!("ctx={}", ctx_mem::status()));
+    lines.push(format!("knowledge={}", knowledge::status()));
+    lines.push(format!("tools={}", tool::status()));
+    lines.push(format!("deadlock={}", deadlock::status()));
+    lines.push(format!("security={}", security::status()));
+    lines.push(format!("container={}", container::status()));
+    lines.join(" | ")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn init_and_status_are_sane() {
+        init();
+        let s = status();
+        assert!(s.contains("models="));
+        assert!(s.contains("agents="));
+        assert!(s.contains("sched="));
+        assert!(s.contains("ctx="));
+        assert!(s.contains("knowledge="));
+        assert!(s.contains("tools="));
+        assert!(s.contains("deadlock="));
+        assert!(s.contains("security="));
+        assert!(s.contains("container="));
+    }
+}

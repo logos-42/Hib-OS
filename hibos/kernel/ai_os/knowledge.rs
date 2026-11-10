@@ -1,1 +1,309 @@
-//! 记忆文件系统 —— AI 原生 OS 中的“文件系统 / 长期记忆 (Swap 后端)”。 //! //! 传统操作系统：文件 → inode → 目录项 → 数据块；路径查找定位 inode； //! 日志/预写日志 (WAL) 保证崩溃一致性；缓冲区缓存与页缓存加热热点文件。 //! //! AI 原生 OS：每段对话/文档/工具输出是一个“知识单元 (KnowledgeUnit)”，带 //! 嵌入向量与元语义标签；**语义/向量检索取代路径查找** (inode lookup)； //! `knowledge commit` 即原子写入（预写日志语义）；长期记忆即 Swap 区， //! ctx_mem 页面置换将冷上下文页摘要后写入此处。 //! //! 接口（供 `knowledge://*` 通道）： //! * `knowledge commit <内容> [向量逗号数字] [置信度]` —— 原子写入一条知识，返回知识 id //! * `knowledge query <文本> [topk]` —— 语义检索（简化：基于内容词重叠与向量余弦近似） //! * `knowledge get <id>` —— 读取知识单元 //! * `knowledge status` —— 知识总数、向量维度、提交日志长度  use std::collections::BTreeMap; use std::sync::{Mutex, OnceLock};  use crate::monitor::get_time_ns;  /// 知识单元：等价于文件 inode + 数据块，外加向量索引。 #[derive(Clone, Debug)] pub struct KnowledgeUnit {     pub id: u64,     pub content: String,     pub vector: Vec<f32>,          // 简化嵌入向量（真实系统由多模态感知域生成）     pub source: String,            // 产生该知识的智能体/工具     pub confidence: f64,           // 0.0-1.0     pub epoch: u64,                // 提交时的世界版本（epoch 快照）     pub created_ns: u128,     pub access_count: u64,         // 被检索次数（热度，供 RAG 预取） }  /// 记忆文件系统：知识单元表 + 提交日志（WAL 等价物）。 pub struct KnowledgeStore {     units: BTreeMap<u64, KnowledgeUnit>,     next_id: u64,     commit_log: Vec<String>,     vector_dim: usize,     commit_count: u64,     query_count: u64, }  impl Default for KnowledgeStore {     fn default() -> Self {         Self::new()     } }  impl KnowledgeStore {     pub fn new() -> Self {         Self {             units: BTreeMap::new(),             next_id: 1,             commit_log: Vec::new(),             vector_dim: 0,             commit_count: 0,             query_count: 0,         }     }      /// 原子写入一条知识（预写日志：先追记日志，再落盘单元，epoch 推进）。     pub fn commit(         &mut self,         content: &str,         vector: Option<Vec<f32>>,         source: &str,         confidence: f64,         epoch: u64,     ) -> u64 {         let id = self.next_id;         self.next_id += 1;         self.commit_count += 1;         let vec = vector.unwrap_or_else(|| vec![0.0f32; 8]);         if self.vector_dim == 0 {             self.vector_dim = vec.len();         }         let unit = KnowledgeUnit {             id,             content: content.to_string(),             vector: vec.clone(),             source: source.to_string(),             confidence: confidence.clamp(0.0, 1.0),             epoch,             created_ns: get_time_ns() as u128,             access_count: 0,         };         // WAL：先记日志。         self.commit_log.push(format!(             "commit id={} epoch={} source={} len={}",             id, epoch, source, content.len()         ));         // 再落盘（模拟原子提交）。         self.units.insert(id, unit);         id     }      /// 语义检索：简化版向量余弦相似度 + 内容词重叠，返回 Top-K。     pub fn query(&mut self, text: &str, top_k: usize) -> Vec<(u64, f64, &KnowledgeUnit)> {         self.query_count += 1;         let qwords: Vec<&str> = text.split_whitespace().collect();         let mut scored: Vec<(u64, f64, &KnowledgeUnit)> = self             .units             .values()             .filter_map(|u| {                 let mut score = 0.0f64;                 // 内容词重叠（模拟语义相似）。                 for w in &qwords {                     if u.content.contains(*w) {                         score += 0.3 * u.confidence;                     }                 }                 // 向量点积近似（当查询未提供向量时按内容哈希生成伪向量）。                 let qvec = pseudo_vector(text, self.vector_dim);                 if !qvec.is_empty() && !u.vector.is_empty() {                     let dot: f32 = qvec.iter().zip(u.vector.iter()).map(|(a, b)| a * b).sum();                     let qn: f32 = qvec.iter().map(|a| a * a).sum::<f32>().sqrt();                     let un: f32 = u.vector.iter().map(|b| b * b).sum::<f32>().sqrt();                     if qn > 0.0 && un > 0.0 {                         score += 0.7 * (dot / (qn * un)) as f64 * u.confidence;                     }                 }                 if score > 0.0 {                     Some((u.id, score, u.clone()))                 } else {                     None                 }             })             .collect();         scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());         scored.truncate(top_k);         for (id, _, _) in &scored {             if let Some(u) = self.units.get_mut(id) {                 u.access_count += 1;             }         }         scored     }      pub fn get(&self, id: u64) -> Option<&KnowledgeUnit> {         self.units.get(&id)     }      pub fn unit_count(&self) -> usize {         self.units.len()     }      pub fn status(&self) -> String {         format!(             "units={} vector_dim={} commits={} queries={} log_len={}",             self.unit_count(),             self.vector_dim,             self.commit_count,             self.query_count,             self.commit_log.len()         )     }      pub fn is_empty(&self) -> bool {         self.units.is_empty()     } }  /// 伪向量：按字符串哈希生成确定性伪向量（无外部嵌入模型依赖）。 fn pseudo_vector(text: &str, dim: usize) -> Vec<f32> {     if dim == 0 {         return Vec::new();     }     let mut v = vec![0.0f32; dim];     let mut h: u64 = 0x811C_9DC5;     for b in text.bytes() {         h ^= b as u64;         h = h.wrapping_mul(0x0000_0100_0000_01B3);     }     for i in 0..dim {         h = h.wrapping_add(i as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15);         v[i] = ((h >> 32) as f32) / (u32::MAX as f32) * 2.0 - 1.0;     }     v }  static KNOWLEDGE: OnceLock<Mutex<KnowledgeStore>> = OnceLock::new();  pub fn knowledge_store() -> &'static Mutex<KnowledgeStore> {     KNOWLEDGE.get_or_init(|| Mutex::new(KnowledgeStore::new())) }  pub fn init() {     let _ = knowledge_store(); }  /// `sense knowledge://store` / `knowledge://query/<文本>`：知识快照或简易检索。 pub fn knowledge_sense(name: &str) -> Option<String> {     match name {         "knowledge://store" => Some(knowledge_store().lock().unwrap().status()),         s if s.starts_with("knowledge://query/") => {             let text = &s["knowledge://query/".len()..];             let mut s = knowledge_store().lock().unwrap();             let res = s.query(text, 5);             if res.is_empty() {                 Some(format!("未检索到与 \"{}\" 相关的知识", text))             } else {                 Some(                     res.iter()                         .map(|(id, score, u)| format!("id={} score={:.2} src={} {}", id, score, u.source, truncate(&u.content, 60)))                         .collect::<Vec<_>>()                         .join("\n"),                 )             }         }         _ => None,     } }  /// 聚合状态摘要。 pub fn status() -> String {     knowledge_store().lock().unwrap().status() }  /// `act knowledge://<op>`：记忆文件系统行动。 pub fn knowledge_act(payload: &str) -> Result<String, String> {     let mut it = payload.splitn(2, ' ');     match it.next().unwrap_or("") {         "commit" => {             let rest = it.next().unwrap_or("").trim();             let (content, tail) = match rest.split_once(' ') {                 Some((c, t)) => (c.to_string(), t.to_string()),                 None => (rest.to_string(), String::new()),             };             let mut parts = tail.split_whitespace();             let vec: Option<Vec<f32>> = parts.next().and_then(|v| {                 v.split(',').map(|x| x.parse::<f32>().ok()).collect()             });             let confidence: f64 = parts.next().and_then(|v| v.parse().ok()).unwrap_or(1.0);             let source = parts.next().unwrap_or("shell").to_string();             let epoch = crate::lease::epoch("knowledge://store");             let id = knowledge_store().lock().unwrap().commit(&content, vec, &source, confidence, epoch);             Ok(format!("知识已提交 id={} epoch={} (长期记忆/WAL)", id, epoch))         }         "query" => {             let text = it.next().unwrap_or("").trim();             let top_k: usize = it.next().and_then(|v| v.parse().ok()).unwrap_or(5);             let mut s = knowledge_store().lock().unwrap();             let res = s.query(text, top_k);             if res.is_empty() {                 Ok(format!("未检索到与 \"{}\" 相关的知识", text))             } else {                 Ok(                     res.iter()                         .map(|(id, score, u)| format!("id={} score={:.2} src={} {}", id, score, u.source, truncate(&u.content, 60)))                         .collect::<Vec<_>>()                         .join("\n"),                 )             }         }         "get" => {             let id: u64 = it.next().ok_or("缺少知识 id")?.parse().map_err(|e| e.to_string())?;             match knowledge_store().lock().unwrap().get(id) {                 Some(u) => Ok(format!(                     "id={} source={} conf={:.2} epoch={} content={}",                     u.id, u.source, u.confidence, u.epoch, u.content                 )),                 None => Err(format!("知识 #{} 不存在", id)),             }         }         "status" | "" => Ok(knowledge_store().lock().unwrap().status()),         _ => Err(             "用法: knowledge commit <内容> [向量] [置信度] [来源] | query <文本> [topk] | get <id> | status"                 .to_string(),         ),     } }  fn truncate(s: &str, n: usize) -> String {     let mut out: String = s.chars().take(n).collect();     if s.chars().count() > n {         out.push('…');     }     out }  #[cfg(test)] mod tests {     use super::*;      #[test]     fn commit_and_query() {         let mut s = KnowledgeStore::new();         let id1 = s.commit("人工智能操作系统调度", Some(vec![0.1, 0.2, 0.3]), "agent-a", 0.9, 1);         let id2 = s.commit("内存页面置换算法 LRU", Some(vec![0.9, 0.1, 0.0]), "agent-b", 0.8, 1);         assert_ne!(id1, id2);         assert_eq!(s.unit_count(), 2);         assert!(s.vector_dim > 0);          let res = s.query("调度", 5);         assert!(!res.is_empty());         assert!(res[0].1 > 0.0);         // 被检索过的单元 access_count 增加。         assert!(s.get(id1).unwrap().access_count >= 1 || s.get(id2).unwrap().access_count >= 1);     }      #[test]     fn query_empty_when_no_match() {         let mut s = KnowledgeStore::new();         s.commit("只有这一条", None, "x", 1.0, 1);         assert!(s.query("完全不相关的词汇 xyz", 5).is_empty());     }      #[test]     fn knowledge_act_roundtrip() {         let res = knowledge_act("commit 智能体 A 提交了一段上下文摘要 0.1,0.2 0.95 agent-a").unwrap();         assert!(res.contains("知识已提交 id="));         assert!(res.contains("epoch="));         let res = knowledge_act("query 智能体 上下文").unwrap();         assert!(res.contains("score="));         let res = knowledge_act("get 1").unwrap();         assert!(res.contains("content="));         let res = knowledge_act("status").unwrap();         assert!(res.contains("units="));         let sense = knowledge_sense("knowledge://store").unwrap();         assert!(sense.contains("commits="));     } }
+//! 记忆文件系统 (Knowledge) —— AI 原生 OS 的「文件系统」。
+//!
+//! 对应《现代操作系统》第 4 章「文件系统」：
+//! * `MemoryNode` 等价于 inode + 目录项：路径、内容、标签、向量；
+//! * 语义检索 (search) 取代路径查找：按关键词/标签/向量相似度；
+//! * 支持写入、读取、追加、删除、按标签遍历；
+//! * 长期记忆与上下文窗口的换出/换入互通。
+
+use std::collections::BTreeMap;
+use std::sync::{Mutex, OnceLock};
+
+/// 记忆节点。
+#[derive(Clone, Debug)]
+pub struct MemoryNode {
+    pub path: String,
+    pub content: String,
+    /// 标签（分类/来源）。
+    pub tags: Vec<String>,
+    /// 简化向量（词袋哈希）。
+    pub vector: Vec<f32>,
+    pub created_at: u64,
+    pub updated_at: u64,
+    pub access_count: u64,
+}
+
+impl MemoryNode {
+    pub fn token_count(&self) -> u64 {
+        (self.content.chars().count() as u64) / 4 + 1
+    }
+}
+
+/// 长期记忆库。
+pub struct KnowledgeBase {
+    nodes: BTreeMap<String, MemoryNode>,
+    clock: u64,
+    pub hits: u64,
+    pub misses: u64,
+}
+
+fn embed(text: &str, dim: usize) -> Vec<f32> {
+    let mut v = vec![0.0f32; dim];
+    for word in text.split_whitespace() {
+        let mut h: u64 = 1469598103934665603;
+        for b in word.as_bytes() {
+            h ^= *b as u64;
+            h = h.wrapping_mul(1099511628211);
+        }
+        v[(h as usize) % dim] += 1.0;
+    }
+    let norm: f32 = v.iter().map(|x| x * x).sum::<f32>().sqrt();
+    if norm > 0.0 {
+        for x in v.iter_mut() {
+            *x /= norm;
+        }
+    }
+    v
+}
+
+fn cosine(a: &[f32], b: &[f32]) -> f32 {
+    a.iter().zip(b).map(|(x, y)| x * y).sum()
+}
+
+impl KnowledgeBase {
+    pub fn new() -> Self {
+        Self {
+            nodes: BTreeMap::new(),
+            clock: 0,
+            hits: 0,
+            misses: 0,
+        }
+    }
+
+    fn tick(&mut self) -> u64 {
+        self.clock += 1;
+        self.clock
+    }
+
+    /// 写入/覆盖一个记忆节点。
+    pub fn write(&mut self, path: &str, content: &str, tags: &[String]) {
+        let now = self.tick();
+        let vector = embed(content, 64);
+        let node = self.nodes.entry(path.to_string()).or_insert(MemoryNode {
+            path: path.to_string(),
+            content: String::new(),
+            tags: Vec::new(),
+            vector: Vec::new(),
+            created_at: now,
+            updated_at: now,
+            access_count: 0,
+        });
+        node.content = content.to_string();
+        node.tags = tags.to_vec();
+        node.vector = vector;
+        node.updated_at = now;
+    }
+
+    /// 追加内容。
+    pub fn append(&mut self, path: &str, content: &str) -> Option<()> {
+        let now = self.tick();
+        let node = self.nodes.get_mut(path)?;
+        node.content.push_str(content);
+        node.vector = embed(&node.content, 64);
+        node.updated_at = now;
+        Some(())
+    }
+
+    /// 读取。
+    pub fn read(&mut self, path: &str) -> Option<&MemoryNode> {
+        let now = self.tick();
+        let node = self.nodes.get_mut(path)?;
+        node.access_count += 1;
+        node.updated_at = node.updated_at.max(now.min(node.updated_at));
+        Some(node)
+    }
+
+    /// 删除。
+    pub fn remove(&mut self, path: &str) -> bool {
+        self.nodes.remove(path).is_some()
+    }
+
+    /// 语义检索：返回按相似度排序的 (路径, 分数)。
+    pub fn search(&mut self, query: &str, top_k: usize) -> Vec<(String, f32)> {
+        let q = embed(query, 64);
+        let mut scored: Vec<(String, f32)> = self
+            .nodes
+            .values()
+            .map(|n| (n.path.clone(), cosine(&q, &n.vector)))
+            .filter(|(_, s)| *s > 0.0)
+            .collect();
+        scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        let found = !scored.is_empty();
+        if found {
+            self.hits += 1;
+        } else {
+            self.misses += 1;
+        }
+        scored.truncate(top_k);
+        scored
+    }
+
+    /// 按标签列举。
+    pub fn by_tag(&self, tag: &str) -> Vec<&MemoryNode> {
+        self.nodes
+            .values()
+            .filter(|n| n.tags.iter().any(|t| t == tag))
+            .collect()
+    }
+
+    pub fn len(&self) -> usize {
+        self.nodes.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.nodes.is_empty()
+    }
+
+    pub fn paths(&self) -> Vec<&str> {
+        self.nodes.keys().map(|s| s.as_str()).collect()
+    }
+}
+
+impl Default for KnowledgeBase {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+static KB: OnceLock<Mutex<KnowledgeBase>> = OnceLock::new();
+
+pub fn knowledge() -> &'static Mutex<KnowledgeBase> {
+    KB.get_or_init(|| Mutex::new(KnowledgeBase::new()))
+}
+
+pub fn init() {
+    let mut kb = knowledge().lock().unwrap();
+    if !kb.is_empty() {
+        return;
+    }
+    kb.write("mem://system/boot", "Hib OS 启动：AI 原生内核已就绪", &["system".to_string()]);
+    kb.write("mem://system/policy", "默认策略：最小权限、显式授权、全程审计", &["system".to_string(), "security".to_string()]);
+    kb.write("mem://agent/init", "init 智能体负责派生与回收其他智能体", &["agent".to_string()]);
+}
+
+pub fn status() -> String {
+    let kb = knowledge().lock().unwrap();
+    format!("nodes={} hits={} misses={}", kb.len(), kb.hits, kb.misses)
+}
+
+/// `act knowledge://*` 的后端动作：
+/// * `write <path> <text...> [tag...]` 写入
+/// * `append <path> <text...>` 追加
+/// * `read <path>` 读取
+/// * `remove <path>` 删除
+/// * `search <query...>` 语义检索
+/// * `tag <tag>` 按标签列出
+/// * `list` / `status`
+pub fn knowledge_act(payload: &str) -> Result<String, String> {
+    let mut it = payload.splitn(3, ' ');
+    let mut kb = knowledge().lock().unwrap();
+    match it.next() {
+        Some("write") => {
+            let path = it.next().ok_or("用法: knowledge://store write <path> <text>")?;
+            let text = it.next().unwrap_or("");
+            kb.write(path, text, &[]);
+            Ok(format!("已写入 {}（{} 字符）", path, text.chars().count()))
+        }
+        Some("append") => {
+            let path = it.next().ok_or("用法: knowledge://store append <path> <text>")?;
+            let text = it.next().unwrap_or("");
+            kb.append(path, text)
+                .ok_or_else(|| format!("节点不存在: {}", path))?;
+            Ok(format!("已追加 {} 字符到 {}", text.chars().count(), path))
+        }
+        Some("read") => {
+            let path = it.next().ok_or("用法: knowledge://store read <path>")?;
+            let node = kb.read(path).ok_or_else(|| format!("节点不存在: {}", path))?;
+            Ok(format!(
+                "path={} tokens={} tags={:?}\n{}",
+                node.path,
+                node.token_count(),
+                node.tags,
+                node.content
+            ))
+        }
+        Some("remove") => {
+            let path = it.next().ok_or("用法: knowledge://store remove <path>")?;
+            if kb.remove(path) {
+                Ok(format!("已删除 {}", path))
+            } else {
+                Err(format!("节点不存在: {}", path))
+            }
+        }
+        Some("search") => {
+            let query = it.next().unwrap_or("");
+            let res = kb.search(query, 10);
+            let mut out = String::from("检索结果:\n");
+            for (path, score) in res {
+                out.push_str(&format!("  {} {:.3}\n", path, score));
+            }
+            Ok(out)
+        }
+        Some("tag") => {
+            let tag = it.next().ok_or("用法: knowledge://store tag <tag>")?;
+            let mut out = String::from("标签结果:\n");
+            for n in kb.by_tag(tag) {
+                out.push_str(&format!("  {}\n", n.path));
+            }
+            Ok(out)
+        }
+        Some("list") => {
+            let mut out = String::from("记忆节点:\n");
+            for p in kb.paths() {
+                out.push_str(&format!("  {}\n", p));
+            }
+            Ok(out)
+        }
+        Some("status") | None => Ok(status()),
+        Some(other) => Err(format!("未知 knowledge 动作: {}", other)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn write_read_remove() {
+        let mut kb = KnowledgeBase::new();
+        kb.write("mem://a", "hello world", &["t".to_string()]);
+        assert_eq!(kb.read("mem://a").unwrap().content, "hello world");
+        assert!(kb.remove("mem://a"));
+        assert!(!kb.remove("mem://a"));
+        assert_eq!(kb.len(), 0);
+    }
+
+    #[test]
+    fn append_updates_vector() {
+        let mut kb = KnowledgeBase::new();
+        kb.write("mem://a", "hello", &[]);
+        kb.append("mem://a", " world").unwrap();
+        assert_eq!(kb.read("mem://a").unwrap().content, "hello world");
+    }
+
+    #[test]
+    fn semantic_search_ranks() {
+        let mut kb = KnowledgeBase::new();
+        kb.write("mem://os", "kernel scheduler memory page", &[]);
+        kb.write("mem://poem", "roses are red violets blue", &[]);
+        let res = kb.search("kernel memory", 2);
+        assert_eq!(res[0].0, "mem://os");
+        assert!(res[0].1 > res[1].1);
+    }
+
+    #[test]
+    fn tag_index() {
+        let mut kb = KnowledgeBase::new();
+        kb.write("mem://x", "x", &["sec".to_string()]);
+        kb.write("mem://y", "y", &["misc".to_string()]);
+        assert_eq!(kb.by_tag("sec").len(), 1);
+    }
+
+    #[test]
+    fn global_init_is_idempotent() {
+        init();
+        init();
+        let kb = knowledge().lock().unwrap();
+        assert!(kb.len() >= 3);
+    }
+}

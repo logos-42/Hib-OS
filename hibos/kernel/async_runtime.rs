@@ -365,10 +365,23 @@ impl Runtime {
     /// 创建任务并返回任务 ID。
     pub fn spawn<F>(&self, name: &str, future: F) -> u64
     where
-        F: Future<Output = ()> + Send + 'static,
+        F: Future + Send + 'static,
     {
+        struct UnitFuture<F> {
+            inner: F,
+        }
+        impl<F: Future> Future for UnitFuture<F> {
+            type Output = ();
+            fn poll(&mut self, cx: &mut Context<'_>) -> Poll<()> {
+                match self.inner.poll(cx) {
+                    Poll::Ready(_) => Poll::Ready(()),
+                    Poll::Pending => Poll::Pending,
+                }
+            }
+        }
+        let fut: Box<dyn Future<Output = ()> + Send> = Box::new(UnitFuture { inner: future });
         let mut r = self.reactor.lock().unwrap();
-        r.spawn_task(name, Box::new(future))
+        r.spawn_task(name, fut)
     }
 
     /// 阻塞当前线程，直到 `future` 完成。
@@ -420,6 +433,11 @@ impl Runtime {
         self.reactor.lock().unwrap().task_count()
     }
 
+    /// 返回已完成任务数。
+    pub fn completed_count(&self) -> u64 {
+        self.reactor.lock().unwrap().completed_count()
+    }
+
     /// 返回 reactor 文本摘要。
     pub fn summary(&self) -> String {
         self.reactor.lock().unwrap().summary()
@@ -445,7 +463,7 @@ fn runtime() -> &'static Mutex<Runtime> {
 /// 创建任务（全局运行时）。
 pub fn async_spawn<F>(name: &str, future: F) -> u64
 where
-    F: Future<Output = ()> + Send + 'static,
+    F: Future + Send + 'static,
 {
     runtime().lock().unwrap().spawn(name, future)
 }
@@ -528,7 +546,7 @@ mod tests {
     #[test]
     fn counter_future_polls_then_ready() {
         let mut f = CounterFuture::new("cnt", 3);
-        let cx = dummy_context();
+        let mut cx = dummy_context();
         // 前 3 次 pending
         for _ in 0..3 {
             assert_eq!(f.poll(&mut cx), Poll::Pending);
@@ -598,9 +616,9 @@ mod tests {
         let _polled = async_poll();
         let _ = _polled;
         let _run = async_run_until_stalled();
-        let _ = run;
+        let _ = _run;
         let _s = async_summary();
-        let _ = s;
+        let _ = _s;
     }
 
     #[test]

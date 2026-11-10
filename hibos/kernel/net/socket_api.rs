@@ -508,14 +508,14 @@ mod tests {
     fn socket_count() {
         let _ = socket(SocketDomain::AfInet, SocketType::SockStream, 6).unwrap();
         let _ = socket(SocketDomain::AfInet, SocketType::SockDgram, 17).unwrap();
-        assert!(socket_count() >= 2);
+        assert!(super::socket_count() >= 2);
     }
 
     #[test]
-    fn set_blocking() {
+    fn set_blocking_test() {
         let fd = socket(SocketDomain::AfInet, SocketType::SockStream, 6).unwrap();
-        assert!(set_blocking(fd, false).is_ok());
-        assert!(set_blocking(fd, true).is_ok());
+        assert!(super::set_blocking(fd, false).is_ok());
+        assert!(super::set_blocking(fd, true).is_ok());
         assert!(close(fd).is_ok());
     }
 
