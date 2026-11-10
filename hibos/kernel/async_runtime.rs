@@ -121,32 +121,37 @@ fn make_waker(task_id: u64, wake_cb: Arc<WakeCallback>) -> Waker {
     unsafe { Waker::from_raw(raw_waker(task_id, wake_cb)) }
 }
 
+static WAKER_VTABLE: RawWakerVTable =
+    RawWakerVTable::new(clone_waker, wake_task, wake_by_ref_task, drop_waker);
+
 unsafe fn raw_waker(task_id: u64, wake_cb: Arc<WakeCallback>) -> RawWaker {
-    let data = Box::into_raw(Box::new((task_id, wake_cb))) as *mut ();
-    let vtable = RawWakerVTable::new(clone_waker, wake_task, wake_by_ref_task, drop_waker);
-    RawWaker::new(data, &vtable)
+    let data = Arc::into_raw(Arc::new((task_id, wake_cb))) as *mut ();
+    RawWaker::new(data, &WAKER_VTABLE)
 }
 
 unsafe fn clone_waker(data: *const ()) -> RawWaker {
-    let ptr = data as *const (u64, Arc<WakeCallback>);
-    let arc = &(*ptr).1;
-    std::mem::forget(arc.clone()); // 增加引用计数
-    raw_waker((*ptr).0, (*ptr).1.clone())
+    let arc = Arc::from_raw(data as *const (u64, Arc<WakeCallback>));
+    std::mem::forget(arc.clone());
+    RawWaker::new(Arc::into_raw(arc) as *mut (), &WAKER_VTABLE)
 }
 
 unsafe fn wake_task(data: *const ()) {
-    let ptr = data as *const (u64, Arc<WakeCallback>);
-    let (task_id, cb) = &(*ptr);
+    let arc = Arc::from_raw(data as *const (u64, Arc<WakeCallback>));
+    let (task_id, cb) = &*arc;
     cb(*task_id);
+    std::mem::forget(arc);
 }
 
 unsafe fn wake_by_ref_task(data: *const ()) {
-    wake_task(data);
+    let arc = Arc::from_raw(data as *const (u64, Arc<WakeCallback>));
+    let (task_id, cb) = &*arc;
+    cb(*task_id);
+    std::mem::forget(arc);
 }
 
 unsafe fn drop_waker(data: *const ()) {
-    let ptr = data as *mut (u64, Arc<WakeCallback>);
-    drop(Box::from_raw(ptr));
+    let _arc = Arc::from_raw(data as *const (u64, Arc<WakeCallback>));
+    drop(_arc);
 }
 
 // =====================================================================================
@@ -244,7 +249,7 @@ impl Reactor {
             if !need_poll {
                 continue;
             }
-            let cx = dummy_context();
+            let mut cx = dummy_context();
             let mut task = self.tasks.remove(&task_id).expect("task exists");
             let result = task.poll_once(&mut cx);
             self.tasks.insert(task_id, task);
@@ -322,10 +327,16 @@ impl Default for Reactor {
     }
 }
 
-/// 空 Context（用于无真正唤醒需求的测试）。
+/// 空 Context（用于无真正唤醒需求的测试）：使用一个 noop waker。
 fn dummy_context() -> Context<'static> {
-    let noop_waker: WakeCallback = Arc::new(|_| {});
-    unsafe { Waker::from_raw(raw_waker(0, noop_waker)) }
+    struct NoopWaker;
+    impl std::task::Wake for NoopWaker {
+        fn wake(self: std::sync::Arc<Self>) {}
+    }
+    let waker = Waker::from(std::sync::Arc::new(NoopWaker));
+    // 泄漏一次以获得 'static 生命周期的 waker（noop，仅用于测试）。
+    let waker: &'static Waker = Box::leak(Box::new(waker));
+    Context::from_waker(waker)
 }
 
 // =====================================================================================
@@ -340,7 +351,7 @@ pub struct Runtime {
 
 impl Runtime {
     pub fn new() -> Self {
-        let mut reactor = Reactor::new();
+        let reactor = Reactor::new();
         // 注入唤醒回调：wake 某任务会把它放回该 reactor 的就绪队列。
         // 由于 Reactor 由 Mutex 保护，回调内部需重新锁 reactor；这里用一个
         // OnceLock 持 reactor 指针的简化做法：回调仅标记待唤醒，实际由 poll
@@ -367,7 +378,7 @@ impl Runtime {
     where
         F: Future,
     {
-        let cx = dummy_context();
+        let mut cx = dummy_context();
         loop {
             match future.poll(&mut cx) {
                 Poll::Ready(v) => return v,

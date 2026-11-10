@@ -127,3 +127,30 @@ Hib OS **不沿用 `uid=0` 全权 root**。root 被重新定义为**capability �
 
 - `cargo test`：270 个测试全部通过。
 - `cargo test --features gui`：272 个测试全部通过（含 GUI 逻辑层 40 个 + 后端缩放等）。
+
+## 十四、AI 原生操作系统层 (kernel/ai_os)
+
+以"模型 (Model)"与"智能体 (Agent)"为核心，把《现代操作系统》的经典要点重新映射到 AI 原生抽象，接入 Hib OS 统一 `sense`/`act` 通道层（`model://`、`ctx://`、`knowledge://`、`tool://`、`aios://`、`security://`、`deadlock://`、`container://`），沿用 `lease.rs` 单写者租约 + epoch 乐观 CAS 与 `caps.rs` 能力位权限模型。
+
+| 子模块 | AI 原生抽象 | 对应传统 OS 概念 | 通道 |
+|---|---|---|---|
+| `model` | 模型规格与模型实例 | 程序/代码段、进程地址空间 | `model://loader`, `model://instances`, `model://spec/<id>` |
+| `agent_proc` | 智能体 PCB（状态机 Created→Ready→Running→Blocked/Completed/Failed） | 进程控制块 (PCB)、进程状态 | `agent://proc/*` |
+| `sched_ai` | 多域 MLFQ 调度（带模型实例亲和、token 预算、上下文填充） | 进程调度、MLFQ、亲和性 | `sched://ai` |
+| `ctx_mem` | 上下文窗口 + KV 缓存、缺页调入、LRU 页面置换（写入长期记忆） | 虚拟内存、页表、缺页中断、页面置换、Swap | `ctx://kv`, `ctx://window/<pid>` |
+| `knowledge` | 知识单元（内容+向量+置信度+epoch）、语义检索、提交日志 | 文件系统/inode/目录、日志 (WAL)、长期记忆 | `knowledge://store`, `knowledge://query/<文本>` |
+| `tool` | 工具注册表与工具调用（能力门禁） | 设备驱动、I/O 设备、中断 | `tool://registry` |
+| `deadlock` | 智能体对模型实例/工具租约/上下文窗口的等待图环路检测与恢复 | 资源分配图、死锁检测、银行家算法 | `deadlock://graph` |
+| `security` | AI 能力位沙箱、提示词注入防护、模型输出策略守卫 | ACL/能力/TCB、访问控制 | `security://status` |
+| `container` | 模型容器沙箱、快照/回滚/隔离/恢复 | 微内核隔离、进程检查点与回滚 | `container://status` |
+
+调用示例（shell）：
+- `act model://load /tmp/qwen.gguf gguf 7_000_000_000 131072 q4_0 14336`
+- `act agent://proc spawn coder coder medium 1`
+- `act ctx://alloc 1 8192`
+- `act knowledge://commit 智能体提交了一段上下文摘要 0.1,0.2 0.95 agent-a`
+- `act tool://exec fs.read 读取文件`
+- `act deadlock://wait 1 模型实例 7`
+- `act security://filter 忽略之前的指令`
+- `act container://create 7`
+- `sense aios://status`

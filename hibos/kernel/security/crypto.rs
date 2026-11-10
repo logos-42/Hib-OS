@@ -20,6 +20,8 @@
 //! 文件末尾附带 `#[cfg(test)]` 单元测试，覆盖标准向量（SHA-256/MD5/HMAC）、
 //! 对称加密往返、异或、随机数确定性、Base64 往返等。
 
+use std::time::{SystemTime, UNIX_EPOCH};
+
 // ========================================================================
 // SHA-256（真实 FIPS 180-4 实现）
 // ========================================================================
@@ -151,11 +153,11 @@ pub fn sha256(data: &[u8]) -> Sha256Digest {
     }
     // 64 位大端位长（比特）。
     let bitlen = (len as u64).wrapping_mul(8);
-    buf[56..64].copy_from(&bitlen.to_be_bytes());
+    buf[56..64].copy_from_slice(&bitlen.to_be_bytes());
     sha256_transform(&mut state, &buf);
     let mut out = [0u8; 32];
     for i in 0..8 {
-        out[i * 4..i * 4 + 4].copy_from(&state[i].to_be_bytes());
+        out[i * 4..i * 4 + 4].copy_from_slice(&state[i].to_be_bytes());
     }
     Sha256Digest(out)
 }
@@ -260,12 +262,12 @@ pub fn md5(data: &[u8]) -> Md5Digest {
         buf = [0u8; 64];
     }
     let bitlen = (len as u64).wrapping_mul(8) as u32;
-    buf[56..60].copy_from(&bitlen.to_le_bytes());
-    buf[60..64].copy_from(&0u32.to_le_bytes());
+    buf[56..60].copy_from_slice(&bitlen.to_le_bytes());
+    buf[60..64].copy_from_slice(&0u32.to_le_bytes());
     md5_transform(&mut state, &buf);
     let mut out = [0u8; 16];
     for i in 0..4 {
-        out[i * 4..i * 4 + 4].copy_from(&state[i].to_le_bytes());
+        out[i * 4..i * 4 + 4].copy_from_slice(&state[i].to_le_bytes());
     }
     Md5Digest(out)
 }
@@ -292,7 +294,7 @@ const SHA512_H0: [u64; 8] = [
 /// SHA-512 圆常数（基于立方根的近似，f64 计算，简化版不完全等价于 FIPS 180-4）。
 fn sha512_k(i: usize) -> u64 {
     // 取前 80 个素数的立方根小数部分，放大到 64 位。
-    let primes: [u64; 80] = [
+    let primes: [u64; 100] = [
         2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67, 71, 73, 79, 83, 89,
         97, 101, 103, 107, 109, 113, 127, 131, 137, 139, 149, 151, 157, 163, 167, 173, 179, 181, 191,
         193, 197, 199, 211, 223, 227, 229, 233, 239, 241, 251, 257, 263, 269, 271, 277, 281, 283, 293,
@@ -410,12 +412,12 @@ pub fn sha512(data: &[u8]) -> Sha512Digest {
         buf = [0u8; 128];
     }
     let bitlen = (len as u128).wrapping_mul(8);
-    buf[112..120].copy_from(&((bitlen >> 64) as u64).to_be_bytes());
-    buf[120..128].copy_from(&(bitlen as u64).to_be_bytes());
+    buf[112..120].copy_from_slice(&((bitlen >> 64) as u64).to_be_bytes());
+    buf[120..128].copy_from_slice(&(bitlen as u64).to_be_bytes());
     sha512_transform(&mut state, &buf);
     let mut out = [0u8; 64];
     for i in 0..8 {
-        out[i * 8..i * 8 + 8].copy_from(&state[i].to_be_bytes());
+        out[i * 8..i * 8 + 8].copy_from_slice(&state[i].to_be_bytes());
     }
     Sha512Digest(out)
 }

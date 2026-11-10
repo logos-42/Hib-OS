@@ -285,17 +285,20 @@ pub fn listen(fd: SocketFd, backlog: u32) -> Result<(), String> {
 /// 接受一个连接，返回 (新 fd, 对端地址)。
 pub fn accept(fd: SocketFd) -> Result<(SocketFd, SockAddr), String> {
     let mut st = SocketTable::instance().lock().unwrap();
-    let entry = st.get(fd).ok_or_else(|| format!("fd {} 不存在", fd))?;
-    if entry.state != SockState::Listening {
-        return Err("socket 未监听".to_string());
-    }
+    let (domain, local) = {
+        let entry = st.get(fd).ok_or_else(|| format!("fd {} 不存在", fd))?;
+        if entry.state != SockState::Listening {
+            return Err("socket 未监听".to_string());
+        }
+        (entry.domain, entry.local.clone())
+    };
     // 简化：模拟一个已连接 socket（实际应由 TCP 层驱动）。
     let new_fd = st.alloc_fd();
     let remote = SockAddr::Inet(InetAddr::new([10, 0, 0, 3], 50000));
-    let mut accepted = SocketEntry::new(new_fd, entry.domain, SocketType::SockStream, 6);
+    let mut accepted = SocketEntry::new(new_fd, domain, SocketType::SockStream, 6);
     accepted.state = SockState::Connected;
     accepted.remote = Some(remote.clone());
-    accepted.local = entry.local.clone();
+    accepted.local = local;
     let _ = st.insert(accepted);
     Ok((new_fd, remote))
 }

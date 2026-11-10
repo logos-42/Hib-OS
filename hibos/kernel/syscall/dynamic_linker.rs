@@ -76,7 +76,7 @@ pub type LinkerResult<T> = Result<T, LinkerError>;
 // ========================================================================
 
 /// 共享库唯一标识。
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Ord, PartialOrd)]
 pub struct LibId(pub u64);
 
 impl LibId {
@@ -173,7 +173,7 @@ pub enum RelocType {
 /// 动态链接器主入口。
 ///
 /// 维护全部已加载共享库、搜索路径、符号绑定表与加载顺序（供 init/fini
-//! 数组使用）。与 `kernel/syscall::posix_layer` 和 `elf_loader` 并行，不替换。
+/// 数组使用）。与 `kernel/syscall::posix_layer` 和 `elf_loader` 并行，不替换。
 pub struct DynamicLinker {
     /// 库 id -> SharedLibrary。
     libraries: BTreeMap<LibId, SharedLibrary>,
@@ -250,7 +250,11 @@ impl DynamicLinker {
             return Ok(id);
         }
 
-        let mut visiting = visiting.unwrap_or_else(|| HashSet::new());
+        let mut temp_visiting: HashSet<String> = HashSet::new();
+        let mut visiting = match visiting {
+            Some(v) => v,
+            None => &mut temp_visiting,
+        };
         if !visiting.insert(abs.clone()) {
             // 形成环路。
             return Err(LinkerError::CycleDetected {
@@ -259,8 +263,8 @@ impl DynamicLinker {
         }
 
         // 若依赖库未找到，尝试搜索路径。
-        let lib_path = if Path::new(&abs).exists() {
-            abs.clone()
+        let lib_path: PathBuf = if Path::new(&abs).exists() {
+            PathBuf::from(&abs)
         } else {
             match self.search_path(path) {
                 Some(p) => p,
@@ -276,7 +280,7 @@ impl DynamicLinker {
         // 递归加载依赖（在 visiting 集合中传递，以检测环）。
         let mut dep_ids: Vec<LibId> = Vec::new();
         for dep in &meta.dependencies {
-            let dep_id = self.load_library(dep, Some(&mut visiting))?;
+            let dep_id = self.load_library(dep, Some(&mut *visiting))?;
             dep_ids.push(dep_id);
         }
 
@@ -297,7 +301,8 @@ impl DynamicLinker {
             loaded: true,
         };
         self.libraries.insert(id, lib.clone());
-        self.path_to_lib.insert(lib_path, id);
+        self.path_to_lib
+            .insert(lib_path.to_string_lossy().to_string(), id);
         self.load_order.push(id);
         drop(visiting); // 离开当前库的递归层级
         let _ = dep_ids; // 依赖已在 path_to_lib 中去重
@@ -410,7 +415,6 @@ impl DynamicLinker {
             .iter()
             .map(|(k, v)| (k.clone(), *v))
             .collect();
-        let lib = self.libraries.get_mut(&lib_id).unwrap();
         for (symbol, _old) in imports {
             let resolved = self.resolve_symbol_global(&symbol).ok_or_else(|| {
                 LinkerError::SymbolUnresolved {
@@ -418,7 +422,11 @@ impl DynamicLinker {
                     symbol: symbol.clone(),
                 }
             })?;
-            lib.imports.insert(symbol, Some(resolved));
+            self.libraries
+                .get_mut(&lib_id)
+                .unwrap()
+                .imports
+                .insert(symbol, Some(resolved));
         }
         Ok(())
     }
@@ -488,23 +496,23 @@ impl DynamicLinker {
         let lib = self.libraries.get(&id).ok_or_else(|| {
             LinkerError::NotFound { name: id.to_string() }
         })?;
-        // 检查是否有其他库依赖此库。
-        for other in self.libraries.values() {
-            if other.dependencies.iter().any(|d| d == lib.path.to_string_lossy().to_string())
-                || other
-                    .dependencies
-                    .iter()
-                    .any(|d| d == lib.path.file_name().unwrap_or_default().to_string_lossy())
-            {
-                return Err(LinkerError::LoadFailed {
-                    path: lib.path.to_string_lossy().to_string(),
-                    reason: "有其他库依赖，拒绝卸载".to_string(),
-                });
-            }
+        let lib_path_key = lib.path.to_string_lossy().to_string();
+        let lib_file_key = lib.path.file_name().unwrap_or_default().to_string_lossy().to_string();
+        let has_dependents = self.libraries.values().any(|other| {
+            other
+                .dependencies
+                .iter()
+                .any(|d| *d == lib_path_key || *d == lib_file_key)
+        });
+        if has_dependents {
+            return Err(LinkerError::LoadFailed {
+                path: lib_path_key.clone(),
+                reason: "有其他库依赖，拒绝卸载".to_string(),
+            });
         }
         self.libraries.remove(&id);
-        self.path_to_lib.remove(&lib.path.to_string_lossy().to_string());
-        self.load_order.retain(&id != id);
+        self.path_to_lib.remove(&lib_path_key);
+        self.load_order.retain(|&x| x != id);
         Ok(())
     }
 

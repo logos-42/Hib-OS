@@ -371,22 +371,29 @@ impl Netfilter {
         }
 
         // 遍历该钩子点的规则链。
-        if let Some(chain) = self.chains.get(&hook) {
-            for id in &chain.rules {
-                let rule = match self.rules.get(id) {
-                    Some(r) => r,
+        let chain_rules: Vec<_> = match self.chains.get(&hook) {
+            Some(chain) => chain.rules.clone(),
+            None => Vec::new(),
+        };
+        {
+            for id in &chain_rules {
+                let matched = match self.rules.get(id) {
+                    Some(r) => r.matches(pkt),
                     None => continue,
                 };
-                if !rule.matches(pkt) { continue; }
-                let mut rule_mut = self.rules.get_mut(id).unwrap();
-                rule_mut.hits += 1;
-                let verdict = match &rule_mut.action {
+                if !matched { continue; }
+                let (rule_id, action) = {
+                    let rule_mut = self.rules.get_mut(id).unwrap();
+                    rule_mut.hits += 1;
+                    (rule_mut.id, rule_mut.action.clone())
+                };
+                let verdict = match &action {
                     RuleAction::Accept => Verdict::Accept,
                     RuleAction::Drop => Verdict::Drop,
                     RuleAction::Reject => Verdict::Drop,
                     RuleAction::Log => {
                         // 记录日志并继续。
-                        self.log_push(format!("LOG {} match rule {}", hook.name(), rule_mut.id));
+                        self.log_push(format!("LOG {} match rule {}", hook.name(), rule_id));
                         continue; // LOG 不终止，继续匹配下一条
                     }
                     RuleAction::NatSnat { new_ip, new_port } => {

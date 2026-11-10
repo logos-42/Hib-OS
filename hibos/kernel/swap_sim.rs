@@ -81,11 +81,11 @@ impl std::fmt::Display for SwapError {
 /// swap 区：以宿主文件系统文件作为后端，管理固定数量的页插槽。
 ///
 /// swap 文件按 `SWAP_PAGE_SIZE` 字节一页组织，第 `i` 个插槽对应文件偏移
-//! `i * SWAP_PAGE_SIZE`。内存中维护：
-//! * `slot_to_page` —— 插槽 -> 物理页地址（已占用插槽）；
-//! * `page_to_slot` —— 物理页地址 -> 插槽（反向查找，支持页故障）；
-//! * `free_slots` —— 空闲插槽栈；
-//! * 统计：换出次数、换入次数、释放次数、页故障次数。
+/// `i * SWAP_PAGE_SIZE`。内存中维护：
+/// * `slot_to_page` —— 插槽 -> 物理页地址（已占用插槽）；
+/// * `page_to_slot` —— 物理页地址 -> 插槽（反向查找，支持页故障）；
+/// * `free_slots` —— 空闲插槽栈；
+/// * 统计：换出次数、换入次数、释放次数、页故障次数。
 pub struct SwapArea {
     pub path: PathBuf,
     pub max_pages: usize,
@@ -108,7 +108,7 @@ impl SwapArea {
     /// 创建或打开 swap 区。`path` 为宿主文件系统路径，`max_pages` 为最大页数。
     ///
     /// 若文件不存在则创建并按 `max_pages * SWAP_PAGE_SIZE` 预分配空间；若存在
-    //! 则直接打开（不清空，以保留既有 swap 内容，模拟重启后 swap 保留）。
+    /// 则直接打开（不清空，以保留既有 swap 内容，模拟重启后 swap 保留）。
     pub fn new(path: &Path, max_pages: usize) -> Result<Self, SwapError> {
         let path = path.to_path_buf();
         // 确保父目录存在。
@@ -181,7 +181,7 @@ impl SwapArea {
     /// 将一页数据换出到 swap，返回分配的 `SwapSlot`。
     ///
     /// 若该物理页已经换出，则复用原插槽并更新数据；若 swap 已满，返回
-    //! `SlotOutOfRange`（实际中应由页替换算法腾出插槽，此处简化）。
+    /// `SlotOutOfRange`（实际中应由页替换算法腾出插槽，此处简化）。
     pub fn swap_out(&mut self, page_addr: usize, data: &[u8]) -> Result<SwapSlot, SwapError> {
         // 若该页已换出，复用原插槽。
         if let Some(&slot_idx) = self.page_to_slot.get(&page_addr) {
@@ -236,7 +236,7 @@ impl SwapArea {
     }
 
     /// 页故障处理：若物理页 `addr` 已在 swap 中，则将其换入并返回数据；
-    //! 否则返回 `PageNotSwapped`。
+    // 否则返回 `PageNotSwapped`。
     ///
     /// 这是缺页中断的简化模型：页故障时检查 swap 表，命中则从 swap 文件读入。
     pub fn page_fault_handler(&mut self, addr: usize) -> Result<Vec<u8>, SwapError> {

@@ -488,7 +488,8 @@ impl DnsResolver {
             return vec![rec];
         }
         // 3. 上游递归查询（串联服务器）。
-        for server in &self.servers {
+        let servers = self.servers.clone();
+        for server in &servers {
             if let Some(recs) = self.query_server(name, rtype, *server) {
                 for r in &recs {
                     self.cache.insert(r.clone(), r.ttl);
@@ -520,7 +521,7 @@ impl DnsResolver {
     }
 
     /// 查询单个上游服务器：构造报文、伪造收发（返回构造的应答）。
-    fn query_server(&self, name: &str, rtype: DnsRecordType, server: [u8; 4]) -> Option<Vec<DnsRecord>> {
+    fn query_server(&mut self, name: &str, rtype: DnsRecordType, server: [u8; 4]) -> Option<Vec<DnsRecord>> {
         let _ = server;
         let id = self.next_id_wrap();
         let msg = DnsMessage::query(id, name, rtype);

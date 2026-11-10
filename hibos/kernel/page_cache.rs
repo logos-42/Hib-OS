@@ -196,8 +196,9 @@ impl PageCache {
             if let Some(page) = self.pages[idx].as_mut() {
                 page.refcount += 1;
                 page.touch();
+                let h = page.clone();
                 self._touch_lru(idx);
-                return page.clone();
+                return h;
             }
         }
         // 未命中：分配新页框。

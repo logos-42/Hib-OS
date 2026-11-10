@@ -215,27 +215,27 @@ pub struct ProgramHeader {
 
 impl ProgramHeader {
     /// 判断该段是否可加载（PT_LOAD）。
-    pub fn is_loadable(self) -> bool {
+    pub fn is_loadable(&self) -> bool {
         self.p_type == PT_LOAD
     }
 
     /// 权限是否可读。
-    pub fn readable(self) -> bool {
+    pub fn readable(&self) -> bool {
         self.p_flags & PF_R != 0
     }
 
     /// 权限是否可写。
-    pub fn writable(self) -> bool {
+    pub fn writable(&self) -> bool {
         self.p_flags & PF_W != 0
     }
 
     /// 权限是否可执行。
-    pub fn executable(self) -> bool {
+    pub fn executable(&self) -> bool {
         self.p_flags & PF_X != 0
     }
 
     /// 权限的可读字符串（如 "rwx"）。
-    pub fn flags_str(self) -> String {
+    pub fn flags_str(&self) -> String {
         let mut s = String::new();
         s.push(if self.readable() { 'r' } else { '-' });
         s.push(if self.writable() { 'w' } else { '-' });
@@ -329,7 +329,7 @@ impl ElfProgram {
     }
 
     /// 判断某地址是否落在某个已加载段内。
-    pub fn contains_addr(self, addr: u64) -> bool {
+    pub fn contains_addr(&self, addr: u64) -> bool {
         self.segments.values().any(|(_, ph)| {
             addr >= ph.p_vaddr && addr < ph.p_vaddr.wrapping_add(ph.p_memsz.max(1))
         })
@@ -407,7 +407,7 @@ fn class_is_32(header: &ElfHeader) -> bool {
 /// ELF 加载器主入口。
 ///
 /// 提供 `load(path)`、`parse_header(data)`、`parse_program_headers()`、
-//! `map_segments()`、`resolve_symbol()`、`relocate()` 等方法。
+// `map_segments()`、`resolve_symbol()`、`relocate()` 等方法。
 /// 所有操作作用于内存模拟的地址空间，不修改宿主进程。
 pub struct ElfLoader;
 
@@ -570,7 +570,7 @@ impl ElfLoader {
             return Err(ElfError::InvalidProgramHeaderTable);
         }
         let mut headers = Vec::with_capacity(header.phnum as usize);
-        let little = header.is_little_endian();
+        let little = header.clone().is_little_endian();
         for i in 0..header.phnum as u64 {
             let off = header
                 .phoff
@@ -644,7 +644,7 @@ impl ElfLoader {
         if header.shnum == 0 || header.shoff == 0 || header.shentsize == 0 {
             return Ok((sections, shstrtab, symbols, interp));
         }
-        let little = header.is_little_endian();
+        let little = header.clone().is_little_endian();
         let shstrndx = header.shstrndx as usize;
         for i in 0..header.shnum as u64 {
             let off = header
@@ -780,7 +780,7 @@ impl ElfLoader {
             content.resize(ph.p_memsz.max(ph.p_filesz) as usize, 0);
             program
                 .segments
-                .insert(start, (content, ph.clone()));
+                .insert(start, (content, (*ph).clone()));
             last_end = end;
             has_last = true;
         }
@@ -866,7 +866,7 @@ mod tests {
         // 程序头 (PT_LOAD) at offset 64, 56 bytes
         // p_type=PT_LOAD, p_flags=PF_R|PF_X, p_offset=0x1000, p_vaddr=vaddr
         f.extend_from_slice(&PT_LOADu32.to_le_bytes());
-        f.extend_from_slice(&(PF_R | PF_X)u32.to_le_bytes());
+        f.extend_from_slice(&(PF_R | PF_X as u32).to_le_bytes());
         f.extend_from_slice(&0x1000u64.to_le_bytes());
         f.extend_from_slice(&vaddr.to_le_bytes());
         f.extend_from_slice(&vaddr.to_le_bytes()); // p_paddr
@@ -968,7 +968,7 @@ mod tests {
         let seg_content = b"AAAA";
         // 段1: vaddr 0x401000, filesz 4, 放文件偏调 0x1000
         f.extend_from_slice(&PT_LOADu32.to_le_bytes());
-        f.extend_from_slice(&(PF_R | PF_X)u32.to_le_bytes());
+        f.extend_from_slice(&(PF_R | PF_X as u32).to_le_bytes());
         f.extend_from_slice(&0x1000u64.to_le_bytes());
         f.extend_from_slice(&0x401000u64.to_le_bytes());
         f.extend_from_slice(&0x401000u64.to_le_bytes());
@@ -977,7 +977,7 @@ mod tests {
         f.extend_from_slice(&4096u64.to_le_bytes());
         // 段2: vaddr 0x401002 (与段1重叠), filesz 4, 放文件偏调 0x2000
         f.extend_from_slice(&PT_LOADu32.to_le_bytes());
-        f.extend_from_slice(&(PF_R | PF_W)u32.to_le_bytes());
+        f.extend_from_slice(&(PF_R | PF_W as u32).to_le_bytes());
         f.extend_from_slice(&0x2000u64.to_le_bytes());
         f.extend_from_slice(&0x401002u64.to_le_bytes());
         f.extend_from_slice(&0x401002u64.to_le_bytes());

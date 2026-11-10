@@ -211,6 +211,10 @@ impl PageTableLevel {
     fn set(&mut self, index: u64, pte: Option<PTE>) {
         self.entries[index as usize] = pte;
     }
+
+    fn get_mut(&mut self, index: u64) -> Option<&mut PTE> {
+        self.entries[index as usize].as_mut()
+    }
 }
 
 /// 四级页表：PML4 -> PDPT -> PD -> PT -> 物理页。
@@ -265,54 +269,60 @@ impl PageTable {
 
         // PML4 -> PDPT
         {
-            let level = self.levels.get_mut(&cur).unwrap();
-            let entry = level.get(pml4_idx);
-            let next = match entry {
-                Some(pte) if pte.is_table_ptr() => pte.paddr.0,
-                _ => {
-                    let new_paddr = self.allocate_page_frame();
-                    level.set(
-                        pml4_idx,
-                        Some(PTE::new(PAddr(new_paddr), PTEFlags::kernel_readonly())),
-                    );
-                    self.levels.insert(new_paddr, PageTableLevel::new());
-                    new_paddr
+            let next = {
+                let entry = self.levels.get(&cur).unwrap().get(pml4_idx);
+                match entry {
+                    Some(pte) if pte.is_table_ptr() => pte.paddr.0,
+                    _ => {
+                        let new_paddr = self.allocate_page_frame();
+                        let level = self.levels.get_mut(&cur).unwrap();
+                        level.set(
+                            pml4_idx,
+                            Some(PTE::new(PAddr(new_paddr), PTEFlags::kernel_readonly())),
+                        );
+                        self.levels.insert(new_paddr, PageTableLevel::new());
+                        new_paddr
+                    }
                 }
             };
             cur = next;
         }
         // PDPT -> PD
         {
-            let level = self.levels.get_mut(&cur).unwrap();
-            let entry = level.get(pdpt_idx);
-            let next = match entry {
-                Some(pte) if pte.is_table_ptr() => pte.paddr.0,
-                _ => {
-                    let new_paddr = self.allocate_page_frame();
-                    level.set(
-                        pdpt_idx,
-                        Some(PTE::new(PAddr(new_paddr), PTEFlags::kernel_readonly())),
-                    );
-                    self.levels.insert(new_paddr, PageTableLevel::new());
-                    new_paddr
+            let next = {
+                let entry = self.levels.get(&cur).unwrap().get(pdpt_idx);
+                match entry {
+                    Some(pte) if pte.is_table_ptr() => pte.paddr.0,
+                    _ => {
+                        let new_paddr = self.allocate_page_frame();
+                        let level = self.levels.get_mut(&cur).unwrap();
+                        level.set(
+                            pdpt_idx,
+                            Some(PTE::new(PAddr(new_paddr), PTEFlags::kernel_readonly())),
+                        );
+                        self.levels.insert(new_paddr, PageTableLevel::new());
+                        new_paddr
+                    }
                 }
             };
             cur = next;
         }
         // PD -> PT
         {
-            let level = self.levels.get_mut(&cur).unwrap();
-            let entry = level.get(pd_idx);
-            let next = match entry {
-                Some(pte) if pte.is_table_ptr() => pte.paddr.0,
-                _ => {
-                    let new_paddr = self.allocate_page_frame();
-                    level.set(
-                        pd_idx,
-                        Some(PTE::new(PAddr(new_paddr), PTEFlags::kernel_readonly())),
-                    );
-                    self.levels.insert(new_paddr, PageTableLevel::new());
-                    new_paddr
+            let next = {
+                let entry = self.levels.get(&cur).unwrap().get(pd_idx);
+                match entry {
+                    Some(pte) if pte.is_table_ptr() => pte.paddr.0,
+                    _ => {
+                        let new_paddr = self.allocate_page_frame();
+                        let level = self.levels.get_mut(&cur).unwrap();
+                        level.set(
+                            pd_idx,
+                            Some(PTE::new(PAddr(new_paddr), PTEFlags::kernel_readonly())),
+                        );
+                        self.levels.insert(new_paddr, PageTableLevel::new());
+                        new_paddr
+                    }
                 }
             };
             cur = next;
@@ -333,31 +343,24 @@ impl PageTable {
         let (pml4_idx, pdpt_idx, pd_idx, pt_idx, _offset) = Self::decompose(vaddr);
         let mut cur = self.root_paddr;
 
-        for (level_idx, is_last) in [
+        let levels = &[
             (pml4_idx, false),
             (pdpt_idx, false),
             (pd_idx, false),
             (pt_idx, true),
-        ] {
-            let level = self.levels.get_mut(&cur)?;
-            let entry = level.get(level_idx);
-            let pte = match entry {
-                Some(pte) => pte,
-                None => return None,
-            };
+        ];
+        for &(level_idx, is_last) in levels {
+            // 先取出当前级别的页表，借用立即释放。
+            let level_entries = self.levels.get(&cur)?.clone();
+            let entry = level_entries.get(level_idx)?;
             if is_last {
-                return Some(unsafe {
-                    // 返回叶子 PTE 的可变引用：由于 levels 是 BTreeMap，借用检查器
-                    // 难以直接表达，这里通过整个结构体的可变自引用模拟。
-                    // 实际实现中应改用 Arena 或索引。此处保留 API 语义。
-                    let ptr = level as *mut PageTableLevel;
-                    &mut (*ptr).entries[pt_idx as usize].as_mut().unwrap()
-                });
+                // 末级：直接返回叶子 PTE 的可变引用。
+                return self.levels.get_mut(&cur)?.get_mut(level_idx);
             }
-            if !pte.is_table_ptr() {
+            if !entry.is_table_ptr() {
                 return None;
             }
-            cur = pte.paddr.0;
+            cur = entry.paddr.0;
         }
         None
     }
@@ -600,7 +603,7 @@ impl TLB {
 
     /// 刷新指定虚拟页号的 TLB 条目。
     pub fn flush_vpn(&mut self, vpn: u64) {
-        if let Some(&idx) = self.map.remove(&vpn) {
+        if let Some(idx) = self.map.remove(&vpn) {
             // 标记该条目失效（从 entries 中移除并重建 map 以保持索引一致）。
             self.entries.remove(idx);
             self.rebuild_map();
@@ -756,8 +759,8 @@ impl PagedMemoryManager {
         }
         // TLB 未命中：查页表。
         let result = self.page_table.translate(vaddr, write, user_mode);
-        if let Ok((paddr, pte, offset)) = &result {
-            self.tlb.insert(vpn, paddr.0 / PAGE_SIZE, *pte);
+        if let Ok((paddr, pte, _offset)) = &result {
+            self.tlb.insert(vpn, paddr.0 / PAGE_SIZE, pte.flags);
         }
         result
     }

@@ -266,7 +266,7 @@ impl UdpStack {
 
     /// 从接收队列取一个数据报，返回 (字节数, 源地址, 源端口)。
     pub fn recvfrom(&mut self, socket: UdpSocketId, buf: &mut [u8]) -> Option<(usize, Ipv4Addr, Port)> {
-        let socket = self.sockets.get_mut(&socket).ok_or_else(|| return None).unwrap();
+        let socket = self.sockets.get_mut(&socket)?;
         let dgram = socket.rx.pop_front()?;
         // 已连接模式：只返回来自 connected 对端的数据报（已在 deliver 时过滤，此处再保险）。
         if let Some(connected) = socket.connected {

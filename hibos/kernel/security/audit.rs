@@ -28,7 +28,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 // ========================================================================
 
 /// 审计事件类型。
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Ord, PartialOrd)]
 pub enum EventType {
     /// 系统调用。
     Syscall,
@@ -283,8 +283,8 @@ pub struct AuditStats {
 /// 审计日志器。
 ///
 /// 日志以 JSON Lines 格式追加写入 `log_path` 指定的文件；内存中保留最近
-//! 记录以供查询；`rotate()` 将当前日志重命名为 `.<seq>` 后新建；`flush()`
-//! 强制将缓冲写入磁盘。
+// 记录以供查询；`rotate()` 将当前日志重命名为 `.<seq>` 后新建；`flush()`
+// 强制将缓冲写入磁盘。
 pub struct AuditLogger {
     pub log_path: PathBuf,
     records: Vec<AuditRecord>,

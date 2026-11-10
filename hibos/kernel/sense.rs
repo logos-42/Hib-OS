@@ -9,7 +9,7 @@ use crate::desktop;
 use crate::gpu::capabilities::{GpuCapability, GpuCapabilities};
 use crate::gpu::{iommu, vram, VramPartitionId};
 use crate::monitor::get_time_ns;
-use crate::net::{ETH_NAME, fmt_ip, fmt_mac, net, parse_ip, parse_mac, Packet, RouteEntry};
+use crate::net::ETH_NAME;
 use crate::vfs::Vfs;
 
 use crate::agent;
@@ -41,13 +41,15 @@ use crate::motive::motives;
 use crate::mount::mounts;
 use crate::mutex2;
 use crate::netif::ifaces;
-use crate::pkg::pkgstore;
 use crate::power::power;
 use crate::proc::proctable;
 use crate::proc2;
 use crate::procfs::procfs;
 use crate::socket::netio;
 use crate::scheduler_domains;
+use crate::buddy_alloc::buddy_summary;
+use crate::page_table_sim::pt_summary;
+use crate::swap_sim::swap_summary;
 use crate::sysctl::sysctl;
 use crate::sync;
 use crate::time::timekeeper;
@@ -161,12 +163,12 @@ pub fn probe(name: &str) -> Option<String> {
             ))
         }
         "net://eth0" => {
-            let st = net().lock().unwrap();
+            let st = crate::net::net().lock().unwrap();
             let s = st.stats();
             let arp_lines: Vec<String> = st
                 .arp
                 .iter()
-                .map(|(ip, mac)| format!("  {} -> {}", fmt_ip(*ip), fmt_mac(*mac)))
+                .map(|(ip, mac)| format!("  {} -> {}", crate::net::fmt_ip(*ip), crate::net::fmt_mac(*mac)))
                 .collect();
             let route_lines: Vec<String> = st
                 .routes
@@ -174,8 +176,8 @@ pub fn probe(name: &str) -> Option<String> {
                 .map(|r| {
                     format!(
                         "  {} via {} dev {}",
-                        fmt_ip(r.network),
-                        fmt_ip(r.gateway),
+                        crate::net::fmt_ip(r.network),
+                        crate::net::fmt_ip(r.gateway),
                         r.iface
                     )
                 })
@@ -193,9 +195,9 @@ pub fn probe(name: &str) -> Option<String> {
             Some(format!(
                 "eth0 link={} ip={} mask={} mac={}\ntx={}/{}B rx={}/{}B\nARP:\n{}\nRoutes:\n{}",
                 if st.iface.link_up { "up" } else { "down" },
-                fmt_ip(st.iface.ip),
-                fmt_ip(st.iface.mask),
-                fmt_mac(st.iface.mac),
+                crate::net::fmt_ip(st.iface.ip),
+                crate::net::fmt_ip(st.iface.mask),
+                crate::net::fmt_mac(st.iface.mac),
                 s.tx_packets,
                 s.tx_bytes,
                 s.rx_packets,
@@ -519,7 +521,7 @@ fn act_raw(name: &str, payload: &str) -> Option<Result<String, String>> {
             let mut it = payload.split_whitespace();
             match it.next() {
                 Some("stats") => {
-                    let st = net().lock().unwrap();
+                    let st = crate::net::net().lock().unwrap();
                     let s = st.stats();
                     Some(Ok(format!(
                         "tx={}/{}B rx={}/{}B link={}",
@@ -531,32 +533,32 @@ fn act_raw(name: &str, payload: &str) -> Option<Result<String, String>> {
                     )))
                 }
                 Some("arp") => {
-                    let mut st = net().lock().unwrap();
+                    let mut st = crate::net::net().lock().unwrap();
                     match it.next() {
                         Some("add") => {
-                            let ip = parse_ip(it.next().unwrap_or("0.0.0.0"));
-                            let mac = parse_mac(it.next().unwrap_or("00:00:00:00:00:00"));
+                            let ip = crate::net::parse_ip(it.next().unwrap_or("0.0.0.0"));
+                            let mac = crate::net::parse_mac(it.next().unwrap_or("00:00:00:00:00:00"));
                             st.arp_add(ip, mac);
                             Some(Ok(format!(
                                 "ARP {} -> {} 已添加",
-                                fmt_ip(ip),
-                                fmt_mac(mac)
+                                crate::net::fmt_ip(ip),
+                                crate::net::fmt_mac(mac)
                             )))
                         }
                         Some("del") => {
-                            let ip = parse_ip(it.next().unwrap_or("0.0.0.0"));
+                            let ip = crate::net::parse_ip(it.next().unwrap_or("0.0.0.0"));
                             st.arp_del(ip);
-                            Some(Ok(format!("ARP {} 已删除", fmt_ip(ip))))
+                            Some(Ok(format!("ARP {} 已删除", crate::net::fmt_ip(ip))))
                         }
                         Some("show") | None => {
-                            let st = net().lock().unwrap();
+                            let st = crate::net::net().lock().unwrap();
                             if st.arp.is_empty() {
                                 Some(Ok("ARP 表为空".to_string()))
                             } else {
                                 let lines: Vec<String> = st
                                     .arp
                                     .iter()
-                                    .map(|(ip, mac)| format!("  {} -> {}", fmt_ip(*ip), fmt_mac(*mac)))
+                                    .map(|(ip, mac)| format!("  {} -> {}", crate::net::fmt_ip(*ip), crate::net::fmt_mac(*mac)))
                                     .collect();
                                 Some(Ok(lines.join("\n")))
                             }
@@ -565,13 +567,13 @@ fn act_raw(name: &str, payload: &str) -> Option<Result<String, String>> {
                     }
                 }
                 Some("route") => {
-                    let mut st = net().lock().unwrap();
+                    let mut st = crate::net::net().lock().unwrap();
                     match it.next() {
                         Some("add") => {
-                            let network = parse_ip(it.next().unwrap_or("0.0.0.0"));
-                            let mask = parse_ip(it.next().unwrap_or("0.0.0.0"));
-                            let gateway = parse_ip(it.next().unwrap_or("0.0.0.0"));
-                            st.route_add(RouteEntry {
+                            let network = crate::net::parse_ip(it.next().unwrap_or("0.0.0.0"));
+                            let mask = crate::net::parse_ip(it.next().unwrap_or("0.0.0.0"));
+                            let gateway = crate::net::parse_ip(it.next().unwrap_or("0.0.0.0"));
+                            st.route_add(crate::net::RouteEntry {
                                 network,
                                 mask,
                                 gateway,
@@ -579,17 +581,17 @@ fn act_raw(name: &str, payload: &str) -> Option<Result<String, String>> {
                             });
                             Some(Ok(format!(
                                 "路由 {} via {} 已添加",
-                                fmt_ip(network),
-                                fmt_ip(gateway)
+                                crate::net::fmt_ip(network),
+                                crate::net::fmt_ip(gateway)
                             )))
                         }
                         Some("del") => {
-                            let network = parse_ip(it.next().unwrap_or("0.0.0.0"));
+                            let network = crate::net::parse_ip(it.next().unwrap_or("0.0.0.0"));
                             st.route_del(network);
-                            Some(Ok(format!("路由 {} 已删除", fmt_ip(network))))
+                            Some(Ok(format!("路由 {} 已删除", crate::net::fmt_ip(network))))
                         }
                         Some("show") | None => {
-                            let st = net().lock().unwrap();
+                            let st = crate::net::net().lock().unwrap();
                             if st.routes.is_empty() {
                                 Some(Ok("路由表为空".to_string()))
                             } else {
@@ -599,8 +601,8 @@ fn act_raw(name: &str, payload: &str) -> Option<Result<String, String>> {
                                     .map(|r| {
                                         format!(
                                             "  {} via {} dev {}",
-                                            fmt_ip(r.network),
-                                            fmt_ip(r.gateway),
+                                            crate::net::fmt_ip(r.network),
+                                            crate::net::fmt_ip(r.gateway),
                                             r.iface
                                         )
                                     })
@@ -616,15 +618,15 @@ fn act_raw(name: &str, payload: &str) -> Option<Result<String, String>> {
                 }
                 Some("ping") => {
                     let host = it.next().unwrap_or("10.0.0.1");
-                    let dst = parse_ip(host);
-                    let mut st = net().lock().unwrap();
+                    let dst = crate::net::parse_ip(host);
+                    let mut st = crate::net::net().lock().unwrap();
                     let r = st.send(dst, b"ping".to_vec());
                     let time_ms = (get_time_ns() % 1_000_000) / 1000;
                     match r {
                         Ok(()) => {
                             let own_ip = st.iface.ip;
                             if dst == own_ip {
-                                st.rx.push_back(Packet {
+                                st.rx.push_back(crate::net::Packet {
                                     src: dst,
                                     dst: own_ip,
                                     ttl: 64,
@@ -635,7 +637,7 @@ fn act_raw(name: &str, payload: &str) -> Option<Result<String, String>> {
                             }
                             Some(Ok(format!(
                                 "64 bytes from {}: icmp_seq=1 ttl=64 time={} ms",
-                                fmt_ip(dst),
+                                crate::net::fmt_ip(dst),
                                 time_ms
                             )))
                         }
@@ -644,17 +646,17 @@ fn act_raw(name: &str, payload: &str) -> Option<Result<String, String>> {
                 }
                 Some("send") => {
                     let host = it.next().unwrap_or("255.255.255.255");
-                    let dst = parse_ip(host);
+                    let dst = crate::net::parse_ip(host);
                     let msg = it.next().unwrap_or("").as_bytes().to_vec();
                     let msg_len = msg.len();
-                    let mut st = net().lock().unwrap();
+                    let mut st = crate::net::net().lock().unwrap();
                     match st.send(dst, msg) {
                         Ok(()) => {
                             let nh = st.lookup_route(dst).unwrap_or(dst);
                             Some(Ok(format!(
                                 "已向 {} (next-hop {}) 发送 {} 字节",
-                                fmt_ip(dst),
-                                fmt_ip(nh),
+                                crate::net::fmt_ip(dst),
+                                crate::net::fmt_ip(nh),
                                 msg_len
                             )))
                         }
@@ -662,7 +664,7 @@ fn act_raw(name: &str, payload: &str) -> Option<Result<String, String>> {
                     }
                 }
                 Some("link") => {
-                    let mut st = net().lock().unwrap();
+                    let mut st = crate::net::net().lock().unwrap();
                     match it.next() {
                         Some("up") => {
                             st.iface.link_up = true;
@@ -2363,11 +2365,11 @@ fn act_pagetable(payload: &str) -> Result<String, String> {
         Some("map") => {
             let vaddr: u64 = it
                 .next()
-                .and_then(|s| u64::from_str_radix(s.trim_start_matches("0x"), 16))
+                .and_then(|s| u64::from_str_radix(s.trim_start_matches("0x"), 16).ok())
                 .ok_or("用法: act pagetable://walk map <vaddr> <paddr> [rw] [user]")?;
             let paddr: u64 = it
                 .next()
-                .and_then(|s| u64::from_str_radix(s.trim_start_matches("0x"), 16))
+                .and_then(|s| u64::from_str_radix(s.trim_start_matches("0x"), 16).ok())
                 .ok_or("用法: act pagetable://walk map <vaddr> <paddr> [rw] [user]")?;
             let writable = it.any(|s| s == "rw");
             let user = it.any(|s| s == "user");
@@ -2386,7 +2388,7 @@ fn act_pagetable(payload: &str) -> Result<String, String> {
         Some("unmap") => {
             let vaddr: u64 = it
                 .next()
-                .and_then(|s| u64::from_str_radix(s.trim_start_matches("0x"), 16))
+                .and_then(|s| u64::from_str_radix(s.trim_start_matches("0x"), 16).ok())
                 .ok_or("用法: act pagetable://walk unmap <vaddr>")?;
             crate::page_table_sim::pt_unmap(vaddr)
                 .map_err(|e| format!("取消映射失败: {:?}", e))?;
@@ -2395,11 +2397,11 @@ fn act_pagetable(payload: &str) -> Result<String, String> {
         Some("translate") | Some("walk") => {
             let vaddr: u64 = it
                 .next()
-                .and_then(|s| u64::from_str_radix(s.trim_start_matches("0x"), 16))
+                .and_then(|s| u64::from_str_radix(s.trim_start_matches("0x"), 16).ok())
                 .ok_or("用法: act pagetable://walk translate <vaddr> [write] [user]")?;
             let write = it.any(|s| s == "write");
             let user = it.any(|s| s == "user");
-            let (paddr, _pte, _offset) = crate::page_table_sim::pt_translate(vaddr, write, user)
+            let (paddr, _flags) = crate::page_table_sim::pt_translate(vaddr, write, user)
                 .map_err(|e| format!("地址转换失败: {:?}", e))?;
             Ok(format!(
                 "vaddr=0x{:x} -> paddr=0x{:x} (write={} user={})",
@@ -2422,24 +2424,32 @@ fn act_slab(payload: &str) -> Result<String, String> {
                 .next()
                 .and_then(|s| s.parse::<usize>().ok())
                 .ok_or("用法: act slab://stats alloc <size>")?;
-            let (handle, cache_id) = crate::slab_alloc::slab_alloc_obj(size)
+            let mut allocator = crate::slab_alloc::SlabAllocator::new();
+            let handle = allocator
+                .alloc(size)
                 .map_err(|e| format!("slab 分配失败: {:?}", e))?;
+            let cache_id = handle.size_class;
             Ok(format!(
                 "已分配 slab 对象 cache={} index={} size={}",
-                cache_id, handle.obj_index, size
+                cache_id, handle.obj_id, size
             ))
         }
         Some("free") => {
-            let cache_id: u64 = it
+            let cache_id: usize = it
                 .next()
-                .and_then(|s| s.parse::<u64>().ok())
+                .and_then(|s| s.parse::<usize>().ok())
                 .ok_or("用法: act slab://stats free <cache_id> <obj_index>")?;
             let obj_index: usize = it
                 .next()
                 .and_then(|s| s.parse::<usize>().ok())
                 .ok_or("用法: act slab://stats free <cache_id> <obj_index>")?;
-            let handle = crate::slab_alloc::ObjHandle::new(cache_id, obj_index);
-            crate::slab_alloc::slab_free_obj(handle)
+            let handle = crate::slab_alloc::SlabHandle {
+                size_class: cache_id,
+                obj_id: obj_index,
+            };
+            let mut allocator = crate::slab_alloc::SlabAllocator::new();
+            allocator
+                .free(handle)
                 .map_err(|e| format!("slab 释放失败: {:?}", e))?;
             Ok(format!("已释放 slab 对象 cache={} index={}", cache_id, obj_index))
         }
@@ -2482,6 +2492,64 @@ fn act_buddy(payload: &str) -> Result<String, String> {
                 .to_string(),
         ),
     }
+}
+
+// ---- 本地辅助：供 sense/act 通道使用（slab_alloc 和 pkg 未导出全局单例） ----
+
+/// slab 统计摘要（临时实例，供 `slab://stats` 通道展示）。
+fn slab_summary() -> String {
+    crate::slab_alloc::SlabAllocator::new().summary()
+}
+
+/// 包存储全局单例（供 `pkg://store` 通道使用，轻量版本）。
+struct PkgStore {
+    installed: std::collections::BTreeSet<String>,
+}
+
+impl PkgStore {
+    fn install(&mut self, name: &str) -> Result<String, String> {
+        if self.installed.contains(name) {
+            return Err(format!("已安装: {}", name));
+        }
+        self.installed.insert(name.to_string());
+        Ok(format!("已安装 {}", name))
+    }
+    fn remove(&mut self, name: &str) -> Result<String, String> {
+        if self.installed.remove(name) {
+            Ok(format!("已移除 {}", name))
+        } else {
+            Err(format!("未安装: {}", name))
+        }
+    }
+    fn search(&self, query: &str) -> String {
+        let mut results: Vec<_> = self
+            .installed
+            .iter()
+            .filter(|n| n.contains(query))
+            .cloned()
+            .collect();
+        results.sort();
+        if results.is_empty() {
+            format!("未找到匹配包: {}", query)
+        } else {
+            results.join("\n")
+        }
+    }
+    fn list(&self) -> String {
+        if self.installed.is_empty() {
+            "无已安装包".to_string()
+        } else {
+            self.installed.iter().cloned().collect::<Vec<_>>().join("\n")
+        }
+    }
+}
+
+fn pkgstore() -> &'static std::sync::Mutex<PkgStore> {
+    static STORE: std::sync::OnceLock<std::sync::Mutex<PkgStore>> =
+        std::sync::OnceLock::new();
+    STORE.get_or_init(|| std::sync::Mutex::new(PkgStore {
+        installed: std::collections::BTreeSet::new(),
+    }))
 }
 
 #[cfg(test)]

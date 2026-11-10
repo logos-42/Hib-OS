@@ -9,3 +9,9 @@ target/
 # 操作系统文件
 .DS_Store
 Thumbs.db
+
+.kilo
+.codebuddy
+.claud
+.codex
+.bolloon

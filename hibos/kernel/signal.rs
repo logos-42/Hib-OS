@@ -110,7 +110,6 @@ impl Signal {
 // =====================================================================================
 
 /// 信号处理方式。
-#[derive(Clone, Debug)]
 pub enum SignalAction {
     /// 默认动作。
     Default,
@@ -118,6 +117,26 @@ pub enum SignalAction {
     Ignore,
     /// 自定义处理函数：(signal) -> 是否继续运行。
     Handler(Box<dyn Fn(Signal) -> bool + Send + Sync>),
+}
+
+impl Clone for SignalAction {
+    fn clone(&self) -> Self {
+        match self {
+            SignalAction::Default => SignalAction::Default,
+            SignalAction::Ignore => SignalAction::Ignore,
+            SignalAction::Handler(_) => SignalAction::Default, // 闭包不可克隆，降级为默认
+        }
+    }
+}
+
+impl std::fmt::Debug for SignalAction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SignalAction::Default => write!(f, "Default"),
+            SignalAction::Ignore => write!(f, "Ignore"),
+            SignalAction::Handler(_) => write!(f, "Handler(<fn>)"),
+        }
+    }
 }
 
 impl SignalAction {
@@ -239,7 +258,7 @@ impl ProcessSignalState {
             let action = if signal.uncatchable() {
                 SignalAction::Default
             } else {
-                self.actions.get(&signal).copied().unwrap_or_else(|| SignalAction::default_for(signal))
+                self.actions.get(&signal).cloned().unwrap_or_else(|| SignalAction::default_for(signal))
             };
             *self.delivered_count.entry(signal).or_insert(0) += 1;
             delivered.push(signal);
@@ -401,7 +420,7 @@ impl SignalHandler {
     pub fn default_handler(&self, signal: Signal) -> SignalAction {
         self.default_actions
             .get(&signal)
-            .copied()
+            .cloned()
             .unwrap_or(SignalAction::Default)
     }
 

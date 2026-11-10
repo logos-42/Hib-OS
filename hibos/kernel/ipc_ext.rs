@@ -394,7 +394,7 @@ impl MessageQueueManager {
     }
 
     pub fn send(&mut self, qid: MsgQId, data: &[u8], priority: i32) -> Result<(), String> {
-        let name = self.queue_name(qid)?;
+        let name = self.queue_name(qid).ok_or_else(|| format!("消息队列不存在: {:?}", qid))?;
         self.queues.get_mut(&name).unwrap().send(data, priority)
     }
 
@@ -407,7 +407,7 @@ impl MessageQueueManager {
     }
 
     pub fn destroy(&mut self, qid: MsgQId) -> Result<(), String> {
-        let name = self.queue_name(qid)?;
+        let name = self.queue_name(qid).ok_or_else(|| format!("消息队列不存在: {:?}", qid))?;
         if let Some(q) = self.queues.get_mut(&name) {
             q.destroy();
         }
@@ -819,10 +819,7 @@ pub fn socket_recvfrom(fd: SockFd, buf: &mut [u8]) -> Result<usize, String> {
 
 pub fn socket_close(fd: SockFd) {
     let mut mgr = socket_mgr().lock().unwrap();
-    let pair_id = mgr.keys().find(|&&k| {
-        let p = &mgr[&k];
-        p.fd1 == fd || p.fd2 == fd
-    });
+    let pair_id = mgr.iter().find(|(_, p)| p.fd1 == fd || p.fd2 == fd).map(|(k, _)| *k);
     if let Some(k) = pair_id {
         mgr.get_mut(&k).unwrap().close(fd);
     }

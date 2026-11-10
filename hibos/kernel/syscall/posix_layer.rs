@@ -733,7 +733,7 @@ impl PosixLayer {
 
     fn sys_read(fd: i32, buf_len: usize) -> PosixResult<usize> {
         PosixState::with_mut(|s| {
-            let entry = s.fds.get(&fd).ok_or(PosixError::EBADF)?;
+            let mut entry = s.fds.get_mut(&fd).ok_or(PosixError::EBADF)?;
             if !entry.readable {
                 return Err(PosixError::EACCES);
             }
@@ -754,7 +754,7 @@ impl PosixLayer {
     fn sys_write(fd: i32, buf_len: usize) -> PosixResult<usize> {
         // 用户态原型中无实际缓冲区，按 buf_len 视为要写入的字节数（填充零字节模拟）。
         PosixState::with_mut(|s| {
-            let entry = s.fds.get(&fd).ok_or(PosixError::EBADF)?;
+            let mut entry = s.fds.get_mut(&fd).ok_or(PosixError::EBADF)?;
             if !entry.writable {
                 return Err(PosixError::EACCES);
             }
@@ -784,7 +784,7 @@ impl PosixLayer {
         let np = normalize_path(path, &current_cwd())?;
         PosixState::with(|s| {
             let (meta, _) = s.fs.get(&np).ok_or(PosixError::ENOENT)?;
-            Ok(encode_stat(meta) as usize)
+            Ok(((((meta.mode as u64) << 32) | (meta.size as u64 & 0xFFFF_FFFF)) as usize))
         })
     }
 
@@ -792,7 +792,7 @@ impl PosixLayer {
         PosixState::with(|s| {
             let entry = s.fds.get(&fd).ok_or(PosixError::EBADF)?;
             let (meta, _) = s.fs.get(&entry.path).ok_or(PosixError::ENOENT)?;
-            Ok(encode_stat(meta) as usize)
+            Ok(((((meta.mode as u64) << 32) | (meta.size as u64 & 0xFFFF_FFFF)) as usize))
         })
     }
 
@@ -1151,7 +1151,7 @@ impl PosixLayer {
             s.next_fd += 1;
             let wr = s.next_fd;
             s.next_fd += 1;
-            let pipe_id = hash_path("pipe://");
+            let pipe_id = hash_path(Path::new("pipe://"));
             let rd_entry = FdEntry {
                 fd: rd,
                 path: PathBuf::from("pipe://rd"),

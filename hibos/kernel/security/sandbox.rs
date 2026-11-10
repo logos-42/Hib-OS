@@ -242,7 +242,7 @@ impl SandboxRule {
 // ========================================================================
 
 /// 沙箱唯一标识。
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Ord, PartialOrd)]
 pub struct SandboxId(pub u64);
 
 /// 沙箱状态。
@@ -422,7 +422,7 @@ impl Sandbox {
                 let s = comp.to_string_lossy().to_string();
                 if s == ".." {
                     // 不允许越过根目录。
-                    if out.pop().is_none() {
+                    if !out.pop() {
                         continue;
                     }
                 } else if s != "." && !s.is_empty() {

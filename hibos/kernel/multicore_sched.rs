@@ -31,7 +31,7 @@ impl TaskId {
 }
 
 impl std::fmt::Display for TaskId {
-    fn fmt(self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "task#{}", self.0)
     }
 }
@@ -394,6 +394,11 @@ impl EevdfRunQueue {
         self.task_map.values().filter(|t| t.state == TaskState::Ready).count()
     }
 
+    /// 返回运行中任务数。
+    pub fn running_count(&self) -> usize {
+        self.task_map.values().filter(|t| t.state == TaskState::Running).count()
+    }
+
     pub fn task_state(&self, tid: TaskId) -> Option<TaskState> {
         self.task_map.get(&tid).map(|t| t.state)
     }
@@ -514,6 +519,11 @@ impl CoreScheduler {
     /// 返回就绪任务总数（跨两个队列）。
     pub fn ready_count(&self) -> usize {
         self.cfs.ready_count() + self.eevdf.ready_count()
+    }
+
+    /// 返回运行中任务总数（跨两个队列，通常每核最多 1 个）。
+    pub fn running_count(&self) -> usize {
+        self.cfs.running_count() + self.eevdf.running_count()
     }
 
     /// 查询任务状态。
@@ -665,10 +675,10 @@ impl MulticoreScheduler {
     }
 
     /// 负载均衡：将负载最高的核心上的一个任务迁移到负载最低的核心，
-    //! 若两者负载差超过 `balance_threshold`。
+    // 若两者负载差超过 `balance_threshold`。
     ///
     /// 迁移时将任务从源核 CFS/EEVDF 队列移除，放入目标核的相应队列，
-    //! 并调整其 bound_core。
+    // 并调整其 bound_core。
     pub fn load_balance(&mut self) -> Option<(usize, usize, TaskId)> {
         if self.core_count < 2 {
             return None;

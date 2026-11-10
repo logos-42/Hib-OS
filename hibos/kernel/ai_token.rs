@@ -284,6 +284,10 @@ impl AIConsciousness {
             ChannelKind::Process => ComputePattern::Custom(format!("process_{}", name)),
             ChannelKind::User => ComputePattern::Custom(format!("user_{}", name)),
             ChannelKind::Will => ComputePattern::Custom(format!("will_{}", name)),
+            ChannelKind::Swap => ComputePattern::Custom(format!("swap_{}", name)),
+            ChannelKind::PageTable => ComputePattern::Custom(format!("pagetable_{}", name)),
+            ChannelKind::Slab => ComputePattern::Custom(format!("slab_{}", name)),
+            ChannelKind::Buddy => ComputePattern::Custom(format!("buddy_{}", name)),
         };
         let policy = match kind {
             ChannelKind::Gpu => SchedulePolicy::HighThroughput,

@@ -283,7 +283,7 @@ impl DhcpClient {
             options: Vec::new(),
         };
         msg.add_option_u8(DHCP_OPT_MSG_TYPE, DHCP_DISCOVER);
-        msg.add_option_u32(DHCP_OPT_REQ_IP, [0, 0, 0, 0]); // 无请求 IP
+        msg.add_option_ip(DHCP_OPT_REQ_IP, [0, 0, 0, 0]); // 无请求 IP
         msg.add_option_end();
         msg
     }
@@ -592,7 +592,11 @@ fn parse_offer(msg: &DhcpMessage) -> Option<DhcpOffer> {
 
 /// 解析 ACK 报文。
 fn parse_ack(msg: &DhcpMessage) -> Result<([u8; 4], [u8; 4], [u8; 4], Vec<[u8; 4]>, u32, [u8; 4]), String> {
-    if msg.get_option_u8(DHCP_OPT_MSG_TYPE)? != DHCP_ACK {
+    if msg
+        .get_option_u8(DHCP_OPT_MSG_TYPE)
+        .ok_or_else(|| "缺少消息类型".to_string())?
+        != DHCP_ACK
+    {
         return Err("非 DHCP ACK".to_string());
     }
     let ip = msg.yiaddr;

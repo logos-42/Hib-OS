@@ -221,7 +221,7 @@ impl ReassemblyBuffer {
         if entry.fragments.iter().any(|(o, _)| *o == offset) {
             return None;
         }
-        entry.fragments.push((offset, fragment.payload));
+        entry.fragments.push((offset, fragment.payload.clone()));
         if !more {
             entry.total = Some(offset + fragment.payload.len());
         }
