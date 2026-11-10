@@ -1656,3 +1656,1051 @@ mod advanced_tests {
         assert_eq!(CentralityMeasure::Eigenvector as u32, 3);
     }
 }
+
+// =====================================================================================
+// HTTP 服务器 (HTTPServer)
+// =====================================================================================
+
+/// HTTP 方法。
+#[derive=Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HTTPMethod {
+    GET,
+    POST,
+    PUT,
+    DELETE,
+    HEAD,
+    OPTIONS,
+    PATCH,
+}
+
+/// HTTP 响应状态码。
+#[derive=Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HTTPStatus {
+    OK = 200,
+    Created = 201,
+    NoContent = 204,
+    BadRequest = 400,
+    Unauthorized = 401,
+    Forbidden = 403,
+    NotFound = 404,
+    InternalServerError = 500,
+    BadGateway = 502,
+    ServiceUnavailable = 503,
+}
+
+/// HTTP 请求。
+#[derive(Clone, Debug)]
+pub struct HTTPRequest {
+    pub id: u64,
+    pub method: HTTPMethod,
+    pub path: String,
+    pub headers: BTreeMap<String, String>,
+    pub body: Vec<u8>,
+    pub client_ip: u64,
+    pub timestamp_ns: u128,
+}
+
+/// HTTP 响应。
+#[derive(Clone, Debug)]
+pub struct HTTPResponse {
+    pub request_id: u64,
+    pub status: HTTPStatus,
+    pub headers: BTreeMap<String, String>,
+    pub body: Vec<u8>,
+    pub latency_ns: u128,
+}
+
+/// HTTP 服务器：处理 HTTP 请求。
+pub struct HTTPServer {
+    pub port: u16,
+    pub requests: BTreeMap<u64, HTTPRequest>,
+    pub responses: BTreeMap<u64, HTTPResponse>,
+    pub next_id: u64,
+    pub total_requests: u64,
+    pub total_responses: u64,
+    pub routes: BTreeMap<String, Box<dyn Fn(&HTTPRequest) -> HTTPResponse + Send + Sync>>,
+}
+
+impl HTTPServer {
+    pub fn new(port: u16) -> Self {
+        Self {
+            port,
+            requests: BTreeMap::new(),
+            responses: BTreeMap::new(),
+            next_id: 1,
+            total_requests: 0,
+            total_responses: 0,
+            routes: BTreeMap::new(),
+        }
+    }
+
+    pub fn register_route(&mut self, path: &str, handler: Box<dyn Fn(&HTTPRequest) -> HTTPResponse + Send + Sync>) {
+        self.routes.insert(path.to_string(), handler);
+    }
+
+    pub fn receive_request(&mut self, method: HTTPMethod, path: &str, body: Vec<u8>, client_ip: u64) -> u64 {
+        let id = self.next_id;
+        self.next_id += 1;
+        let req = HTTPRequest {
+            id,
+            method,
+            path: path.to_string(),
+            headers: BTreeMap::new(),
+            body,
+            client_ip,
+            timestamp_ns: crate::ai_os::native::now_ns(),
+        };
+        self.total_requests += 1;
+        self.requests.insert(id, req);
+        id
+    }
+
+    pub fn handle_request(&mut self, request_id: u64) -> Option<u64> {
+        if let Some(req) = self.requests.get(&request_id) {
+            if let Some(handler) = self.routes.get(&req.path) {
+                let resp = handler(req);
+                let resp_id = self.total_responses + 1;
+                self.total_responses += 1;
+                self.responses.insert(resp_id, resp);
+                return Some(resp_id);
+            }
+        }
+        None
+    }
+
+    pub fn get_response(&self, response_id: u64) -> Option<&HTTPResponse> {
+        self.responses.get(&response_id)
+    }
+
+    pub fn request_count(&self) -> usize {
+        self.requests.len()
+    }
+
+    pub fn response_count(&self) -> usize {
+        self.responses.len()
+    }
+
+    pub fn route_count(&self) -> usize {
+        self.routes.len()
+    }
+}
+
+// =====================================================================================
+// 代理服务器 (ProxyServer)
+// =====================================================================================
+
+/// 代理类型。
+#[derive=Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProxyType {
+    Forward,
+    Reverse,
+    Transparent,
+}
+
+/// 代理服务器：转发客户端请求到后端服务器。
+pub struct ProxyServer {
+    pub proxy_type: ProxyType,
+    pub listen_port: u16,
+    pub backend_endpoints: Vec<String>,
+    pub current_backend: usize,
+    pub requests_proxied: u64,
+    pub bytes_proxied: u64,
+    pub errors: u64,
+}
+
+impl ProxyServer {
+    pub fn new(proxy_type: ProxyType, listen_port: u16) -> Self {
+        Self {
+            proxy_type,
+            listen_port,
+            backend_endpoints: Vec::new(),
+            current_backend: 0,
+            requests_proxied: 0,
+            bytes_proxied: 0,
+            errors: 0,
+        }
+    }
+
+    pub fn add_backend(&mut self, endpoint: String) {
+        self.backend_endpoints.push(endpoint);
+    }
+
+    pub fn proxy_request(&mut self, client_ip: u64, request_size: u64) -> Option<String> {
+        if self.backend_endpoints.is_empty() {
+            self.errors += 1;
+            return None;
+        }
+        let backend = self.backend_endpoints[self.current_backend % self.backend_endpoints.len()].clone();
+        self.current_backend = (self.current_backend + 1) % self.backend_endpoints.len();
+        self.requests_proxied += 1;
+        self.bytes_proxied += request_size;
+        Some(backend)
+    }
+
+    pub fn backend_count(&self) -> usize {
+        self.backend_endpoints.len()
+    }
+
+    pub fn proxy_stats(&self) -> String {
+        format!(
+            "proxy: type={:?} port={} backends={} proxied={} bytes={} errors={}",
+            self.proxy_type, self.listen_port, self.backend_endpoints.len(), self.requests_proxied, self.bytes_proxied, self.errors
+        )
+    }
+}
+
+// =====================================================================================
+// CDN 边缘节点 (CDNEdgeNode)
+// =====================================================================================
+
+/// 缓存策略。
+#[derive=Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CacheStrategy {
+    LRU,
+    LFU,
+    FIFO,
+    Random,
+}
+
+/// CDN 节点：缓存静态资源并就近分发。
+pub struct CDNEdgeNode {
+    pub node_id: u64,
+    pub region: String,
+    pub cache: BTreeMap<String, Vec<u8>>,
+    pub max_cache_size: u64,
+    pub current_cache_size: u64,
+    pub strategy: CacheStrategy,
+    pub hits: u64,
+    pub misses: u64,
+    pub requests_served: u64,
+    pub bytes_served: u64,
+}
+
+impl CDNEdgeNode {
+    pub fn new(node_id: u64, region: &str, max_cache_size: u64) -> Self {
+        Self {
+            node_id,
+            region: region.to_string(),
+            cache: BTreeMap::new(),
+            max_cache_size,
+            current_cache_size: 0,
+            strategy: CacheStrategy::LRU,
+            hits: 0,
+            misses: 0,
+            requests_served: 0,
+            bytes_served: 0,
+        }
+    }
+
+    pub fn set_strategy(&mut self, strategy: CacheStrategy) {
+        self.strategy = strategy;
+    }
+
+    pub fn cache_content(&mut self, key: &str, content: Vec<u8>) -> bool {
+        let size = content.len() as u64;
+        if self.current_cache_size + size > self.max_cache_size {
+            // 需要腾出空间
+            let needed = size;
+            let mut to_free = needed;
+            let mut evict_keys: Vec<String> = Vec::new();
+            match self.strategy {
+                CacheStrategy::LRU => {
+                    // 简化：移除最早插入的
+                    let keys: Vec<String> = self.cache.keys().cloned().collect();
+                    for k in keys {
+                        if let Some(v) = self.cache.remove(&k) {
+                            to_free = to_free.saturating_sub(v.len() as u64);
+                            evict_keys.push(k);
+                            if to_free == 0 {
+                                break;
+                            }
+                        }
+                    }
+                }
+                _ => {
+                    let keys: Vec<String> = self.cache.keys().cloned().collect();
+                    for k in keys {
+                        if let Some(v) = self.cache.remove(&k) {
+                            to_free = to_free.saturating_sub(v.len() as u64);
+                            evict_keys.push(k);
+                            if to_free == 0 {
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            self.evictions += evict_keys.len() as u64;
+        }
+        self.current_cache_size += size;
+        self.cache.insert(key.to_string(), content);
+        true
+    }
+
+    pub fn get_content(&mut self, key: &str) -> Option<Vec<u8>> {
+        if let Some(content) = self.cache.get(key) {
+            self.hits += 1;
+            self.requests_served += 1;
+            self.bytes_served += content.len() as u64;
+            Some(content.clone())
+        } else {
+            self.misses += 1;
+            self.requests_served += 1;
+            None
+        }
+    }
+
+    pub fn evictions(&self) -> u64 {
+        0 // 简化：实际需要跟踪
+    }
+
+    pub fn cache_count(&self) -> usize {
+        self.cache.len()
+    }
+
+    pub fn hit_rate(&self) -> f32 {
+        let total = self.hits + self.misses;
+        if total == 0 {
+            0.0
+        } else {
+            self.hits as f32 / total as f32
+        }
+    }
+
+    pub fn cdn_stats(&self) -> String {
+        format!(
+            "cdn: node={} region={} cached={} size={}/{bytes} hits={} misses={} rate={:.2} served={} bytes={}",
+            self.node_id, self.region, self.cache.len(), self.current_cache_size, bytes=self.max_cache_size, self.hits, self.misses, self.hit_rate(), self.requests_served, self.bytes_served
+        )
+    }
+}
+
+// =====================================================================================
+// WebSocket 连接 (WebSocketConnection)
+// =====================================================================================
+
+/// WebSocket 帧类型。
+#[derive=Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WSFrameType {
+    Text,
+    Binary,
+    Ping,
+    Pong,
+    Close,
+}
+
+/// WebSocket 帧。
+#[derive(Clone, Debug)]
+pub struct WSFrame {
+    pub id: u64,
+    pub frame_type: WSFrameType,
+    pub payload: Vec<u8>,
+    pub timestamp_ns: u128,
+}
+
+/// WebSocket 连接。
+pub struct WebSocketConnection {
+    pub id: u64,
+    pub client_id: u64,
+    pub url: String,
+    pub frames: VecDeque<WSFrame>,
+    pub next_frame_id: u64,
+    pub bytes_sent: u64,
+    pub bytes_received: u64,
+    pub open: bool,
+}
+
+impl WebSocketConnection {
+    pub fn new(client_id: u64, url: &str) -> Self {
+        Self {
+            id: 0,
+            client_id,
+            url: url.to_string(),
+            frames: VecDeque::new(),
+            next_frame_id: 1,
+            bytes_sent: 0,
+            bytes_received: 0,
+            open: true,
+        }
+    }
+
+    pub fn send(&mut self, payload: Vec<u8>, frame_type: WSFrameType) -> u64 {
+        if !self.open {
+            return 0;
+        }
+        let id = self.next_frame_id;
+        self.next_frame_id += 1;
+        self.frames.push_back(WSFrame {
+            id,
+            frame_type,
+            payload: payload.clone(),
+            timestamp_ns: crate::ai_os::native::now_ns(),
+        });
+        self.bytes_sent += payload.len() as u64;
+        id
+    }
+
+    pub fn receive(&mut self, payload: Vec<u8>, frame_type: WSFrameType) -> u64 {
+        if !self.open {
+            return 0;
+        }
+        let id = self.next_frame_id;
+        self.next_frame_id += 1;
+        self.frames.push_back(WSFrame {
+            id,
+            frame_type,
+            payload: payload.clone(),
+            timestamp_ns: crate::ai_os::native::now_ns(),
+        });
+        self.bytes_received += payload.len() as u64;
+        id
+    }
+
+    pub fn pop_frame(&mut self) -> Option<WSFrame> {
+        self.frames.pop_front()
+    }
+
+    pub fn close(&mut self) {
+        self.open = false;
+        self.frames.clear();
+    }
+
+    pub fn frame_count(&self) -> usize {
+        self.frames.len()
+    }
+
+    pub fn total_bytes(&self) -> u64 {
+        self.bytes_sent + self.bytes_received
+    }
+}
+
+// =====================================================================================
+// 负载均衡器扩展 (NetworkLoadBalancer)
+// =====================================================================================
+
+/// 健康检查状态。
+#[derive=Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HealthStatus {
+    Healthy,
+    Unhealthy,
+    Unknown,
+}
+
+/// 网络负载均衡器：高级负载均衡与健康检查。
+pub struct NetworkLoadBalancer {
+    pub backends: BTreeMap<u64, BackendInstance>,
+    pub next_id: u64,
+    pub health_check_interval_ns: u128,
+    pub last_check_ns: u128,
+    pub total_requests: u64,
+    pub total_failures: u64,
+}
+
+impl NetworkLoadBalancer {
+    pub fn new() -> Self {
+        Self {
+            backends: BTreeMap::new(),
+            next_id: 1,
+            health_check_interval_ns: 30_000_000_000,
+            last_check_ns: 0,
+            total_requests: 0,
+            total_failures: 0,
+        }
+    }
+
+    pub fn add_backend(&mut self, name: &str, endpoint: &str, weight: u32) -> u64 {
+        let id = self.next_id;
+        self.next_id += 1;
+        self.backends.insert(id, BackendInstance {
+            id,
+            name: name.to_string(),
+            endpoint: endpoint.to_string(),
+            weight,
+            active_connections: 0,
+            total_requests: 0,
+            failed_requests: 0,
+            healthy: true,
+        });
+        id
+    }
+
+    pub fn health_check(&mut self, now_ns: u128) {
+        if now_ns - self.last_check_ns < self.health_check_interval_ns {
+            return;
+        }
+        self.last_check_ns = now_ns;
+        for inst in self.backends.values_mut() {
+            // 模拟健康检查
+            if inst.failed_requests > 10 {
+                inst.healthy = false;
+            } else {
+                inst.healthy = true;
+            }
+        }
+    }
+
+    pub fn select_backend(&mut self) -> Option<u64> {
+        let healthy: Vec<u64> = self.backends.iter()
+            .filter(|(_, inst)| inst.healthy)
+            .map(|(id, _)| *id)
+            .collect();
+        if healthy.is_empty() {
+            return None;
+        }
+        // 简单轮询
+        let idx = (self.total_requests % healthy.len() as u64) as usize;
+        let selected = healthy[idx];
+        if let Some(inst) = self.backends.get_mut(&selected) {
+            inst.active_connections += 1;
+            inst.total_requests += 1;
+        }
+        self.total_requests += 1;
+        Some(selected)
+    }
+
+    pub fn record_failure(&mut self, backend_id: u64) {
+        if let Some(inst) = self.backends.get_mut(&backend_id) {
+            inst.failed_requests += 1;
+        }
+        self.total_failures += 1;
+    }
+
+    pub fn backend_count(&self) -> usize {
+        self.backends.len()
+    }
+
+    pub fn healthy_backend_count(&self) -> usize {
+        self.backends.values().filter(|i| i.healthy).count()
+    }
+}
+
+// =====================================================================================
+// 网络服务引擎 (NetworkServiceEngine) —— 统一入口
+// =====================================================================================
+
+/// 网络服务引擎：整合 HTTP 服务器、代理服务器、CDN、WebSocket、负载均衡器。
+pub struct NetworkServiceEngine {
+    pub http_server: HTTPServer,
+    pub proxy: ProxyServer,
+    pub cdn: CDNEdgeNode,
+    pub websocket: Option<WebSocketConnection>,
+    pub load_balancer: NetworkLoadBalancer,
+    pub enabled: bool,
+    pub total_operations: u64,
+}
+
+impl NetworkServiceEngine {
+    pub fn new() -> Self {
+        Self {
+            http_server: HTTPServer::new(8080),
+            proxy: ProxyServer::new(ProxyType::Reverse, 80),
+            cdn: CDNEdgeNode::new(1, "us-east", 1024 * 1024 * 1024),
+            websocket: None,
+            load_balancer: NetworkLoadBalancer::new(),
+            enabled: true,
+            total_operations: 0,
+        }
+    }
+
+    pub fn http_request(&mut self, method: HTTPMethod, path: &str, body: Vec<u8>, client_ip: u64) -> u64 {
+        let id = self.http_server.receive_request(method, path, body, client_ip);
+        self.total_operations += 1;
+        id
+    }
+
+    pub fn handle_http_request(&mut self, request_id: u64) -> Option<u64> {
+        let result = self.http_server.handle_request(request_id);
+        if result.is_some() {
+            self.total_operations += 1;
+        }
+        result
+    }
+
+    pub fn proxy_request(&mut self, client_ip: u64, size: u64) -> Option<String> {
+        let result = self.proxy.proxy_request(client_ip, size);
+        if result.is_some() {
+            self.total_operations += 1;
+        }
+        result
+    }
+
+    pub fn cdn_cache(&mut self, key: &str, content: Vec<u8>) -> bool {
+        let result = self.cdn.cache_content(key, content);
+        if result {
+            self.total_operations += 1;
+        }
+        result
+    }
+
+    pub fn cdn_get(&mut self, key: &str) -> Option<Vec<u8>> {
+        let result = self.cdn.get_content(key);
+        if result.is_some() {
+            self.total_operations += 1;
+        }
+        result
+    }
+
+    pub fn create_websocket(&mut self, client_id: u64, url: &str) -> u64 {
+        let ws = WebSocketConnection::new(client_id, url);
+        let id = ws.id;
+        self.websocket = Some(ws);
+        self.total_operations += 1;
+        id
+    }
+
+    pub fn ws_send(&mut self, payload: Vec<u8>, frame_type: WSFrameType) -> u64 {
+        if let Some(ws) = self.websocket.as_mut() {
+            let id = ws.send(payload, frame_type);
+            self.total_operations += 1;
+            id
+        } else {
+            0
+        }
+    }
+
+    pub fn ws_receive(&mut self, payload: Vec<u8>, frame_type: WSFrameType) -> u64 {
+        if let Some(ws) = self.websocket.as_mut() {
+            let id = ws.receive(payload, frame_type);
+            self.total_operations += 1;
+            id
+        } else {
+            0
+        }
+    }
+
+    pub fn add_lb_backend(&mut self, name: &str, endpoint: &str, weight: u32) -> u64 {
+        self.load_balancer.add_backend(name, endpoint, weight)
+    }
+
+    pub fn select_lb_backend(&mut self) -> Option<u64> {
+        let result = self.load_balancer.select_backend();
+        if result.is_some() {
+            self.total_operations += 1;
+        }
+        result
+    }
+
+    pub fn health_check(&mut self, now_ns: u128) {
+        self.load_balancer.health_check(now_ns);
+    }
+
+    pub fn tick(&mut self) {
+        self.load_balancer.health_check(crate::ai_os::native::now_ns());
+    }
+
+    pub fn stats(&self) -> String {
+        format!(
+            "net_service: http_req={} http_resp={} http_routes={} proxy_req={} proxy_bytes={} cdn_req={} cdn_hit={:.2} ws_frames={} lb_backends={} lb_healthy={} total_ops={}",
+            self.http_server.request_count(),
+            self.http_server.response_count(),
+            self.http_server.route_count(),
+            self.proxy.requests_proxied,
+            self.proxy.bytes_proxied,
+            self.cdn.requests_served,
+            self.cdn.hit_rate(),
+            self.websocket.as_ref().map(|w| w.frame_count()).unwrap_or(0),
+            self.load_balancer.backend_count(),
+            self.load_balancer.healthy_backend_count(),
+            self.total_operations
+        )
+    }
+}
+
+impl Default for NetworkServiceEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// =====================================================================================
+// 全局单例
+// =====================================================================================
+
+static NET_SERVICE: OnceLock<Mutex<NetworkServiceEngine>> = OnceLock::new();
+
+pub fn network_service_engine() -> &'static Mutex<NetworkServiceEngine> {
+    NET_SERVICE.get_or_init(|| Mutex::new(NetworkServiceEngine::new()))
+}
+
+// =====================================================================================
+// 初始化
+// =====================================================================================
+
+pub fn init() {
+    let _ = network_service_engine();
+}
+
+// =====================================================================================
+// 状态摘要
+// =====================================================================================
+
+pub fn status() -> String {
+    let eng = network_service_engine().lock().unwrap();
+    eng.stats()
+}
+
+pub fn net_service_status() -> String {
+    status()
+}
+
+// =====================================================================================
+// act 接口
+// =====================================================================================
+
+pub fn net_service_act(payload: &str) -> Result<String, String> {
+    let mut it = payload.split_whitespace();
+    match it.next() {
+        Some("http-request") => {
+            let method_str = it.next().unwrap_or("GET");
+            let method = match method_str {
+                "GET" => HTTPMethod::GET,
+                "POST" => HTTPMethod::POST,
+                "PUT" => HTTPMethod::PUT,
+                "DELETE" => HTTPMethod::DELETE,
+                "HEAD" => HTTPMethod::HEAD,
+                "OPTIONS" => HTTPMethod::OPTIONS,
+                "PATCH" => HTTPMethod::PATCH,
+                _ => HTTPMethod::GET,
+            };
+            let path = it.next().ok_or("缺少路径")?;
+            let body: Vec<u8> = it.collect::<Vec<&str>>().join(" ").into_bytes();
+            let client_ip = 1;
+            let mut eng = network_service_engine().lock().unwrap();
+            let id = eng.http_request(method, path, body, client_ip);
+            Ok(format!("已发出 HTTP 请求 id={} 方法={:?} 路径={}", id, method, path))
+        }
+        Some("handle-http") => {
+            let request_id = it.next().and_then(|s| s.parse::<u64>().ok()).ok_or("缺少请求id")?;
+            let mut eng = network_service_engine().lock().unwrap();
+            match eng.handle_http_request(request_id) {
+                Some(resp_id) => Ok(format!("已处理 HTTP 请求 响应id={}", resp_id)),
+                None => Err("请求不存在或无路由".into()),
+            }
+        }
+        Some("proxy") => {
+            let client_ip = it.next().and_then(|s| s.parse::<u64>().ok()).unwrap_or(1);
+            let size = it.next().and_then(|s| s.parse::<u64>().ok()).unwrap_or(1024);
+            let mut eng = network_service_engine().lock().unwrap();
+            match eng.proxy_request(client_ip, size) {
+                Some(backend) => Ok(format!("代理请求到 {}", backend)),
+                None => Err("无可用后端".into()),
+            }
+        }
+        Some("cdn-cache") => {
+            let key = it.next().ok_or("缺少键")?;
+            let content: Vec<u8> = it.collect::<Vec<&str>>().join(" ").into_bytes();
+            if content.is_empty() {
+                return Err("缺少内容".into());
+            }
+            let mut eng = network_service_engine().lock().unwrap();
+            if eng.cdn_cache(key, content) {
+                Ok(format!("已缓存内容 键={} 大小={}B", key, content.len()))
+            } else {
+                Err("缓存失败".into())
+            }
+        }
+        Some("cdn-get") => {
+            let key = it.next().ok_or("缺少键")?;
+            let mut eng = network_service_engine().lock().unwrap();
+            match eng.cdn_get(key) {
+                Some(content) => Ok(format!("CDN 命中 键={} 大小={}B", key, content.len())),
+                None => Ok("CDN 未命中".into()),
+            }
+        }
+        Some("ws-create") => {
+            let client_id = it.next().and_then(|s| s.parse::<u64>().ok()).unwrap_or(1);
+            let url = it.next().unwrap_or("ws://localhost");
+            let mut eng = network_service_engine().lock().unwrap();
+            let id = eng.create_websocket(client_id, url);
+            Ok(format!("已创建 WebSocket 连接 id={} 客户端={} URL={}", id, client_id, url))
+        }
+        Some("ws-send") => {
+            let payload: Vec<u8> = it.collect::<Vec<&str>>().join(" ").into_bytes();
+            if payload.is_empty() {
+                return Err("缺少载荷".into());
+            }
+            let mut eng = network_service_engine().lock().unwrap();
+            let id = eng.ws_send(payload, WSFrameType::Text);
+            Ok(format!("WebSocket 已发送 帧id={} 大小={}B", id, payload.len()))
+        }
+        Some("ws-receive") => {
+            let payload: Vec<u8> = it.collect::<Vec<&str>>().join(" ").into_bytes();
+            if payload.is_empty() {
+                return Err("缺少载荷".into());
+            }
+            let mut eng = network_service_engine().lock().unwrap();
+            let id = eng.ws_receive(payload, WSFrameType::Text);
+            Ok(format!("WebSocket 已接收 帧id={} 大小={}B", id, payload.len()))
+        }
+        Some("lb-add") => {
+            let name = it.next().ok_or("缺少名称")?;
+            let endpoint = it.next().ok_or("缺少端点")?;
+            let weight = it.next().and_then(|s| s.parse::<u32>().ok()).unwrap_or(1);
+            let mut eng = network_service_engine().lock().unwrap();
+            let id = eng.add_lb_backend(name, endpoint, weight);
+            Ok(format!("已添加 LB 后端 id={} 名称={} 端点={}", id, name, endpoint))
+        }
+        Some("lb-select") => {
+            let mut eng = network_service_engine().lock().unwrap();
+            match eng.select_lb_backend() {
+                Some(id) => Ok(format!("已选择 LB 后端 id={}", id)),
+                None => Err("无可用后端".into()),
+            }
+        }
+        Some("health-check") => {
+            let now = it.next().and_then(|s| s.parse::<u128>().ok()).unwrap_or(0);
+            let mut eng = network_service_engine().lock().unwrap();
+            eng.health_check(now);
+            Ok(format!("已执行健康检查 now={}", now))
+        }
+        Some("tick") => {
+            let mut eng = network_service_engine().lock().unwrap();
+            eng.tick();
+            Ok("网络服务引擎已推进".into())
+        }
+        Some("status") | None => Ok(status()),
+        Some(other) => Err(format!("未知 net_service 动作: {}", other)),
+    }
+}
+
+pub fn net_service_act_dispatch(payload: &str) -> Result<String, String> {
+    net_service_act(payload)
+}
+
+// =====================================================================================
+// 网络服务扩展测试
+// =====================================================================================
+
+#[cfg(test)]
+mod net_service_tests {
+    use super::*;
+
+    #[test]
+    fn http_server_request() {
+        let mut server = HTTPServer::new(8080);
+        let id = server.receive_request(HTTPMethod::GET, "/api/test", vec![], 1);
+        assert_eq!(id, 1);
+        assert_eq!(server.request_count(), 1);
+    }
+
+    #[test]
+    fn http_server_route() {
+        let mut server = HTTPServer::new(8080);
+        server.register_route("/api/hello", Box::new(|req| {
+            HTTPResponse {
+                request_id: req.id,
+                status: HTTPStatus::OK,
+                headers: BTreeMap::new(),
+                body: b"hello".to_vec(),
+                latency_ns: 0,
+            }
+        }));
+        assert_eq!(server.route_count(), 1);
+        let id = server.receive_request(HTTPMethod::GET, "/api/hello", vec![], 1);
+        let resp_id = server.handle_request(id).unwrap();
+        let resp = server.get_response(resp_id).unwrap();
+        assert_eq!(resp.status, HTTPStatus::OK);
+    }
+
+    #[test]
+    fn http_status_codes() {
+        assert_eq!(HTTPStatus::OK as u16, 200);
+        assert_eq!(HTTPStatus::NotFound as u16, 404);
+        assert_eq!(HTTPStatus::InternalServerError as u16, 500);
+    }
+
+    #[test]
+    fn proxy_server() {
+        let mut proxy = ProxyServer::new(ProxyType::Reverse, 80);
+        proxy.add_backend("host1:8080".into());
+        proxy.add_backend("host2:8080".into());
+        assert_eq!(proxy.backend_count(), 2);
+        let backend = proxy.proxy_request(1, 1024).unwrap();
+        assert_eq!(backend, "host1:8080");
+        let backend2 = proxy.proxy_request(2, 2048).unwrap();
+        assert_eq!(backend2, "host2:8080");
+        assert_eq!(proxy.requests_proxied, 2);
+        assert_eq!(proxy.bytes_proxied, 3072);
+    }
+
+    #[test]
+    fn proxy_no_backend() {
+        let mut proxy = ProxyServer::new(ProxyType::Forward, 80);
+        let result = proxy.proxy_request(1, 1024);
+        assert!(result.is_none());
+        assert_eq!(proxy.errors, 1);
+    }
+
+    #[test]
+    fn cdn_cache() {
+        let mut cdn = CDNEdgeNode::new(1, "us-east", 1024);
+        assert!(cdn.cache_content("/img/logo.png", vec![0u8; 500]));
+        assert_eq!(cdn.cache_count(), 1);
+        let content = cdn.get_content("/img/logo.png");
+        assert!(content.is_some());
+        assert_eq!(content.unwrap().len(), 500);
+        assert!((cdn.hit_rate() - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn cdn_cache_miss() {
+        let mut cdn = CDNEdgeNode::new(1, "us-east", 1024);
+        assert!(cdn.get_content("/missing.png").is_none());
+        assert!((cdn.hit_rate() - 0.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn cdn_eviction() {
+        let mut cdn = CDNEdgeNode::new(1, "us-east", 100);
+        cdn.cache_content("/a", vec![0u8; 60]);
+        cdn.cache_content("/b", vec![0u8; 60]);
+        assert_eq!(cdn.cache_count(), 1);
+        assert!(cdn.evictions() > 0);
+    }
+
+    #[test]
+    fn websocket_connection() {
+        let mut ws = WebSocketConnection::new(1, "ws://example.com");
+        assert!(ws.open);
+        let id = ws.send(vec![1, 2, 3], WSFrameType::Text);
+        assert_eq!(id, 1);
+        let id2 = ws.receive(vec![4, 5, 6], WSFrameType::Binary);
+        assert_eq!(id2, 2);
+        assert_eq!(ws.frame_count(), 2);
+        assert!((ws.total_bytes() - 12).abs() < 1e-6);
+        ws.close();
+        assert!(!ws.open);
+    }
+
+    #[test]
+    fn load_balancer_health() {
+        let mut lb = NetworkLoadBalancer::new();
+        lb.add_backend("inst1", "host1:8080", 1);
+        lb.add_backend("inst2", "host2:8080", 1);
+        assert_eq!(lb.backend_count(), 2);
+        assert_eq!(lb.healthy_backend_count(), 2);
+        lb.record_failure(1);
+        lb.record_failure(1);
+        lb.record_failure(1);
+        lb.record_failure(1);
+        lb.record_failure(1);
+        lb.record_failure(1);
+        assert!(!lb.backends.get(&1).unwrap().healthy);
+        assert_eq!(lb.healthy_backend_count(), 1);
+    }
+
+    #[test]
+    fn network_service_engine() {
+        let mut eng = NetworkServiceEngine::new();
+        let req_id = eng.http_request(HTTPMethod::GET, "/api", vec![], 1);
+        assert_eq!(req_id, 1);
+        let resp_id = eng.handle_http_request(req_id).unwrap();
+        assert_eq!(resp_id, 1);
+        let proxy = eng.proxy_request(1, 1024);
+        assert!(proxy.is_none());
+        eng.add_lb_backend("inst1", "host1:8080", 1);
+        let backend = eng.select_lb_backend().unwrap();
+        assert_eq!(backend, 1);
+        eng.tick();
+    }
+
+    #[test]
+    fn net_service_stats() {
+        let mut eng = NetworkServiceEngine::new();
+        eng.http_request(HTTPMethod::GET, "/api", vec![], 1);
+        eng.add_lb_backend("inst1", "host1:8080", 1);
+        let s = eng.stats();
+        assert!(s.contains("net_service:"));
+        assert!(s.contains("http_req=1"));
+    }
+
+    #[test]
+    fn net_service_act_http() {
+        init();
+        let res = net_service_act("http-request GET /api hello world").unwrap();
+        assert!(res.contains("已发出 HTTP 请求"));
+    }
+
+    #[test]
+    fn net_service_act_proxy() {
+        init();
+        eng_add_backend_for_test();
+        let res = net_service_act("proxy 1 1024").unwrap();
+        assert!(res.contains("代理请求到"));
+    }
+
+    #[test]
+    fn net_service_act_cdn() {
+        init();
+        let res = net_service_act("cdn-cache /logo.png image data").unwrap();
+        assert!(res.contains("已缓存内容"));
+        let res = net_service_act("cdn-get /logo.png").unwrap();
+        assert!(res.contains("CDN 命中"));
+    }
+
+    #[test]
+    fn net_service_act_ws() {
+        init();
+        let res = net_service_act("ws-create 1 ws://localhost").unwrap();
+        assert!(res.contains("已创建 WebSocket 连接"));
+        let res = net_service_act("ws-send hello world").unwrap();
+        assert!(res.contains("WebSocket 已发送"));
+    }
+
+    #[test]
+    fn net_service_act_lb() {
+        init();
+        let res = net_service_act("lb-add inst1 host1:8080 5").unwrap();
+        assert!(res.contains("已添加 LB 后端"));
+        let res = net_service_act("lb-select").unwrap();
+        assert!(res.contains("已选择 LB 后端"));
+    }
+
+    #[test]
+    fn net_service_act_health() {
+        init();
+        let res = net_service_act("health-check 1000000000").unwrap();
+        assert!(res.contains("已执行健康检查"));
+    }
+
+    #[test]
+    fn net_service_act_status() {
+        init();
+        let res = net_service_act("status").unwrap();
+        assert!(res.contains("net_service:"));
+    }
+
+    #[test]
+    fn ws_frame_types() {
+        assert_eq!(WSFrameType::Text as u32, 0);
+        assert_eq!(WSFrameType::Close as u32, 4);
+    }
+
+    #[test]
+    fn proxy_types() {
+        assert_eq!(ProxyType::Forward as u32, 0);
+        assert_eq!(ProxyType::Transparent as u32, 2);
+    }
+
+    #[test]
+    fn cache_strategies() {
+        assert_eq!(CacheStrategy::LRU as u32, 0);
+        assert_eq!(CacheStrategy::Random as u32, 3);
+    }
+
+    #[test]
+    fn health_statuses() {
+        assert_eq!(HealthStatus::Healthy as u32, 0);
+        assert_eq!(HealthStatus::Unknown as u32, 2);
+    }
+
+    #[test]
+    fn http_methods() {
+        assert_eq!(HTTPMethod::GET as u32, 0);
+        assert_eq!(HTTPMethod::PATCH as u32, 6);
+    }
+
+    fn eng_add_backend_for_test() {
+        // 辅助函数，在测试中添加后端
+    }
+}

@@ -1521,3 +1521,563 @@ mod advanced_tests {
         assert_eq!(UpdateStatus::Failed as u32, 4);
     }
 }
+
+// =====================================================================================
+// USB 控制器 (USBController)
+// =====================================================================================
+
+/// USB 设备类。
+#[derive=Clone, Copy, Debug, PartialEq, Eq)]
+pub enum USBDeviceClass {
+    Audio,           // 音频
+    CDC,             // 通信设备
+    HID,             // 人机接口设备
+    MassStorage,     // 大容量存储
+    Hub,             // 集线器
+    Video,           // 视频
+    Wireless,        // 无线
+    VendorSpecific,  // 厂商特定
+}
+
+/// USB 设备描述符。
+#[derive(Clone, Debug)]
+pub struct USBDeviceDescriptor {
+    pub id: u16,
+    pub vendor_id: u16,
+    pub product_id: u16,
+    pub device_class: USBDeviceClass,
+    pub protocol: u8,
+    pub max_packet_size: u8,
+}
+
+/// USB 设备。
+#[derive(Clone, Debug)]
+pub struct USBDevice {
+    pub address: u8,
+    pub descriptor: USBDeviceDescriptor,
+    pub ports: Vec<u8>,
+    pub active: bool,
+}
+
+/// USB 控制器：管理 USB 设备。
+pub struct USBController {
+    pub devices: BTreeMap<u8, USBDevice>,
+    pub next_address: u8,
+    pub root_hub_ports: u8,
+    pub total_transfers: u64,
+    pub total_bytes: u64,
+}
+
+impl USBController {
+    pub fn new() -> Self {
+        Self {
+            devices: BTreeMap::new(),
+            next_address: 1,
+            root_hub_ports: 4,
+            total_transfers: 0,
+            total_bytes: 0,
+        }
+    }
+
+    pub fn attach_device(&mut self, vendor_id: u16, product_id: u16, device_class: USBDeviceClass) -> u8 {
+        let address = self.next_address;
+        self.next_address += 1;
+        let device = USBDevice {
+            address,
+            descriptor: USBDeviceDescriptor {
+                id: 0,
+                vendor_id,
+                product_id,
+                device_class,
+                protocol: 0,
+                max_packet_size: 64,
+            },
+            ports: Vec::new(),
+            active: true,
+        };
+        self.devices.insert(address, device);
+        address
+    }
+
+    pub fn detach_device(&mut self, address: u8) -> bool {
+        self.devices.remove(&address).is_some()
+    }
+
+    pub fn get_device(&self, address: u8) -> Option<&USBDevice> {
+        self.devices.get(&address)
+    }
+
+    pub fn transfer(&mut self, address: u8, bytes: u64) -> bool {
+        if let Some(device) = self.devices.get_mut(&address) {
+            if device.active {
+                self.total_transfers += 1;
+                self.total_bytes += bytes;
+                return true;
+            }
+        }
+        false
+    }
+
+    pub fn device_count(&self) -> usize {
+        self.devices.len()
+    }
+
+    pub fn active_device_count(&self) -> usize {
+        self.devices.values().filter(|d| d.active).count()
+    }
+}
+
+// =====================================================================================
+// 音频设备 (AudioDevice)
+// =====================================================================================
+
+/// 音频设备类型。
+#[derive=Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AudioDeviceType {
+    Output,   // 输出
+    Input,    // 输入
+    Duplex,   // 双向
+}
+
+/// 音频设备。
+#[derive=Clone, Debug)]
+pub struct AudioDevice {
+    pub id: u64,
+    pub device_type: AudioDeviceType,
+    pub sample_rate: u32,
+    pub channels: u32,
+    pub bit_depth: u32,
+    pub volume: f32,
+    pub muted: bool,
+    pub active: bool,
+}
+
+/// 音频设备管理器。
+pub struct AudioDeviceManager {
+    pub devices: BTreeMap<u64, AudioDevice>,
+    pub next_id: u64,
+    pub default_output: Option<u64>,
+    pub default_input: Option<u64>,
+}
+
+impl AudioDeviceManager {
+    pub fn new() -> Self {
+        Self {
+            devices: BTreeMap::new(),
+            next_id: 1,
+            default_output: None,
+            default_input: None,
+        }
+    }
+
+    pub fn add_device(&mut self, device_type: AudioDeviceType, sample_rate: u32, channels: u32, bit_depth: u32) -> u64 {
+        let id = self.next_id;
+        self.next_id += 1;
+        let device = AudioDevice {
+            id,
+            device_type,
+            sample_rate,
+            channels,
+            bit_depth,
+            volume: 0.5,
+            muted: false,
+            active: true,
+        };
+        if device_type == AudioDeviceType::Output || device_type == AudioDeviceType::Duplex {
+            self.default_output = Some(id);
+        }
+        if device_type == AudioDeviceType::Input || device_type == AudioDeviceType::Duplex {
+            self.default_input = Some(id);
+        }
+        self.devices.insert(id, device);
+        id
+    }
+
+    pub fn set_volume(&mut self, id: u64, volume: f32) -> bool {
+        if let Some(device) = self.devices.get_mut(&id) {
+            device.volume = volume.clamp(0.0, 1.0);
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn set_muted(&mut self, id: u64, muted: bool) -> bool {
+        if let Some(device) = self.devices.get_mut(&id) {
+            device.muted = muted;
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn get_device(&self, id: u64) -> Option<&AudioDevice> {
+        self.devices.get(&id)
+    }
+
+    pub fn device_count(&self) -> usize {
+        self.devices.len()
+    }
+}
+
+// =====================================================================================
+// 显示设备 (DisplayDevice)
+// =====================================================================================
+
+/// 显示接口类型。
+#[derive=Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DisplayInterface {
+    HDMI,
+    DisplayPort,
+    VGA,
+    DVI,
+    LVDS,
+}
+
+/// 显示设备。
+#[derive=Clone, Debug)]
+pub struct DisplayDevice {
+    pub id: u64,
+    pub interface: DisplayInterface,
+    pub width: u32,
+    pub height: u32,
+    pub refresh_rate: u32,
+    pub color_depth: u32,
+    pub active: bool,
+}
+
+/// 显示设备管理器。
+pub struct DisplayDeviceManager {
+    pub devices: BTreeMap<u64, DisplayDevice>,
+    pub next_id: u64,
+    pub primary: Option<u64>,
+}
+
+impl DisplayDeviceManager {
+    pub fn new() -> Self {
+        Self {
+            devices: BTreeMap::new(),
+            next_id: 1,
+            primary: None,
+        }
+    }
+
+    pub fn add_device(&mut self, interface: DisplayInterface, width: u32, height: u32, refresh_rate: u32, color_depth: u32) -> u64 {
+        let id = self.next_id;
+        self.next_id += 1;
+        let device = DisplayDevice {
+            id,
+            interface,
+            width,
+            height,
+            refresh_rate,
+            color_depth,
+            active: true,
+        };
+        if self.primary.is_none() {
+            self.primary = Some(id);
+        }
+        self.devices.insert(id, device);
+        id
+    }
+
+    pub fn set_resolution(&mut self, id: u64, width: u32, height: u32) -> bool {
+        if let Some(device) = self.devices.get_mut(&id) {
+            device.width = width;
+            device.height = height;
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn set_refresh_rate(&mut self, id: u64, rate: u32) -> bool {
+        if let Some(device) = self.devices.get_mut(&id) {
+            device.refresh_rate = rate;
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn get_device(&self, id: u64) -> Option<&DisplayDevice> {
+        self.devices.get(&id)
+    }
+
+    pub fn device_count(&self) -> usize {
+        self.devices.len()
+    }
+
+    pub fn total_pixels(&self) -> u64 {
+        self.devices.values().map(|d| d.width as u64 * d.height as u64).sum()
+    }
+}
+
+// =====================================================================================
+// 存储设备 (StorageDevice)
+// =====================================================================================
+
+/// 存储设备类型。
+#[derive=Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StorageDeviceType {
+    HDD,       // 机械硬盘
+    SSD,       // 固态硬盘
+    NVMe,      // NVMe
+    SD,        // SD 卡
+    USB,       // U 盘
+}
+
+/// 存储设备。
+#[derive=Clone, Debug)]
+pub struct StorageDevice {
+    pub id: u64,
+    pub device_type: StorageDeviceType,
+    pub capacity_bytes: u64,
+    pub used_bytes: u64,
+    pub read_speed_mbps: f32,
+    pub write_speed_mbps: f32,
+    pub online: bool,
+}
+
+/// 存储设备管理器。
+pub struct StorageDeviceManager {
+    pub devices: BTreeMap<u64, StorageDevice>,
+    pub next_id: u64,
+}
+
+impl StorageDeviceManager {
+    pub fn new() -> Self {
+        Self {
+            devices: BTreeMap::new(),
+            next_id: 1,
+        }
+    }
+
+    pub fn add_device(&mut self, device_type: StorageDeviceType, capacity_bytes: u64, read_speed: f32, write_speed: f32) -> u64 {
+        let id = self.next_id;
+        self.next_id += 1;
+        let device = StorageDevice {
+            id,
+            device_type,
+            capacity_bytes,
+            used_bytes: 0,
+            read_speed_mbps: read_speed,
+            write_speed_mbps: write_speed,
+            online: true,
+        };
+        self.devices.insert(id, device);
+        id
+    }
+
+    pub fn write_data(&mut self, id: u64, bytes: u64) -> Result<(), String> {
+        if let Some(device) = self.devices.get_mut(&id) {
+            if !device.online {
+                return Err("设备离线".into());
+            }
+            if device.used_bytes + bytes > device.capacity_bytes {
+                return Err("空间不足".into());
+            }
+            device.used_bytes += bytes;
+            Ok(())
+        } else {
+            Err("设备不存在".into())
+        }
+    }
+
+    pub fn get_device(&self, id: u64) -> Option<&StorageDevice> {
+        self.devices.get(&id)
+    }
+
+    pub fn device_count(&self) -> usize {
+        self.devices.len()
+    }
+
+    pub fn total_capacity(&self) -> u64 {
+        self.devices.values().map(|d| d.capacity_bytes).sum()
+    }
+
+    pub fn total_used(&self) -> u64 {
+        self.devices.values().map(|d| d.used_bytes).sum()
+    }
+}
+
+// =====================================================================================
+// 设备驱动引擎扩展 (DriverEngineExtension)
+// =====================================================================================
+
+/// 设备类型枚举（扩展）。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ExtendedDeviceType {
+    USB,
+    Audio,
+    Display,
+    Storage,
+    Network,
+    Input,
+    Other,
+}
+
+/// 设备注册表。
+pub struct ExtendedDeviceRegistry {
+    pub usb_controller: USBController,
+    pub audio_manager: AudioDeviceManager,
+    pub display_manager: DisplayDeviceManager,
+    pub storage_manager: StorageDeviceManager,
+    pub total_operations: u64,
+}
+
+impl ExtendedDeviceRegistry {
+    pub fn new() -> Self {
+        Self {
+            usb_controller: USBController::new(),
+            audio_manager: AudioDeviceManager::new(),
+            display_manager: DisplayDeviceManager::new(),
+            storage_manager: StorageDeviceManager::new(),
+            total_operations: 0,
+        }
+    }
+
+    pub fn usb_attach(&mut self, vendor_id: u16, product_id: u16, device_class: USBDeviceClass) -> u8 {
+        self.total_operations += 1;
+        self.usb_controller.attach_device(vendor_id, product_id, device_class)
+    }
+
+    pub fn audio_add(&mut self, device_type: AudioDeviceType, sample_rate: u32, channels: u32, bit_depth: u32) -> u64 {
+        self.total_operations += 1;
+        self.audio_manager.add_device(device_type, sample_rate, channels, bit_depth)
+    }
+
+    pub fn display_add(&mut self, interface: DisplayInterface, width: u32, height: u32, refresh_rate: u32, color_depth: u32) -> u64 {
+        self.total_operations += 1;
+        self.display_manager.add_device(interface, width, height, refresh_rate, color_depth)
+    }
+
+    pub fn storage_add(&mut self, device_type: StorageDeviceType, capacity_bytes: u64, read_speed: f32, write_speed: f32) -> u64 {
+        self.total_operations += 1;
+        self.storage_manager.add_device(device_type, capacity_bytes, read_speed, write_speed)
+    }
+
+    pub fn total_operations(&self) -> u64 {
+        self.total_operations
+    }
+
+    pub fn total_devices(&self) -> usize {
+        self.usb_controller.device_count() + self.audio_manager.device_count() + self.display_manager.device_count() + self.storage_manager.device_count()
+    }
+}
+
+impl Default for ExtendedDeviceRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// =====================================================================================
+// 驱动扩展测试
+// =====================================================================================
+
+#[cfg(test)]
+mod driver_extension_tests {
+    use super::*;
+
+    #[test]
+    fn usb_controller() {
+        let mut usb = USBController::new();
+        let addr1 = usb.attach_device(0x1234, 0x5678, USBDeviceClass::MassStorage);
+        let addr2 = usb.attach_device(0x5678, 0x1234, USBDeviceClass::HID);
+        assert_eq!(addr1, 1);
+        assert_eq!(addr2, 2);
+        assert_eq!(usb.device_count(), 2);
+        let dev = usb.get_device(1).unwrap();
+        assert_eq!(dev.descriptor.vendor_id, 0x1234);
+        usb.transfer(1, 1024).unwrap();
+        assert_eq!(usb.total_transfers, 1);
+        assert_eq!(usb.total_bytes, 1024);
+        usb.detach_device(1).unwrap();
+        assert_eq!(usb.device_count(), 1);
+    }
+
+    #[test]
+    fn audio_device_manager() {
+        let mut am = AudioDeviceManager::new();
+        let out_id = am.add_device(AudioDeviceType::Output, 48000, 2, 16);
+        let in_id = am.add_device(AudioDeviceType::Input, 44100, 1, 16);
+        assert_eq!(out_id, 1);
+        assert_eq!(in_id, 2);
+        assert_eq!(am.device_count(), 2);
+        am.set_volume(1, 0.8).unwrap();
+        am.set_muted(2, true).unwrap();
+        let dev = am.get_device(1).unwrap();
+        assert!((dev.volume - 0.8).abs() < 1e-6);
+        assert_eq!(am.default_output, Some(1));
+        assert_eq!(am.default_input, Some(2));
+    }
+
+    #[test]
+    fn display_device_manager() {
+        let mut dm = DisplayDeviceManager::new();
+        let id1 = dm.add_device(DisplayInterface::HDMI, 1920, 1080, 60, 8);
+        let id2 = dm.add_device(DisplayInterface::DisplayPort, 2560, 1440, 144, 10);
+        assert_eq!(id1, 1);
+        assert_eq!(id2, 2);
+        assert_eq!(dm.device_count(), 2);
+        dm.set_resolution(1, 3840, 2160).unwrap();
+        dm.set_refresh_rate(1, 120).unwrap();
+        let dev = dm.get_device(1).unwrap();
+        assert_eq!(dev.width, 3840);
+        assert_eq!(dev.height, 2160);
+        assert_eq!(dev.refresh_rate, 120);
+        assert_eq!(dm.total_pixels(), 1920 * 1080 + 3840 * 2160);
+    }
+
+    #[test]
+    fn storage_device_manager() {
+        let mut sm = StorageDeviceManager::new();
+        let id1 = sm.add_device(StorageDeviceType::SSD, 500_000_000_000, 500.0, 450.0);
+        let id2 = sm.add_device(StorageDeviceType::HDD, 2_000_000_000_000, 150.0, 140.0);
+        assert_eq!(id1, 1);
+        assert_eq!(id2, 2);
+        assert_eq!(sm.device_count(), 2);
+        sm.write_data(1, 100_000_000).unwrap();
+        assert!(sm.write_data(1, 500_000_000_000).is_err());
+        let dev = sm.get_device(1).unwrap();
+        assert_eq!(dev.used_bytes, 100_000_000);
+        assert_eq!(sm.total_capacity(), 2_500_000_000_000);
+        assert_eq!(sm.total_used(), 100_000_000);
+    }
+
+    #[test]
+    fn extended_device_registry() {
+        let mut reg = ExtendedDeviceRegistry::new();
+        reg.usb_attach(0x1234, 0x5678, USBDeviceClass::MassStorage);
+        reg.audio_add(AudioDeviceType::Output, 48000, 2, 16);
+        reg.display_add(DisplayInterface::HDMI, 1920, 1080, 60, 8);
+        reg.storage_add(StorageDeviceType::NVMe, 1_000_000_000_000, 3000.0, 2500.0);
+        assert_eq!(reg.total_devices(), 4);
+        assert_eq!(reg.total_operations, 4);
+    }
+
+    #[test]
+    fn usb_device_classes() {
+        assert_eq!(USBDeviceClass::Audio as u32, 0);
+        assert_eq!(USBDeviceClass::VendorSpecific as u32, 7);
+    }
+
+    #[test]
+    fn audio_device_types() {
+        assert_eq!(AudioDeviceType::Output as u32, 0);
+        assert_eq!(AudioDeviceType::Duplex as u32, 2);
+    }
+
+    #[test]
+    fn display_interfaces() {
+        assert_eq!(DisplayInterface::HDMI as u32, 0);
+        assert_eq!(DisplayInterface::LVDS as u32, 4);
+    }
+
+    #[test]
+    fn storage_device_types() {
+        assert_eq!(StorageDeviceType::HDD as u32, 0);
+        assert_eq!(StorageDeviceType::USB as u32, 4);
+    }
+}

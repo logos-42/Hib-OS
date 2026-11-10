@@ -1251,3 +1251,911 @@ mod advanced_tests {
         assert_eq!(ScriptStatus::Failed as u32, 3);
     }
 }
+
+// =====================================================================================
+// 脚本解析器 (ScriptParser)
+// =====================================================================================
+
+/// 脚本命令类型。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ScriptCommandType {
+    Assignment,    // 变量赋值
+    Command,       // 外部命令
+    If,            // 条件判断
+    Then,          // 条件真分支
+    Else,          // 条件假分支
+    Fi,            // 条件结束
+    For,           // 循环开始
+    Do,            // 循环体
+    Done,          // 循环结束
+    While,         // while 循环
+    Function,      // 函数定义
+    Call,          // 函数调用
+    Return,        // 函数返回
+    Echo,          // 输出
+    Comment,       // 注释
+    Export,        // 导出变量
+    Unset,         // 取消变量
+    Source,        // source 命令
+}
+
+/// 脚本解析节点。
+#[derive(Clone, Debug)]
+pub struct ScriptNode {
+    pub id: u64,
+    pub command_type: ScriptCommandType,
+    pub args: Vec<String>,
+    pub children: Vec<u64>,
+    pub line_number: u32,
+}
+
+/// 脚本解析器：解析 shell 脚本为 AST。
+pub struct ScriptParser {
+    pub nodes: BTreeMap<u64, ScriptNode>,
+    pub next_id: u64,
+    pub root_id: Option<u64>,
+    pub parse_errors: Vec<String>,
+}
+
+impl ScriptParser {
+    pub fn new() -> Self {
+        Self {
+            nodes: BTreeMap::new(),
+            next_id: 1,
+            root_id: None,
+            parse_errors: Vec::new(),
+        }
+    }
+
+    pub fn parse_line(&mut self, line: &str, line_number: u32) -> Option<u64> {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            let id = self.next_id;
+            self.next_id += 1;
+            self.nodes.insert(id, ScriptNode {
+                id,
+                command_type: ScriptCommandType::Comment,
+                args: vec![trimmed.to_string()],
+                children: Vec::new(),
+                line_number,
+            });
+            return Some(id);
+        }
+
+        let parts: Vec<&str> = trimmed.split_whitespace().collect();
+        if parts.is_empty() {
+            return None;
+        }
+
+        let command_type = match parts[0] {
+            "if" => ScriptCommandType::If,
+            "then" => ScriptCommandType::Then,
+            "else" => ScriptCommandType::Else,
+            "fi" => ScriptCommandType::Fi,
+            "for" => ScriptCommandType::For,
+            "do" => ScriptCommandType::Do,
+            "done" => ScriptCommandType::Done,
+            "while" => ScriptCommandType::While,
+            "function" => ScriptCommandType::Function,
+            "return" => ScriptCommandType::Return,
+            "echo" => ScriptCommandType::Echo,
+            "export" => ScriptCommandType::Export,
+            "unset" => ScriptCommandType::Unset,
+            "source" => ScriptCommandType::Source,
+            _ => {
+                if parts[0].contains('=') {
+                    ScriptCommandType::Assignment
+                } else {
+                    ScriptCommandType::Command
+                }
+            }
+        };
+
+        let id = self.next_id;
+        self.next_id += 1;
+        let args: Vec<String> = parts[1..].iter().map(|s| s.to_string()).collect();
+        self.nodes.insert(id, ScriptNode {
+            id,
+            command_type,
+            args,
+            children: Vec::new(),
+            line_number,
+        });
+
+        if self.root_id.is_none() {
+            self.root_id = Some(id);
+        }
+
+        Some(id)
+    }
+
+    pub fn add_child(&mut self, parent_id: u64, child_id: u64) -> bool {
+        if let Some(node) = self.nodes.get_mut(&parent_id) {
+            node.children.push(child_id);
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn get_node(&self, id: u64) -> Option<&ScriptNode> {
+        self.nodes.get(&id)
+    }
+
+    pub fn node_count(&self) -> usize {
+        self.nodes.len()
+    }
+
+    pub fn error_count(&self) -> usize {
+        self.parse_errors.len()
+    }
+}
+
+// =====================================================================================
+// 作业控制 (JobControl)
+// =====================================================================================
+
+/// 作业状态。
+#[derive=Clone, Copy, Debug, PartialEq, Eq)]
+pub enum JobStatus {
+    Running,
+    Stopped,
+    Completed,
+    Failed,
+}
+
+/// 作业：后台运行的任务。
+#[derive=Clone, Debug)]
+pub struct Job {
+    pub id: u64,
+    pub command: String,
+    pub status: JobStatus,
+    pub pid: u64,
+    pub start_time_ns: u128,
+    pub end_time_ns: Option<u128>,
+    pub output: String,
+}
+
+/// 作业控制器：管理后台作业。
+pub struct JobController {
+    pub jobs: BTreeMap<u64, Job>,
+    pub next_id: u64,
+    pub max_jobs: usize,
+}
+
+impl JobController {
+    pub fn new() -> Self {
+        Self {
+            jobs: BTreeMap::new(),
+            next_id: 1,
+            max_jobs: 100,
+        }
+    }
+
+    pub fn start_job(&mut self, command: String, pid: u64) -> u64 {
+        if self.jobs.len() >= self.max_jobs {
+            return 0;
+        }
+        let id = self.next_id;
+        self.next_id += 1;
+        self.jobs.insert(id, Job {
+            id,
+            command,
+            status: JobStatus::Running,
+            pid,
+            start_time_ns: crate::ai_os::native::now_ns(),
+            end_time_ns: None,
+            output: String::new(),
+        });
+        id
+    }
+
+    pub fn complete_job(&mut self, id: u64, output: String) -> bool {
+        if let Some(job) = self.jobs.get_mut(&id) {
+            job.status = JobStatus::Completed;
+            job.end_time_ns = Some(crate::ai_os::native::now_ns());
+            job.output = output;
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn fail_job(&mut self, id: u64, output: String) -> bool {
+        if let Some(job) = self.jobs.get_mut(&id) {
+            job.status = JobStatus::Failed;
+            job.end_time_ns = Some(crate::ai_os::native::now_ns());
+            job.output = output;
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn stop_job(&mut self, id: u64) -> bool {
+        if let Some(job) = self.jobs.get_mut(&id) {
+            job.status = JobStatus::Stopped;
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn get_job(&self, id: u64) -> Option<&Job> {
+        self.jobs.get(&id)
+    }
+
+    pub fn job_count(&self) -> usize {
+        self.jobs.len()
+    }
+
+    pub fn running_count(&self) -> usize {
+        self.jobs.values().filter(|j| j.status == JobStatus::Running).count()
+    }
+
+    pub fn completed_count(&self) -> usize {
+        self.jobs.values().filter(|j| j.status == JobStatus::Completed).count()
+    }
+}
+
+// =====================================================================================
+// 环境变量管理器 (EnvironmentManager)
+// =====================================================================================
+
+/// 环境变量作用域。
+#[derive=Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EnvScope {
+    Local,   // 局部
+    Global,  // 全局
+    Exported, // 导出
+}
+
+/// 环境变量条目。
+#[derive=Clone, Debug)]
+pub struct EnvVar {
+    pub name: String,
+    pub value: String,
+    pub scope: EnvScope,
+    pub set_at: u128,
+}
+
+/// 环境变量管理器。
+pub struct EnvironmentManager {
+    pub variables: BTreeMap<String, EnvVar>,
+    pub next_id: u64,
+}
+
+impl EnvironmentManager {
+    pub fn new() -> Self {
+        let mut vars = BTreeMap::new();
+        vars.insert("PATH".to_string(), EnvVar {
+            name: "PATH".to_string(),
+            value: "/bin:/usr/bin".to_string(),
+            scope: EnvScope::Exported,
+            set_at: 0,
+        });
+        vars.insert("HOME".to_string(), EnvVar {
+            name: "HOME".to_string(),
+            value: "/root".to_string(),
+            scope: EnvScope::Exported,
+            set_at: 0,
+        });
+        vars.insert("SHELL".to_string(), EnvVar {
+            name: "SHELL".to_string(),
+            value: "/bin/hibos".to_string(),
+            scope: EnvScope::Exported,
+            set_at: 0,
+        });
+        Self {
+            variables: vars,
+            next_id: 1,
+        }
+    }
+
+    pub fn set_var(&mut self, name: &str, value: &str, scope: EnvScope) {
+        self.variables.insert(name.to_string(), EnvVar {
+            name: name.to_string(),
+            value: value.to_string(),
+            scope,
+            set_at: crate::ai_os::native::now_ns(),
+        });
+    }
+
+    pub fn get_var(&self, name: &str) -> Option<&String> {
+        self.variables.get(name).map(|v| &v.value)
+    }
+
+    pub fn unset_var(&mut self, name: &str) -> bool {
+        self.variables.remove(name).is_some()
+    }
+
+    pub fn export_var(&mut self, name: &str) -> bool {
+        if let Some(var) = self.variables.get_mut(name) {
+            var.scope = EnvScope::Exported;
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn variable_count(&self) -> usize {
+        self.variables.len()
+    }
+
+    pub fn exported_count(&self) -> usize {
+        self.variables.values().filter(|v| v.scope == EnvScope::Exported).count()
+    }
+}
+
+// =====================================================================================
+// 命令别名 (CommandAlias)
+// =====================================================================================
+
+/// 别名条目。
+#[derive=Clone, Debug)]
+pub struct AliasEntry {
+    pub name: String,
+    pub expansion: String,
+    pub created_at: u128,
+}
+
+/// 别名管理器。
+pub struct AliasManager {
+    pub aliases: BTreeMap<String, AliasEntry>,
+    pub next_id: u64,
+    pub expansion_count: u64,
+}
+
+impl AliasManager {
+    pub fn new() -> Self {
+        Self {
+            aliases: BTreeMap::new(),
+            next_id: 1,
+            expansion_count: 0,
+        }
+    }
+
+    pub fn define(&mut self, name: &str, expansion: &str) {
+        self.aliases.insert(name.to_string(), AliasEntry {
+            name: name.to_string(),
+            expansion: expansion.to_string(),
+            created_at: crate::ai_os::native::now_ns(),
+        });
+    }
+
+    pub fn expand(&mut self, name: &str) -> Option<String> {
+        if let Some(entry) = self.aliases.get(name) {
+            self.expansion_count += 1;
+            Some(entry.expansion.clone())
+        } else {
+            None
+        }
+    }
+
+    pub fn undefine(&mut self, name: &str) -> bool {
+        self.aliases.remove(name).is_some()
+    }
+
+    pub fn alias_count(&self) -> usize {
+        self.aliases.len()
+    }
+}
+
+// =====================================================================================
+// 命令历史 (CommandHistoryEx)
+// =====================================================================================
+
+/// 命令历史条目。
+#[derive=Clone, Debug)]
+pub struct HistoryEntryEx {
+    pub id: u64,
+    pub command: String,
+    pub timestamp_ns: u128,
+    pub exit_code: i32,
+    pub duration_ns: u128,
+}
+
+/// 命令历史管理器。
+pub struct CommandHistoryEx {
+    pub entries: VecDeque<HistoryEntryEx>,
+    pub next_id: u64,
+    pub max_entries: usize,
+}
+
+impl CommandHistoryEx {
+    pub fn new() -> Self {
+        Self {
+            entries: VecDeque::new(),
+            next_id: 1,
+            max_entries: 10000,
+        }
+    }
+
+    pub fn add(&mut self, command: &str, exit_code: i32, duration_ns: u128) -> u64 {
+        let id = self.next_id;
+        self.next_id += 1;
+        self.entries.push_back(HistoryEntryEx {
+            id,
+            command: command.to_string(),
+            timestamp_ns: crate::ai_os::native::now_ns(),
+            exit_code,
+            duration_ns,
+        });
+        if self.entries.len() > self.max_entries {
+            self.entries.pop_front();
+        }
+        id
+    }
+
+    pub fn search(&self, query: &str, limit: usize) -> Vec<&HistoryEntryEx> {
+        self.entries.iter()
+            .filter(|e| e.command.contains(query))
+            .take(limit)
+            .collect()
+    }
+
+    pub fn recent(&self, count: usize) -> Vec<&HistoryEntryEx> {
+        self.entries.iter().rev().take(count).collect()
+    }
+
+    pub fn entry_count(&self) -> usize {
+        self.entries.len()
+    }
+
+    pub fn average_duration(&self) -> u128 {
+        if self.entries.is_empty() {
+            0
+        } else {
+            self.entries.iter().map(|e| e.duration_ns).sum::<u128>() / self.entries.len() as u128
+        }
+    }
+}
+
+// =====================================================================================
+// Shell 扩展引擎 (ShellExtensionEngine) —— 统一入口
+// =====================================================================================
+
+/// Shell 扩展引擎：整合脚本解析、作业控制、环境变量、别名、命令历史。
+pub struct ShellExtensionEngine {
+    pub parser: ScriptParser,
+    pub job_control: JobController,
+    pub env_manager: EnvironmentManager,
+    pub alias_manager: AliasManager,
+    pub history: CommandHistoryEx,
+    pub enabled: bool,
+    pub total_commands: u64,
+}
+
+impl ShellExtensionEngine {
+    pub fn new() -> Self {
+        Self {
+            parser: ScriptParser::new(),
+            job_control: JobController::new(),
+            env_manager: EnvironmentManager::new(),
+            alias_manager: AliasManager::new(),
+            history: CommandHistoryEx::new(),
+            enabled: true,
+            total_commands: 0,
+        }
+    }
+
+    pub fn parse_script_line(&mut self, line: &str, line_number: u32) -> Option<u64> {
+        let id = self.parser.parse_line(line, line_number);
+        if id.is_some() {
+            self.total_commands += 1;
+        }
+        id
+    }
+
+    pub fn start_background_job(&mut self, command: String, pid: u64) -> u64 {
+        let id = self.job_control.start_job(command, pid);
+        self.total_commands += 1;
+        id
+    }
+
+    pub fn complete_job(&mut self, id: u64, output: String) -> bool {
+        self.job_control.complete_job(id, output)
+    }
+
+    pub fn set_env_var(&mut self, name: &str, value: &str, scope: EnvScope) {
+        self.env_manager.set_var(name, value, scope);
+    }
+
+    pub fn get_env_var(&self, name: &str) -> Option<String> {
+        self.env_manager.get_var(name).cloned()
+    }
+
+    pub fn unset_env_var(&mut self, name: &str) -> bool {
+        self.env_manager.unset_var(name)
+    }
+
+    pub fn define_alias(&mut self, name: &str, expansion: &str) {
+        self.alias_manager.define(name, expansion);
+    }
+
+    pub fn expand_alias(&mut self, name: &str) -> Option<String> {
+        self.alias_manager.expand(name)
+    }
+
+    pub fn add_history(&mut self, command: &str, exit_code: i32, duration_ns: u128) -> u64 {
+        let id = self.history.add(command, exit_code, duration_ns);
+        self.total_commands += 1;
+        id
+    }
+
+    pub fn search_history(&self, query: &str, limit: usize) -> Vec<&HistoryEntryEx> {
+        self.history.search(query, limit)
+    }
+
+    pub fn tick(&mut self) {
+        // 周期性维护
+        let _ = self.job_control.job_count();
+        let _ = self.history.entry_count();
+    }
+
+    pub fn command_count(&self) -> u64 {
+        self.total_commands
+    }
+
+    pub fn stats(&self) -> String {
+        format!(
+            "shell_ext: commands={} scripts={} jobs={} running={} env_vars={} aliases={} history={}",
+            self.total_commands,
+            self.parser.node_count(),
+            self.job_control.job_count(),
+            self.job_control.running_count(),
+            self.env_manager.variable_count(),
+            self.alias_manager.alias_count(),
+            self.history.entry_count()
+        )
+    }
+}
+
+impl Default for ShellExtensionEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// =====================================================================================
+// 全局单例
+// =====================================================================================
+
+static SHELL_EXT: OnceLock<Mutex<ShellExtensionEngine>> = OnceLock::new();
+
+pub fn shell_extension_engine() -> &'static Mutex<ShellExtensionEngine> {
+    SHELL_EXT.get_or_init(|| Mutex::new(ShellExtensionEngine::new()))
+}
+
+// =====================================================================================
+// 初始化
+// =====================================================================================
+
+pub fn init() {
+    let _ = shell_extension_engine();
+}
+
+// =====================================================================================
+// 状态摘要
+// =====================================================================================
+
+pub fn status() -> String {
+    let eng = shell_extension_engine().lock().unwrap();
+    eng.stats()
+}
+
+pub fn shell_extension_status() -> String {
+    status()
+}
+
+// =====================================================================================
+// act 接口
+// =====================================================================================
+
+pub fn shell_extension_act(payload: &str) -> Result<String, String> {
+    let mut it = payload.split_whitespace();
+    match it.next() {
+        Some("parse-line") => {
+            let line: String = it.collect::<Vec<&str>>().join(" ");
+            if line.is_empty() {
+                return Err("缺少脚本行".into());
+            }
+            let mut eng = shell_extension_engine().lock().unwrap();
+            let id = eng.parse_script_line(&line, 1);
+            match id {
+                Some(id) => Ok(format!("已解析脚本行 节点id={}", id)),
+                None => Ok("无法解析".into()),
+            }
+        }
+        Some("start-job") => {
+            let command: String = it.collect::<Vec<&str>>().join(" ");
+            if command.is_empty() {
+                return Err("缺少命令".into());
+            }
+            let mut eng = shell_extension_engine().lock().unwrap();
+            let id = eng.start_background_job(command, 1000);
+            Ok(format!("已启动后台作业 id={}", id))
+        }
+        Some("complete-job") => {
+            let id = it.next().and_then(|s| s.parse::<u64>().ok()).ok_or("缺少作业id")?;
+            let output: String = it.collect::<Vec<&str>>().join(" ");
+            let mut eng = shell_extension_engine().lock().unwrap();
+            if eng.complete_job(id, output) {
+                Ok(format!("作业 {} 已完成", id))
+            } else {
+                Err(format!("作业 {} 不存在", id))
+            }
+        }
+        Some("set-env") => {
+            let name = it.next().ok_or("缺少变量名")?;
+            let value = it.next().ok_or("缺少值")?;
+            let scope_str = it.next().unwrap_or("exported");
+            let scope = match scope_str {
+                "local" => EnvScope::Local,
+                "global" => EnvScope::Global,
+                "exported" => EnvScope::Exported,
+                _ => EnvScope::Exported,
+            };
+            let mut eng = shell_extension_engine().lock().unwrap();
+            eng.set_env_var(name, value, scope);
+            Ok(format!("已设置环境变量 {}={}", name, value))
+        }
+        Some("get-env") => {
+            let name = it.next().ok_or("缺少变量名")?;
+            let eng = shell_extension_engine().lock().unwrap();
+            match eng.get_env_var(name) {
+                Some(v) => Ok(format!("{}={}", name, v)),
+                None => Err(format!("环境变量 {} 未定义", name)),
+            }
+        }
+        Some("unset-env") => {
+            let name = it.next().ok_or("缺少变量名")?;
+            let mut eng = shell_extension_engine().lock().unwrap();
+            if eng.unset_env_var(name) {
+                Ok(format!("已取消环境变量 {}", name))
+            } else {
+                Err(format!("环境变量 {} 未定义", name))
+            }
+        }
+        Some("define-alias") => {
+            let name = it.next().ok_or("缺少别名")?;
+            let expansion: String = it.collect::<Vec<&str>>().join(" ");
+            if expansion.is_empty() {
+                return Err("缺少展开内容".into());
+            }
+            let mut eng = shell_extension_engine().lock().unwrap();
+            eng.define_alias(name, &expansion);
+            Ok(format!("已定义别名 {}={}", name, expansion))
+        }
+        Some("expand-alias") => {
+            let name = it.next().ok_or("缺少别名")?;
+            let mut eng = shell_extension_engine().lock().unwrap();
+            match eng.expand_alias(name) {
+                Some(exp) => Ok(format!("别名 {} 展开为 {}", name, exp)),
+                None => Err(format!("别名 {} 未定义", name)),
+            }
+        }
+        Some("add-history") => {
+            let command: String = it.collect::<Vec<&str>>().join(" ");
+            if command.is_empty() {
+                return Err("缺少命令".into());
+            }
+            let mut eng = shell_extension_engine().lock().unwrap();
+            let id = eng.add_history(&command, 0, 1_000_000);
+            Ok(format!("已添加命令历史 id={}", id))
+        }
+        Some("search-history") => {
+            let query = it.next().ok_or("缺少查询")?;
+            let limit = it.next().and_then(|s| s.parse::<usize>().ok()).unwrap_or(10);
+            let eng = shell_extension_engine().lock().unwrap();
+            let results = eng.search_history(query, limit);
+            let mut out = String::from("命令历史搜索:\n");
+            for e in results {
+                out.push_str(&format!("  id={} 命令={} 退出码={}\n", e.id, e.command, e.exit_code));
+            }
+            Ok(out)
+        }
+        Some("tick") => {
+            let mut eng = shell_extension_engine().lock().unwrap();
+            eng.tick();
+            Ok("Shell 引擎已推进".into())
+        }
+        Some("status") | None => Ok(status()),
+        Some(other) => Err(format!("未知 shell_extension 动作: {}", other)),
+    }
+}
+
+pub fn shell_extension_act_dispatch(payload: &str) -> Result<String, String> {
+    shell_extension_act(payload)
+}
+
+// =====================================================================================
+// Shell 扩展测试
+// =====================================================================================
+
+#[cfg(test)]
+mod shell_extension_tests {
+    use super::*;
+
+    #[test]
+    fn script_parser() {
+        let mut parser = ScriptParser::new();
+        let id = parser.parse_line("echo hello world", 1).unwrap();
+        assert_eq!(id, 1);
+        let node = parser.get_node(id).unwrap();
+        assert_eq!(node.command_type, ScriptCommandType::Echo);
+        assert_eq!(parser.node_count(), 1);
+    }
+
+    #[test]
+    fn script_parser_assignment() {
+        let mut parser = ScriptParser::new();
+        let id = parser.parse_line("VAR=value", 1).unwrap();
+        let node = parser.get_node(id).unwrap();
+        assert_eq!(node.command_type, ScriptCommandType::Assignment);
+    }
+
+    #[test]
+    fn script_parser_comment() {
+        let mut parser = ScriptParser::new();
+        let id = parser.parse_line("# 注释", 1).unwrap();
+        let node = parser.get_node(id).unwrap();
+        assert_eq!(node.command_type, ScriptCommandType::Comment);
+    }
+
+    #[test]
+    fn script_parser_add_child() {
+        let mut parser = ScriptParser::new();
+        let root = parser.parse_line("if condition", 1).unwrap();
+        let child = parser.parse_line("then command", 2).unwrap();
+        parser.add_child(root, child).unwrap();
+        let node = parser.get_node(root).unwrap();
+        assert_eq!(node.children.len(), 1);
+        assert_eq!(node.children[0], child);
+    }
+
+    #[test]
+    fn job_control() {
+        let mut jc = JobController::new();
+        let id = jc.start_job("ls -la".into(), 100);
+        assert_eq!(id, 1);
+        assert_eq!(jc.job_count(), 1);
+        assert_eq!(jc.running_count(), 1);
+        jc.complete_job(id, "output".into()).unwrap();
+        assert_eq!(jc.completed_count(), 1);
+        assert_eq!(jc.running_count(), 0);
+    }
+
+    #[test]
+    fn job_control_fail() {
+        let mut jc = JobController::new();
+        let id = jc.start_job("bad".into(), 100);
+        jc.fail_job(id, "error".into()).unwrap();
+        let job = jc.get_job(id).unwrap();
+        assert_eq!(job.status, JobStatus::Failed);
+    }
+
+    #[test]
+    fn job_control_stop() {
+        let mut jc = JobController::new();
+        let id = jc.start_job("long".into(), 100);
+        jc.stop_job(id).unwrap();
+        let job = jc.get_job(id).unwrap();
+        assert_eq!(job.status, JobStatus::Stopped);
+    }
+
+    #[test]
+    fn environment_manager() {
+        let mut env = EnvironmentManager::new();
+        assert!(env.get_var("HOME").is_some());
+        env.set_var("FOO", "bar", EnvScope::Local);
+        assert_eq!(env.get_var("FOO"), Some(&"bar".to_string()));
+        env.export_var("FOO").unwrap();
+        assert_eq!(env.variable_count(), 4);
+        assert_eq!(env.exported_count(), 4);
+        env.unset_var("FOO").unwrap();
+        assert!(env.get_var("FOO").is_none());
+    }
+
+    #[test]
+    fn alias_manager() {
+        let mut am = AliasManager::new();
+        am.define("ll", "ls -la");
+        assert_eq!(am.expand("ll"), Some("ls -la".to_string()));
+        assert_eq!(am.expand("nonexistent"), None);
+        assert_eq!(am.expansion_count(), 1);
+        am.undefine("ll").unwrap();
+        assert!(am.expand("ll").is_none());
+        assert_eq!(am.alias_count(), 0);
+    }
+
+    #[test]
+    fn command_history() {
+        let mut ch = CommandHistoryEx::new();
+        let id = ch.add("ls -la", 0, 5_000_000);
+        assert_eq!(id, 1);
+        assert_eq!(ch.entry_count(), 1);
+        let results = ch.search("ls", 5);
+        assert_eq!(results.len(), 1);
+        let recent = ch.recent(5);
+        assert_eq!(recent.len(), 1);
+        assert!((ch.average_duration() - 5_000_000).abs() < 1e-6);
+    }
+
+    #[test]
+    fn shell_extension_engine() {
+        let mut eng = ShellExtensionEngine::new();
+        eng.parse_script_line("echo hello", 1).unwrap();
+        eng.start_background_job("long running".into(), 100).unwrap();
+        eng.set_env_var("TEST", "value", EnvScope::Local);
+        eng.define_alias("ll", "ls -la");
+        eng.add_history("ls", 0, 1_000_000).unwrap();
+        eng.tick();
+        assert_eq!(eng.command_count(), 5);
+    }
+
+    #[test]
+    fn shell_extension_act() {
+        init();
+        let res = shell_extension_act("parse-line echo hello world").unwrap();
+        assert!(res.contains("已解析脚本行"));
+    }
+
+    #[test]
+    fn shell_extension_act_start_job() {
+        init();
+        let res = shell_extension_act("start-job long running command").unwrap();
+        assert!(res.contains("已启动后台作业"));
+    }
+
+    #[test]
+    fn shell_extension_act_env() {
+        init();
+        let res = shell_extension_act("set-env FOO bar exported").unwrap();
+        assert!(res.contains("已设置环境变量"));
+        let res = shell_extension_act("get-env FOO").unwrap();
+        assert!(res.contains("FOO=bar"));
+    }
+
+    #[test]
+    fn shell_extension_act_alias() {
+        init();
+        let res = shell_extension_act("define-alias ll ls -la").unwrap();
+        assert!(res.contains("已定义别名"));
+        let res = shell_extension_act("expand-alias ll").unwrap();
+        assert!(res.contains("ls -la"));
+    }
+
+    #[test]
+    fn shell_extension_act_history() {
+        init();
+        shell_extension_act("add-history ls -la").unwrap();
+        let res = shell_extension_act("search-history ls").unwrap();
+        assert!(res.contains("命令历史搜索"));
+    }
+
+    #[test]
+    fn shell_extension_act_status() {
+        init();
+        let res = shell_extension_act("status").unwrap();
+        assert!(res.contains("shell_ext:"));
+    }
+
+    #[test]
+    fn script_command_types() {
+        assert_eq!(ScriptCommandType::Assignment as u32, 0);
+        assert_eq!(ScriptCommandType::Source as u32, 11);
+    }
+
+    #[test]
+    fn job_statuses() {
+        assert_eq!(JobStatus::Running as u32, 0);
+        assert_eq!(JobStatus::Failed as u32, 3);
+    }
+
+    #[test]
+    fn env_scopes() {
+        assert_eq!(EnvScope::Local as u32, 0);
+        assert_eq!(EnvScope::Exported as u32, 2);
+    }
+}

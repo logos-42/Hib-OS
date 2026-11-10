@@ -2512,3 +2512,1173 @@ mod advanced_tests {
         assert_eq!(CalibrationMethod::MSE as u32, 3);
     }
 }
+
+// =====================================================================================
+// 模型推理服务引擎 (ModelInferenceServer)
+// =====================================================================================
+
+/// 推理请求。
+#[derive(Clone, Debug)]
+pub struct InferenceRequest {
+    pub id: u64,
+    pub model_name: String,
+    pub instance_id: InstanceId,
+    pub input_tokens: Vec<u32>,
+    pub max_new_tokens: u64,
+    pub temperature: f32,
+    pub top_p: f32,
+    pub top_k: u32,
+    pub priority: u32,
+    pub submitted_at: u128,
+    pub callback: Option<String>,
+}
+
+/// 推理响应。
+#[derive(Clone, Debug)]
+pub struct InferenceResponse {
+    pub request_id: u64,
+    pub output_tokens: Vec<u32>,
+    pub generated_text: String,
+    pub tokens_generated: u64,
+    pub prefill_time_ns: u128,
+    pub decode_time_ns: u128,
+    pub total_time_ns: u128,
+    pub status: InferenceStatus,
+}
+
+/// 推理状态。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum InferenceStatus {
+    Pending,
+    Processing,
+    Completed,
+    Failed,
+    Cancelled,
+}
+
+/// 推理服务器：管理模型推理请求队列和执行。
+pub struct InferenceServer {
+    pub request_queue: VecDeque<InferenceRequest>,
+    pub processing: BTreeMap<u64, InferenceRequest>,
+    pub completed: BTreeMap<u64, InferenceResponse>,
+    pub next_id: u64,
+    pub max_concurrent: u64,
+    pub total_requests: u64,
+    pub completed_count: u64,
+    pub failed_count: u64,
+    pub avg_latency_ns: u128,
+}
+
+impl InferenceServer {
+    pub fn new() -> Self {
+        Self {
+            request_queue: VecDeque::new(),
+            processing: BTreeMap::new(),
+            completed: BTreeMap::new(),
+            next_id: 1,
+            max_concurrent: 8,
+            total_requests: 0,
+            completed_count: 0,
+            failed_count: 0,
+            avg_latency_ns: 0,
+        }
+    }
+
+    pub fn submit(&mut self, model_name: &str, instance_id: InstanceId, input: Vec<u32>, max_new: u64, temp: f32, top_p: f32, top_k: u32, priority: u32) -> u64 {
+        let id = self.next_id;
+        self.next_id += 1;
+        let req = InferenceRequest {
+            id,
+            model_name: model_name.to_string(),
+            instance_id,
+            input_tokens: input,
+            max_new_tokens: max_new,
+            temperature: temp,
+            top_p,
+            top_k,
+            priority,
+            submitted_at: crate::ai_os::native::now_ns(),
+            callback: None,
+        };
+        self.total_requests += 1;
+        let pos = self.request_queue.iter().position(|r| r.priority < priority).unwrap_or(self.request_queue.len());
+        self.request_queue.insert(pos, req);
+        id
+    }
+
+    pub fn start_processing(&mut self) -> Vec<u64> {
+        let mut started = Vec::new();
+        while self.processing.len() < self.max_concurrent as usize {
+            if let Some(req) = self.request_queue.pop_front() {
+                let id = req.id;
+                self.processing.insert(id, req);
+                started.push(id);
+            } else {
+                break;
+            }
+        }
+        started
+    }
+
+    pub fn complete(&mut self, request_id: u64, response: InferenceResponse) -> bool {
+        if let Some(_req) = self.processing.remove(&request_id) {
+            let total = response.total_time_ns;
+            self.completed.insert(request_id, response);
+            self.completed_count += 1;
+            self.avg_latency_ns = (self.avg_latency_ns * (self.completed_count - 1) + total) / self.completed_count;
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn fail(&mut self, request_id: u64, _error: &str) -> bool {
+        if self.processing.remove(&request_id).is_some() {
+            self.failed_count += 1;
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn get_response(&self, request_id: u64) -> Option<&InferenceResponse> {
+        self.completed.get(&request_id)
+    }
+
+    pub fn queue_len(&self) -> usize {
+        self.request_queue.len()
+    }
+
+    pub fn processing_count(&self) -> usize {
+        self.processing.len()
+    }
+
+    pub fn stats(&self) -> String {
+        format!(
+            "inference: total={} completed={} failed={} queue={} processing={} avg_latency={}ns",
+            self.total_requests, self.completed_count, self.failed_count, self.queue_len(), self.processing_count(), self.avg_latency_ns
+        )
+    }
+}
+
+impl Default for InferenceServer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// =====================================================================================
+// 批处理引擎 (BatchProcessor)
+// =====================================================================================
+
+/// 批处理策略。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BatchStrategy {
+    Fixed,
+    Dynamic,
+    Adaptive,
+}
+
+/// 批次。
+#[derive(Clone, Debug)]
+pub struct Batch {
+    pub id: u64,
+    pub requests: Vec<u64>,
+    pub total_tokens: u64,
+    pub created_at: u128,
+    pub completed_at: Option<u128>,
+}
+
+/// 批处理引擎：将多个推理请求合并为批次以提高吞吐。
+pub struct BatchProcessor {
+    pub strategy: BatchStrategy,
+    pub max_batch_size: usize,
+    pub max_wait_ns: u128,
+    pub batches: BTreeMap<u64, Batch>,
+    pub next_batch_id: u64,
+    pub total_batches: u64,
+    pub avg_batch_size: f32,
+}
+
+impl BatchProcessor {
+    pub fn new() -> Self {
+        Self {
+            strategy: BatchStrategy::Dynamic,
+            max_batch_size: 32,
+            max_wait_ns: 10_000_000,
+            batches: BTreeMap::new(),
+            next_batch_id: 1,
+            total_batches: 0,
+            avg_batch_size: 0.0,
+        }
+    }
+
+    pub fn set_strategy(&mut self, strategy: BatchStrategy) {
+        self.strategy = strategy;
+    }
+
+    pub fn set_max_batch_size(&mut self, size: usize) {
+        self.max_batch_size = size;
+    }
+
+    pub fn create_batch(&mut self, request_ids: Vec<u64>, total_tokens: u64) -> u64 {
+        let id = self.next_batch_id;
+        self.next_batch_id += 1;
+        let batch = Batch {
+            id,
+            requests: request_ids.clone(),
+            total_tokens,
+            created_at: crate::ai_os::native::now_ns(),
+            completed_at: None,
+        };
+        self.total_batches += 1;
+        let count = request_ids.len() as f32;
+        self.avg_batch_size = (self.avg_batch_size * (self.total_batches - 1) as f32 + count) / self.total_batches as f32;
+        self.batches.insert(id, batch);
+        id
+    }
+
+    pub fn complete_batch(&mut self, batch_id: u64) -> bool {
+        if let Some(batch) = self.batches.get_mut(&batch_id) {
+            batch.completed_at = Some(crate::ai_os::native::now_ns());
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn get_batch(&self, batch_id: u64) -> Option<&Batch> {
+        self.batches.get(&batch_id)
+    }
+
+    pub fn batch_count(&self) -> usize {
+        self.batches.len()
+    }
+
+    pub fn can_batch(&self, current_size: usize) -> bool {
+        current_size < self.max_batch_size
+    }
+}
+
+impl Default for BatchProcessor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// =====================================================================================
+// 响应缓存 (ResponseCache)
+// =====================================================================================
+
+/// 缓存条目。
+#[derive(Clone, Debug)]
+pub struct CacheEntry {
+    pub key: String,
+    pub response: InferenceResponse,
+    pub created_at: u128,
+    pub access_count: u64,
+    pub last_access: u128,
+    pub ttl_ns: Option<u128>,
+}
+
+/// 响应缓存：缓存常见推理结果以减少重复计算。
+pub struct ResponseCache {
+    pub entries: BTreeMap<String, CacheEntry>,
+    pub max_size: usize,
+    pub hits: u64,
+    pub misses: u64,
+    pub evictions: u64,
+}
+
+impl ResponseCache {
+    pub fn new() -> Self {
+        Self {
+            entries: BTreeMap::new(),
+            max_size: 10000,
+            hits: 0,
+            misses: 0,
+            evictions: 0,
+        }
+    }
+
+    pub fn set_max_size(&mut self, size: usize) {
+        self.max_size = size;
+    }
+
+    pub fn get(&mut self, key: &str) -> Option<InferenceResponse> {
+        if let Some(entry) = self.entries.get_mut(key) {
+            if let Some(ttl) = entry.ttl_ns {
+                let now = crate::ai_os::native::now_ns();
+                if now - entry.created_at > ttl {
+                    self.entries.remove(key);
+                    self.evictions += 1;
+                    self.misses += 1;
+                    return None;
+                }
+            }
+            entry.access_count += 1;
+            entry.last_access = crate::ai_os::native::now_ns();
+            self.hits += 1;
+            Some(entry.response.clone())
+        } else {
+            self.misses += 1;
+            None
+        }
+    }
+
+    pub fn put(&mut self, key: &str, response: InferenceResponse, ttl_ns: Option<u128>) {
+        if self.entries.len() >= self.max_size {
+            if let Some((oldest_key, _)) = self.entries.iter()
+                .min_by_key(|(_, e)| e.last_access)
+                .map(|(k, _)| k.clone()) {
+                self.entries.remove(&oldest_key);
+                self.evictions += 1;
+            }
+        }
+        self.entries.insert(key.to_string(), CacheEntry {
+            key: key.to_string(),
+            response,
+            created_at: crate::ai_os::native::now_ns(),
+            access_count: 1,
+            last_access: crate::ai_os::native::now_ns(),
+            ttl_ns,
+        });
+    }
+
+    pub fn remove(&mut self, key: &str) -> bool {
+        self.entries.remove(key).is_some()
+    }
+
+    pub fn entry_count(&self) -> usize {
+        self.entries.len()
+    }
+
+    pub fn hit_rate(&self) -> f32 {
+        let total = self.hits + self.misses;
+        if total == 0 {
+            0.0
+        } else {
+            self.hits as f32 / total as f32
+        }
+    }
+}
+
+impl Default for ResponseCache {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// =====================================================================================
+// 指标采集 (MetricsCollector)
+// =====================================================================================
+
+/// 指标类型。
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum MetricType {
+    Counter,
+    Gauge,
+    Histogram,
+    Summary,
+}
+
+/// 指标点。
+#[derive(Clone, Debug)]
+pub struct MetricPoint {
+    pub name: String,
+    pub metric_type: MetricType,
+    pub value: f64,
+    pub labels: BTreeMap<String, String>,
+    pub timestamp_ns: u128,
+}
+
+/// 指标采集器：收集模型服务各项指标。
+pub struct MetricsCollector {
+    pub metrics: BTreeMap<String, Vec<MetricPoint>>,
+    pub counters: BTreeMap<String, f64>,
+    pub gauges: BTreeMap<String, f64>,
+    pub total_points: u64,
+}
+
+impl MetricsCollector {
+    pub fn new() -> Self {
+        Self {
+            metrics: BTreeMap::new(),
+            counters: BTreeMap::new(),
+            gauges: BTreeMap::new(),
+            total_points: 0,
+        }
+    }
+
+    pub fn increment_counter(&mut self, name: &str, value: f64, labels: &[(&str, &str)]) {
+        let entry = self.counters.entry(name.to_string()).or_insert(0.0);
+        *entry += value;
+        let point = MetricPoint {
+            name: name.to_string(),
+            metric_type: MetricType::Counter,
+            value: *entry,
+            labels: labels.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
+            timestamp_ns: crate::ai_os::native::now_ns(),
+        };
+        self.metrics.entry(name.to_string()).or_default().push(point);
+        self.total_points += 1;
+    }
+
+    pub fn set_gauge(&mut self, name: &str, value: f64, labels: &[(&str, &str)]) {
+        self.gauges.insert(name.to_string(), value);
+        let point = MetricPoint {
+            name: name.to_string(),
+            metric_type: MetricType::Gauge,
+            value,
+            labels: labels.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
+            timestamp_ns: crate::ai_os::native::now_ns(),
+        };
+        self.metrics.entry(name.to_string()).or_default().push(point);
+        self.total_points += 1;
+    }
+
+    pub fn observe_histogram(&mut self, name: &str, value: f64, labels: &[(&str, &str)]) {
+        let point = MetricPoint {
+            name: name.to_string(),
+            metric_type: MetricType::Histogram,
+            value,
+            labels: labels.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
+            timestamp_ns: crate::ai_os::native::now_ns(),
+        };
+        self.metrics.entry(name.to_string()).or_default().push(point);
+        self.total_points += 1;
+    }
+
+    pub fn get_counter(&self, name: &str) -> f64 {
+        self.counters.get(name).copied().unwrap_or(0.0)
+    }
+
+    pub fn get_gauge(&self, name: &str) -> f64 {
+        self.gauges.get(name).copied().unwrap_or(0.0)
+    }
+
+    pub fn metric_count(&self) -> usize {
+        self.metrics.len()
+    }
+
+    pub fn total_point_count(&self) -> u64 {
+        self.total_points
+    }
+}
+
+impl Default for MetricsCollector {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// =====================================================================================
+// 负载均衡器 (LoadBalancer)
+// =====================================================================================
+
+/// 负载均衡策略。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LBStrategy {
+    RoundRobin,
+    LeastConn,
+    Random,
+    Weighted,
+}
+
+/// 后端实例。
+#[derive(Clone, Debug)]
+pub struct BackendInstance {
+    pub id: u64,
+    pub name: String,
+    pub endpoint: String,
+    pub weight: u32,
+    pub active_connections: u64,
+    pub total_requests: u64,
+    pub failed_requests: u64,
+    pub healthy: bool,
+}
+
+/// 负载均衡器：分发推理请求到多个模型实例。
+pub struct LoadBalancer {
+    pub strategy: LBStrategy,
+    pub instances: BTreeMap<u64, BackendInstance>,
+    pub next_id: u64,
+    pub rr_index: u64,
+    pub total_requests: u64,
+}
+
+impl LoadBalancer {
+    pub fn new() -> Self {
+        Self {
+            strategy: LBStrategy::RoundRobin,
+            instances: BTreeMap::new(),
+            next_id: 1,
+            rr_index: 0,
+            total_requests: 0,
+        }
+    }
+
+    pub fn set_strategy(&mut self, strategy: LBStrategy) {
+        self.strategy = strategy;
+    }
+
+    pub fn add_instance(&mut self, name: &str, endpoint: &str, weight: u32) -> u64 {
+        let id = self.next_id;
+        self.next_id += 1;
+        self.instances.insert(id, BackendInstance {
+            id,
+            name: name.to_string(),
+            endpoint: endpoint.to_string(),
+            weight,
+            active_connections: 0,
+            total_requests: 0,
+            failed_requests: 0,
+            healthy: true,
+        });
+        id
+    }
+
+    pub fn select(&mut self) -> Option<u64> {
+        let healthy: Vec<u64> = self.instances.iter()
+            .filter(|(_, inst)| inst.healthy)
+            .map(|(id, _)| *id)
+            .collect();
+        if healthy.is_empty() {
+            return None;
+        }
+        let selected = match self.strategy {
+            LBStrategy::RoundRobin => {
+                let idx = (self.rr_index % healthy.len() as u64) as usize;
+                self.rr_index += 1;
+                healthy[idx]
+            }
+            LBStrategy::LeastConn => {
+                healthy.into_iter()
+                    .min_by_key(|id| self.instances.get(id).map(|i| i.active_connections).unwrap_or(u64::MAX))
+                    .unwrap_or(healthy[0])
+            }
+            LBStrategy::Random => {
+                let idx = (fastrand_f32() * healthy.len() as f32) as usize;
+                healthy[idx.min(healthy.len() - 1)]
+            }
+            LBStrategy::Weighted => {
+                let total_weight: u32 = healthy.iter().filter_map(|id| self.instances.get(id).map(|i| i.weight)).sum();
+                let mut target = fastrand_f32() * total_weight as f32;
+                for id in &healthy {
+                    if let Some(inst) = self.instances.get(id) {
+                        target -= inst.weight as f32;
+                        if target <= 0.0 {
+                            return Some(*id);
+                        }
+                    }
+                }
+                healthy[0]
+            }
+        };
+        if let Some(inst) = self.instances.get_mut(&selected) {
+            inst.active_connections += 1;
+            inst.total_requests += 1;
+        }
+        self.total_requests += 1;
+        Some(selected)
+    }
+
+    pub fn release(&mut self, instance_id: u64) {
+        if let Some(inst) = self.instances.get_mut(&instance_id) {
+            inst.active_connections = inst.active_connections.saturating_sub(1);
+        }
+    }
+
+    pub fn mark_failed(&mut self, instance_id: u64) {
+        if let Some(inst) = self.instances.get_mut(&instance_id) {
+            inst.failed_requests += 1;
+            if inst.failed_requests > 5 {
+                inst.healthy = false;
+            }
+        }
+    }
+
+    pub fn mark_healthy(&mut self, instance_id: u64) {
+        if let Some(inst) = self.instances.get_mut(&instance_id) {
+            inst.healthy = true;
+            inst.failed_requests = 0;
+        }
+    }
+
+    pub fn instance_count(&self) -> usize {
+        self.instances.len()
+    }
+
+    pub fn healthy_count(&self) -> usize {
+        self.instances.values().filter(|i| i.healthy).count()
+    }
+}
+
+impl Default for LoadBalancer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// =====================================================================================
+// 模型服务引擎 (ModelServingEngine) —— 统一入口
+// =====================================================================================
+
+/// 模型服务引擎：整合推理服务器、批处理器、响应缓存、指标采集、负载均衡器。
+pub struct ModelServingEngine {
+    pub inference_server: InferenceServer,
+    pub batch_processor: BatchProcessor,
+    pub response_cache: ResponseCache,
+    pub metrics: MetricsCollector,
+    pub load_balancer: LoadBalancer,
+    pub enabled: bool,
+    pub total_requests: u64,
+}
+
+impl ModelServingEngine {
+    pub fn new() -> Self {
+        Self {
+            inference_server: InferenceServer::new(),
+            batch_processor: BatchProcessor::new(),
+            response_cache: ResponseCache::new(),
+            metrics: MetricsCollector::new(),
+            load_balancer: LoadBalancer::new(),
+            enabled: true,
+            total_requests: 0,
+        }
+    }
+
+    pub fn submit_inference(&mut self, model_name: &str, instance_id: InstanceId, input: Vec<u32>, max_new: u64, temp: f32, top_p: f32, top_k: u32, priority: u32) -> u64 {
+        let id = self.inference_server.submit(model_name, instance_id, input, max_new, temp, top_p, top_k, priority);
+        self.total_requests += 1;
+        self.metrics.increment_counter("model_requests_total", 1.0, &[("model", model_name)]);
+        id
+    }
+
+    pub fn process_batch(&mut self) -> Vec<u64> {
+        let started = self.inference_server.start_processing();
+        if !started.is_empty() {
+            let total_tokens: u64 = started.iter()
+                .filter_map(|id| self.inference_server.processing.get(id))
+                .map(|r| r.input_tokens.len() as u64 + r.max_new_tokens)
+                .sum();
+            self.batch_processor.create_batch(started.clone(), total_tokens);
+            self.metrics.increment_counter("model_batches_total", 1.0, &[]);
+        }
+        started
+    }
+
+    pub fn complete_inference(&mut self, request_id: u64, output_tokens: Vec<u32>, generated_text: String, prefill_ns: u128, decode_ns: u128) -> Result<(), String> {
+        let total = prefill_ns + decode_ns;
+        let response = InferenceResponse {
+            request_id,
+            output_tokens,
+            generated_text,
+            tokens_generated: output_tokens.len() as u64,
+            prefill_time_ns: prefill_ns,
+            decode_time_ns: decode_ns,
+            total_time_ns: total,
+            status: InferenceStatus::Completed,
+        };
+        let success = self.inference_server.complete(request_id, response.clone());
+        if success {
+            let cache_key = format!("req_{}", request_id);
+            self.response_cache.put(&cache_key, response, None);
+            self.metrics.observe_histogram("model_inference_latency_ns", total as f64, &[]);
+            Ok(())
+        } else {
+            Err("请求不存在".into())
+        }
+    }
+
+    pub fn fail_inference(&mut self, request_id: u64, error: &str) -> bool {
+        let result = self.inference_server.fail(request_id, error);
+        if result {
+            self.metrics.increment_counter("model_requests_failed_total", 1.0, &[]);
+        }
+        result
+    }
+
+    pub fn get_cached_response(&mut self, key: &str) -> Option<InferenceResponse> {
+        let result = self.response_cache.get(key);
+        if result.is_some() {
+            self.metrics.increment_counter("model_cache_hits_total", 1.0, &[]);
+        } else {
+            self.metrics.increment_counter("model_cache_misses_total", 1.0, &[]);
+        }
+        result
+    }
+
+    pub fn add_backend(&mut self, name: &str, endpoint: &str, weight: u32) -> u64 {
+        self.load_balancer.add_instance(name, endpoint, weight)
+    }
+
+    pub fn select_backend(&mut self) -> Option<u64> {
+        self.load_balancer.select()
+    }
+
+    pub fn release_backend(&mut self, instance_id: u64) {
+        self.load_balancer.release(instance_id);
+    }
+
+    pub fn tick(&mut self) {
+        let _ = self.inference_server.queue_len();
+        let _ = self.inference_server.processing_count();
+    }
+
+    pub fn stats(&self) -> String {
+        format!(
+            "serving: requests={} queue={} processing={} completed={} failed={} cache_hit={:.2} batches={} backends={} healthy={}",
+            self.total_requests,
+            self.inference_server.queue_len(),
+            self.inference_server.processing_count(),
+            self.inference_server.completed_count,
+            self.inference_server.failed_count,
+            self.response_cache.hit_rate(),
+            self.batch_processor.batch_count(),
+            self.load_balancer.instance_count(),
+            self.load_balancer.healthy_count()
+        )
+    }
+}
+
+impl Default for ModelServingEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// =====================================================================================
+// 全局单例
+// =====================================================================================
+
+static SERVING: OnceLock<Mutex<ModelServingEngine>> = OnceLock::new();
+
+pub fn model_serving_engine() -> &'static Mutex<ModelServingEngine> {
+    SERVING.get_or_init(|| Mutex::new(ModelServingEngine::new()))
+}
+
+// =====================================================================================
+// 初始化
+// =====================================================================================
+
+pub fn init() {
+    let _ = model_serving_engine();
+}
+
+// =====================================================================================
+// 状态摘要
+// =====================================================================================
+
+pub fn status() -> String {
+    let eng = model_serving_engine().lock().unwrap();
+    eng.stats()
+}
+
+pub fn serving_status() -> String {
+    status()
+}
+
+// =====================================================================================
+// act 接口
+// =====================================================================================
+
+pub fn serving_act(payload: &str) -> Result<String, String> {
+    let mut it = payload.split_whitespace();
+    match it.next() {
+        Some("submit") => {
+            let model = it.next().ok_or("用法: model_serving:// submit <model> <instance_id> <token...> [max_new] [temp] [top_p] [top_k] [priority]")?;
+            let instance_id = it.next().and_then(|s| s.parse::<u64>().ok()).map(InstanceId).unwrap_or(InstanceId(1));
+            let tokens: Vec<u32> = it.by_ref().filter_map(|s| s.parse::<u32>().ok()).collect();
+            if tokens.is_empty() {
+                return Err("缺少输入token".into());
+            }
+            let max_new = it.next().and_then(|s| s.parse::<u64>().ok()).unwrap_or(64);
+            let temp = it.next().and_then(|s| s.parse::<f32>().ok()).unwrap_or(0.7);
+            let top_p = it.next().and_then(|s| s.parse::<f32>().ok()).unwrap_or(0.9);
+            let top_k = it.next().and_then(|s| s.parse::<u32>().ok()).unwrap_or(40);
+            let priority = it.next().and_then(|s| s.parse::<u32>().ok()).unwrap_or(0);
+            let mut eng = model_serving_engine().lock().unwrap();
+            let id = eng.submit_inference(model, instance_id, tokens, max_new, temp, top_p, top_k, priority);
+            Ok(format!("已提交推理请求 id={} 模型={} 实例={} tokens={}", id, model, instance_id, tokens.len()))
+        }
+        Some("process") => {
+            let mut eng = model_serving_engine().lock().unwrap();
+            let started = eng.process_batch();
+            Ok(format!("已启动批处理 请求数={}", started.len()))
+        }
+        Some("complete") => {
+            let request_id = it.next().and_then(|s| s.parse::<u64>().ok()).ok_or("缺少请求id")?;
+            let tokens: Vec<u32> = it.filter_map(|s| s.parse::<u32>().ok()).collect();
+            let text: String = it.collect::<Vec<&str>>().join(" ");
+            let prefill = it.next().and_then(|s| s.parse::<u128>().ok()).unwrap_or(1_000_000);
+            let decode = it.next().and_then(|s| s.parse::<u128>().ok()).unwrap_or(5_000_000);
+            let mut eng = model_serving_engine().lock().unwrap();
+            eng.complete_inference(request_id, tokens, text, prefill, decode)
+        }
+        Some("fail") => {
+            let request_id = it.next().and_then(|s| s.parse::<u64>().ok()).ok_or("缺少请求id")?;
+            let error: String = it.collect::<Vec<&str>>().join(" ");
+            let mut eng = model_serving_engine().lock().unwrap();
+            if eng.fail_inference(request_id, &error) {
+                Ok(format!("请求 {} 标记为失败: {}", request_id, error))
+            } else {
+                Err(format!("请求 {} 不存在", request_id))
+            }
+        }
+        Some("cache") => {
+            let key = it.next().ok_or("用法: model_serving:// cache <key> [get|put]")?;
+            let op = it.next().unwrap_or("get");
+            match op {
+                "get" => {
+                    let mut eng = model_serving_engine().lock().unwrap();
+                    match eng.get_cached_response(key) {
+                        Some(resp) => Ok(format!("缓存命中 请求={} 生成tokens={}", resp.request_id, resp.tokens_generated)),
+                        None => Ok("缓存未命中".into()),
+                    }
+                }
+                "put" => Ok("缓存put需要完整响应数据".into()),
+                _ => Err("未知缓存操作".into()),
+            }
+        }
+        Some("backend") => {
+            let name = it.next().ok_or("缺少后端名称")?;
+            let endpoint = it.next().ok_or("缺少端点")?;
+            let weight = it.next().and_then(|s| s.parse::<u32>().ok()).unwrap_or(1);
+            let mut eng = model_serving_engine().lock().unwrap();
+            let id = eng.add_backend(name, endpoint, weight);
+            Ok(format!("已添加后端 id={} 名称={} 端点={}", id, name, endpoint))
+        }
+        Some("select-backend") => {
+            let mut eng = model_serving_engine().lock().unwrap();
+            match eng.select_backend() {
+                Some(id) => Ok(format!("已选择后端 id={}", id)),
+                None => Err("无可用后端".into()),
+            }
+        }
+        Some("release-backend") => {
+            let id = it.next().and_then(|s| s.parse::<u64>().ok()).ok_or("缺少后端id")?;
+            let mut eng = model_serving_engine().lock().unwrap();
+            eng.release_backend(id);
+            Ok(format!("已释放后端 id={}", id))
+        }
+        Some("tick") => {
+            let mut eng = model_serving_engine().lock().unwrap();
+            eng.tick();
+            Ok("服务引擎已推进".into())
+        }
+        Some("status") | None => Ok(status()),
+        Some(other) => Err(format!("未知 model_serving 动作: {}", other)),
+    }
+}
+
+pub fn serving_act_dispatch(payload: &str) -> Result<String, String> {
+    serving_act(payload)
+}
+
+// =====================================================================================
+// 模型服务扩展测试
+// =====================================================================================
+
+#[cfg(test)]
+mod serving_tests {
+    use super::*;
+
+    #[test]
+    fn inference_server_submit() {
+        let mut eng = InferenceServer::new();
+        let id = eng.submit("model-a", InstanceId(1), vec![1, 2, 3], 64, 0.7, 0.9, 40, 1);
+        assert_eq!(id, 1);
+        assert_eq!(eng.queue_len(), 1);
+    }
+
+    #[test]
+    fn inference_server_process() {
+        let mut eng = InferenceServer::new();
+        eng.submit("model-a", InstanceId(1), vec![1], 64, 0.7, 0.9, 40, 1);
+        eng.submit("model-a", InstanceId(1), vec![2], 64, 0.7, 0.9, 40, 1);
+        let started = eng.start_processing();
+        assert_eq!(started.len(), 2);
+        assert_eq!(eng.processing_count(), 2);
+        assert_eq!(eng.queue_len(), 0);
+    }
+
+    #[test]
+    fn inference_server_complete() {
+        let mut eng = InferenceServer::new();
+        let id = eng.submit("model-a", InstanceId(1), vec![1], 64, 0.7, 0.9, 40, 1);
+        eng.start_processing();
+        let resp = InferenceResponse {
+            request_id: id,
+            output_tokens: vec![4, 5, 6],
+            generated_text: "hello".into(),
+            tokens_generated: 3,
+            prefill_time_ns: 1_000_000,
+            decode_time_ns: 2_000_000,
+            total_time_ns: 3_000_000,
+            status: InferenceStatus::Completed,
+        };
+        assert!(eng.complete(id, resp));
+        assert_eq!(eng.completed_count, 1);
+    }
+
+    #[test]
+    fn inference_server_fail() {
+        let mut eng = InferenceServer::new();
+        let id = eng.submit("model-a", InstanceId(1), vec![1], 64, 0.7, 0.9, 40, 1);
+        eng.start_processing();
+        assert!(eng.fail(id, "timeout"));
+        assert_eq!(eng.failed_count, 1);
+    }
+
+    #[test]
+    fn batch_processor() {
+        let mut bp = BatchProcessor::new();
+        bp.set_max_batch_size(4);
+        let id = bp.create_batch(vec![1, 2, 3], 100);
+        assert_eq!(id, 1);
+        assert_eq!(bp.batch_count(), 1);
+        assert!(bp.complete_batch(id));
+    }
+
+    #[test]
+    fn batch_processor_dynamic() {
+        let mut bp = BatchProcessor::new();
+        bp.set_strategy(BatchStrategy::Dynamic);
+        bp.set_max_batch_size(2);
+        assert!(bp.can_batch(1));
+        assert!(!bp.can_batch(2));
+    }
+
+    #[test]
+    fn response_cache() {
+        let mut cache = ResponseCache::new();
+        let resp = InferenceResponse {
+            request_id: 1,
+            output_tokens: vec![1],
+            generated_text: "test".into(),
+            tokens_generated: 1,
+            prefill_time_ns: 0,
+            decode_time_ns: 0,
+            total_time_ns: 0,
+            status: InferenceStatus::Completed,
+        };
+        cache.put("key1", resp.clone(), None);
+        assert_eq!(cache.get("key1"), Some(resp));
+        assert_eq!(cache.entry_count(), 1);
+        assert!((cache.hit_rate() - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn response_cache_miss() {
+        let mut cache = ResponseCache::new();
+        assert!(cache.get("missing").is_none());
+        assert_eq!(cache.misses, 1);
+        assert!((cache.hit_rate() - 0.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn metrics_collector() {
+        let mut mc = MetricsCollector::new();
+        mc.increment_counter("requests", 1.0, &[("model", "a")]);
+        mc.increment_counter("requests", 1.0, &[("model", "a")]);
+        mc.set_gauge("latency", 50.0, &[]);
+        mc.observe_histogram("tokens", 100.0, &[]);
+        assert!((mc.get_counter("requests") - 2.0).abs() < 1e-6);
+        assert!((mc.get_gauge("latency") - 50.0).abs() < 1e-6);
+        assert_eq!(mc.metric_count(), 3);
+        assert_eq!(mc.total_point_count(), 4);
+    }
+
+    #[test]
+    fn load_balancer() {
+        let mut lb = LoadBalancer::new();
+        lb.add_instance("inst1", "host1:8080", 1);
+        lb.add_instance("inst2", "host2:8080", 1);
+        let sel1 = lb.select().unwrap();
+        let sel2 = lb.select().unwrap();
+        assert_ne!(sel1, sel2);
+        lb.release(sel1);
+        assert_eq!(lb.instance_count(), 2);
+        assert_eq!(lb.healthy_count(), 2);
+    }
+
+    #[test]
+    fn load_balancer_weighted() {
+        let mut lb = LoadBalancer::new();
+        lb.set_strategy(LBStrategy::Weighted);
+        lb.add_instance("heavy", "host1:8080", 10);
+        lb.add_instance("light", "host2:8080", 1);
+        let mut heavy_count = 0;
+        let mut light_count = 0;
+        for _ in 0..100 {
+            match lb.select() {
+                Some(id) => {
+                    if id == 1 { heavy_count += 1; }
+                    if id == 2 { light_count += 1; }
+                }
+                None => {}
+            }
+        }
+        assert!(heavy_count > light_count);
+    }
+
+    #[test]
+    fn serving_engine_full() {
+        let mut eng = ModelServingEngine::new();
+        let id = eng.submit_inference("model-a", InstanceId(1), vec![1, 2, 3], 64, 0.7, 0.9, 40, 1);
+        assert_eq!(id, 1);
+        let started = eng.process_batch();
+        assert!(!started.is_empty());
+        eng.complete_inference(1, vec![4, 5], "hi".into(), 1_000_000, 2_000_000).unwrap();
+        assert_eq!(eng.inference_server.completed_count, 1);
+    }
+
+    #[test]
+    fn serving_engine_cache() {
+        let mut eng = ModelServingEngine::new();
+        eng.submit_inference("model-a", InstanceId(1), vec![1], 64, 0.7, 0.9, 40, 1);
+        eng.process_batch();
+        eng.complete_inference(1, vec![2], "cached".into(), 500_000, 500_000).unwrap();
+        let cached = eng.get_cached_response("req_1");
+        assert!(cached.is_some());
+        assert_eq!(cached.unwrap().generated_text, "cached");
+    }
+
+    #[test]
+    fn serving_engine_backend() {
+        let mut eng = ModelServingEngine::new();
+        let id = eng.add_backend("inst1", "host1:8080", 5);
+        assert_eq!(id, 1);
+        let selected = eng.select_backend().unwrap();
+        assert_eq!(selected, 1);
+        eng.release_backend(1);
+    }
+
+    #[test]
+    fn serving_stats() {
+        let mut eng = ModelServingEngine::new();
+        eng.submit_inference("m", InstanceId(1), vec![1], 10, 0.5, 0.9, 40, 0);
+        let s = eng.stats();
+        assert!(s.contains("serving:"));
+        assert!(s.contains("requests=1"));
+    }
+
+    #[test]
+    fn inference_statuses() {
+        assert_eq!(InferenceStatus::Pending as u32, 0);
+        assert_eq!(InferenceStatus::Completed as u32, 2);
+        assert_eq!(InferenceStatus::Cancelled as u32, 4);
+    }
+
+    #[test]
+    fn batch_strategies() {
+        assert_eq!(BatchStrategy::Fixed as u32, 0);
+        assert_eq!(BatchStrategy::Adaptive as u32, 2);
+    }
+
+    #[test]
+    fn metric_types() {
+        assert_eq!(MetricType::Counter as u32, 0);
+        assert_eq!(MetricType::Summary as u32, 3);
+    }
+
+    #[test]
+    fn lb_strategies() {
+        assert_eq!(LBStrategy::RoundRobin as u32, 0);
+        assert_eq!(LBStrategy::Weighted as u32, 3);
+    }
+
+    #[test]
+    fn serving_status_nonempty() {
+        init();
+        let s = status();
+        assert!(s.contains("serving:"));
+        assert!(s.contains("requests="));
+    }
+
+    #[test]
+    fn serving_act_submit() {
+        init();
+        let res = serving_act("submit model-a 1 10 20 30 64 0.7 0.9 40 1").unwrap();
+        assert!(res.contains("已提交推理请求"));
+    }
+
+    #[test]
+    fn serving_act_process() {
+        init();
+        serving_act("submit model-a 1 1 2 3 64 0.7 0.9 40 1").unwrap();
+        let res = serving_act("process").unwrap();
+        assert!(res.contains("已启动批处理"));
+    }
+
+    #[test]
+    fn serving_act_complete() {
+        init();
+        serving_act("submit model-a 1 1 2 3 64 0.7 0.9 40 1").unwrap();
+        serving_act("process").unwrap();
+        let res = serving_act("complete 1 4 5 hi 1000000 2000000").unwrap();
+        assert!(res.is_ok());
+    }
+
+    #[test]
+    fn serving_act_cache() {
+        init();
+        serving_act("submit model-a 1 1 2 3 64 0.7 0.9 40 1").unwrap();
+        serving_act("process").unwrap();
+        serving_act("complete 1 4 5 cached 500000 500000").unwrap();
+        let res = serving_act("cache req_1 get").unwrap();
+        assert!(res.contains("缓存命中"));
+    }
+
+    #[test]
+    fn serving_act_backend() {
+        init();
+        let res = serving_act("backend inst1 host1:8080 5").unwrap();
+        assert!(res.contains("已添加后端"));
+        let res = serving_act("select-backend").unwrap();
+        assert!(res.contains("已选择后端"));
+    }
+
+    #[test]
+    fn serving_act_status() {
+        init();
+        let res = serving_act("status").unwrap();
+        assert!(res.contains("serving:"));
+    }
+
+    #[test]
+    fn inference_request_creation() {
+        let req = InferenceRequest {
+            id: 1,
+            model_name: "m".into(),
+            instance_id: InstanceId(1),
+            input_tokens: vec![1, 2, 3],
+            max_new_tokens: 64,
+            temperature: 0.7,
+            top_p: 0.9,
+            top_k: 40,
+            priority: 1,
+            submitted_at: 0,
+            callback: None,
+        };
+        assert_eq!(req.model_name, "m");
+        assert_eq!(req.input_tokens.len(), 3);
+    }
+
+    #[test]
+    fn inference_response_creation() {
+        let resp = InferenceResponse {
+            request_id: 1,
+            output_tokens: vec![4, 5],
+            generated_text: "text".into(),
+            tokens_generated: 2,
+            prefill_time_ns: 100,
+            decode_time_ns: 200,
+            total_time_ns: 300,
+            status: InferenceStatus::Processing,
+        };
+        assert_eq!(resp.tokens_generated, 2);
+        assert_eq!(resp.status, InferenceStatus::Processing);
+    }
+}
