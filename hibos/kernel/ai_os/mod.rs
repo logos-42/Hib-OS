@@ -38,6 +38,7 @@ pub mod ethics;
 pub mod evolution;
 pub mod dream;
 pub mod vfs_ai;
+pub mod net_ai;
 
 /// AI 原生子系统初始化：在 `kernel::boot_subsystems` 或 shell 启动时调用一次。
 pub fn init() {
@@ -63,6 +64,7 @@ pub fn init() {
     evolution::init();
     dream::init();
     vfs_ai::init();
+    net_ai::init();
 }
 
 /// 聚合状态摘要，供 `sense aios://status` 使用。
@@ -90,6 +92,7 @@ pub fn status() -> String {
     lines.push(format!("evolution={}", evolution::status()));
     lines.push(format!("dream={}", dream::status()));
     lines.push(format!("vfs_ai={}", vfs_ai::status()));
+    lines.push(format!("net_ai={}", net_ai::status()));
     lines.join(" | ")
 }
 
@@ -123,5 +126,6 @@ mod tests {
         assert!(s.contains("evolution="));
         assert!(s.contains("dream="));
         assert!(s.contains("vfs_ai="));
+        assert!(s.contains("net_ai="));
     }
 }

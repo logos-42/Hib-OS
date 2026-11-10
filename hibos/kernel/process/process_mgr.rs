@@ -5,9 +5,9 @@ use std::collections::BTreeMap;
 use std::sync::{Mutex, OnceLock};
 
 /// 全局进程管理器。
-struct ProcessManagerState {
-    processes: BTreeMap<ProcessId, Pcb>,
-    next_id: u64,
+pub(crate) struct ProcessManagerState {
+    pub(crate) processes: BTreeMap<ProcessId, Pcb>,
+    pub(crate) next_id: u64,
 }
 
 static PM: OnceLock<Mutex<ProcessManagerState>> = OnceLock::new();

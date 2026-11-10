@@ -88,7 +88,7 @@ pub struct PciDevice {
 }
 
 /// IRQ 线。
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct IrqLine(pub u32);
 
 /// IRQ 处理器签名。

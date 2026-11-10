@@ -17,7 +17,7 @@ use std::sync::{Mutex, OnceLock};
 // ============================================================================
 
 /// 终端颜色：16 色索引、256 色调色板、或真彩色 RGB。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum Color {
     /// 标准 16 色索引 (0-15)。
     Index(u8),
@@ -26,6 +26,7 @@ pub enum Color {
     /// 真彩色 RGB。
     Rgb(u8, u8, u8),
     /// 默认前景色。
+    #[default]
     DefaultFg,
     /// 默认背景色。
     DefaultBg,
@@ -635,11 +636,22 @@ pub enum AnsiAction {
 // ============================================================================
 
 /// 当前 SGR 状态。
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct SgrState {
     pub fg: Color,
     pub bg: Color,
     pub attrs: CellAttrs,
+}
+
+impl Default for SgrState {
+    fn default() -> Self {
+        // 默认前景/背景各自对应，不能简单地都取 `Color::default()`。
+        Self {
+            fg: Color::DefaultFg,
+            bg: Color::DefaultBg,
+            attrs: CellAttrs::default(),
+        }
+    }
 }
 
 impl SgrState {
@@ -1019,7 +1031,11 @@ pub fn terminal_act(payload: &str) -> Result<String, String> {
             Ok(format!("已写入 {} 字节", text.len()))
         }
         "resize" => {
-            let rows: usize = it.next().ok_or("缺少 rows")?.parse().map_err(|e| e.to_string())?;
+            let rows: usize = it
+                .next()
+                .ok_or("缺少 rows")?
+                .parse::<usize>()
+                .map_err(|e| e.to_string())?;
             let cols: usize = it.next().ok_or("缺少 cols")?.parse().map_err(|e| e.to_string())?;
             t.resize(rows, cols);
             Ok(format!("终端已调整为 {}x{}", rows, cols))

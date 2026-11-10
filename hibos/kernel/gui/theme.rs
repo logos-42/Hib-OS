@@ -15,7 +15,7 @@ use std::sync::{Mutex, OnceLock};
 // ============================================================================
 
 /// UI 颜色角色：每个角色对应一组界面元素的颜色。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ColorRole {
     /// 背景（窗口底色、桌面）。
     Background,
@@ -181,7 +181,7 @@ impl Theme {
 // ============================================================================
 
 /// CSS 属性键。
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum CssProperty {
     Color,
     BackgroundColor,
@@ -275,7 +275,9 @@ impl CssStylesheet {
                         }
                         if !current_selector.is_empty() {
                             let mut rule = CssRule::new(&current_selector);
-                            for (prop, val) in current_props.drain() {
+                            // BTreeMap 没有 drain()，用 take 取走本轮属性再遍历。
+                            let props = std::mem::take(&mut current_props);
+                            for (prop, val) in props {
                                 rule.set(prop, &val);
                             }
                             sheet.add_rule(rule);
@@ -705,7 +707,11 @@ pub fn theme_act(payload: &str) -> Result<String, String> {
         }
         "font" => {
             let name = it.next().ok_or("缺少字体名")?;
-            let size: u32 = it.next().ok_or("缺少尺寸")?.parse().map_err(|e| e.to_string())?;
+            let size: u32 = it
+                .next()
+                .ok_or("缺少尺寸")?
+                .parse::<u32>()
+                .map_err(|e| e.to_string())?;
             tm.set_font(name, size);
             Ok(format!("字体 {} 尺寸 {}px", name, size))
         }

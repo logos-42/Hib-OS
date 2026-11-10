@@ -32,6 +32,7 @@ use crate::ai_os::ethics;
 use crate::ai_os::evolution;
 use crate::ai_os::dream;
 use crate::ai_os::vfs_ai;
+use crate::ai_os::net_ai;
 use crate::ai_os::{status as ai_os_status};
 use crate::agent;
 use crate::belief::beliefs;
@@ -941,9 +942,13 @@ fn act_raw(name: &str, payload: &str) -> Option<Result<String, String>> {
         "vfs_ai://mkdir" | "vfs_ai://create" | "vfs_ai://write" | "vfs_ai://read" | "vfs_ai://delete" | "vfs_ai://lookup" | "vfs_ai://tag" | "vfs_ai://semantic-vector" | "vfs_ai://semantic-search" | "vfs_ai://watch" | "vfs_ai://poll" => {
             Some(crate::ai_os::vfs_ai::vfs_ai_act_dispatch(payload))
         }
-        // —— AI 原生语义文件系统通道 ——
-        "vfs_ai://mkdir" | "vfs_ai://create" | "vfs_ai://write" | "vfs_ai://read" | "vfs_ai://delete" | "vfs_ai://lookup" | "vfs_ai://tag" | "vfs_ai://semantic-vector" | "vfs_ai://semantic-search" | "vfs_ai://watch" | "vfs_ai://poll" => {
-            Some(crate::ai_os::vfs_ai::vfs_ai_act_dispatch(payload))
+        // —— AI 原生智能网络通道 ——
+        "net_ai://send" | "net_ai://socket" | "net_ai://connect" | "net_ai://sock-send" | "net_ai://sock-recv" | "net_ai://route" | "net_ai://route-intent" | "net_ai://topology" | "net_ai://bandwidth" | "net_ai://latency" | "net_ai://firewall" => {
+            Some(crate::ai_os::net_ai::net_ai_act_dispatch(payload))
+        }
+        // —— AI 原生智能网络通道 ——
+        "net_ai://send" | "net_ai://socket" | "net_ai://connect" | "net_ai://sock-send" | "net_ai://sock-recv" | "net_ai://route" | "net_ai://route-intent" | "net_ai://topology" | "net_ai://bandwidth" | "net_ai://latency" | "net_ai://firewall" => {
+            Some(crate::ai_os::net_ai::net_ai_act_dispatch(payload))
         }
         _ => None,
     }

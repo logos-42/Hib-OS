@@ -107,6 +107,8 @@ pub enum ChannelKind {
     Dream,
     /// AI 原生：语义文件系统层（vfs_ai://*）
     VfsAi,
+    /// AI 原生：智能网络层（net_ai://*）
+    NetAi,
 }
 
 impl ChannelKind {
@@ -159,6 +161,7 @@ impl ChannelKind {
             ChannelKind::Evolution => "evolution",
             ChannelKind::Dream => "dream",
             ChannelKind::VfsAi => "vfs_ai",
+            ChannelKind::NetAi => "net_ai",
         }
     }
 }
@@ -563,6 +566,18 @@ pub fn bootstrap() -> ChannelRegistry {
         (ChannelKind::VfsAi, "vfs_ai://semantic-search", Access::Read),
         (ChannelKind::VfsAi, "vfs_ai://watch", Access::Write),
         (ChannelKind::VfsAi, "vfs_ai://poll", Access::Read),
+        // —— AI 原生智能网络通道 ——
+        (ChannelKind::NetAi, "net_ai://send", Access::Write),
+        (ChannelKind::NetAi, "net_ai://socket", Access::Write),
+        (ChannelKind::NetAi, "net_ai://connect", Access::Write),
+        (ChannelKind::NetAi, "net_ai://sock-send", Access::Write),
+        (ChannelKind::NetAi, "net_ai://sock-recv", Access::Read),
+        (ChannelKind::NetAi, "net_ai://route", Access::Write),
+        (ChannelKind::NetAi, "net_ai://route-intent", Access::Read),
+        (ChannelKind::NetAi, "net_ai://topology", Access::Write),
+        (ChannelKind::NetAi, "net_ai://bandwidth", Access::Write),
+        (ChannelKind::NetAi, "net_ai://latency", Access::Write),
+        (ChannelKind::NetAi, "net_ai://firewall", Access::Write),
     ];
     for (kind, name, access) in defaults {
         let _ = reg.open(kind, name, access);
@@ -577,7 +592,7 @@ mod tests {
     #[test]
     fn bootstrap_opens_all_channels() {
         let reg = bootstrap();
-        assert_eq!(reg.len(), 199);
+        assert_eq!(reg.len(), 210);
         assert_eq!(reg.of_kind(ChannelKind::Net).count(), 5);
         assert_eq!(reg.of_kind(ChannelKind::Will).count(), 4);
         assert_eq!(reg.of_kind(ChannelKind::Context).count(), 2);
@@ -613,6 +628,7 @@ mod tests {
         assert_eq!(reg.of_kind(ChannelKind::Evolution).count(), 7);
         assert_eq!(reg.of_kind(ChannelKind::Dream).count(), 6);
         assert_eq!(reg.of_kind(ChannelKind::VfsAi).count(), 11);
+        assert_eq!(reg.of_kind(ChannelKind::NetAi).count(), 11);
         assert!(reg.find("file://vfs").is_some());
         assert!(reg.find("desktop://screen").is_some());
         assert!(reg.find("trace://exec").is_some());
@@ -640,6 +656,8 @@ mod tests {
         assert!(reg.find("dream://cycle").is_some());
         assert!(reg.find("vfs_ai://mkdir").is_some());
         assert!(reg.find("vfs_ai://semantic-search").is_some());
+        assert!(reg.find("net_ai://send").is_some());
+        assert!(reg.find("net_ai://route-intent").is_some());
     }
 
     #[test]

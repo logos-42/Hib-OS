@@ -235,6 +235,113 @@ impl Surface {
         }
     }
 
+    /// `put` 的别名：供合成器等上层模块按「写像素」语义调用。
+    #[inline]
+    pub fn set(&mut self, x: i32, y: i32, color: u32) {
+        self.put(x, y, color);
+    }
+
+    /// 画矩形边框，`thickness` 为线宽（0 按 1 处理）。
+    pub fn draw_rect(&mut self, x: i32, y: i32, w: u32, h: u32, color: u32, thickness: u32) {
+        let t = thickness.max(1);
+        if w == 0 || h == 0 {
+            return;
+        }
+        // 上、下两条边。
+        self.fill_rect(x, y, w, t, color);
+        if h > t {
+            self.fill_rect(x, y + h as i32 - t as i32, w, t, color);
+        }
+        // 左、右两条边。
+        self.fill_rect(x, y, t, h, color);
+        if w > t {
+            self.fill_rect(x + w as i32 - t as i32, y, t, h, color);
+        }
+    }
+
+    /// 画一条线段（Bresenham，整数坐标）。
+    pub fn draw_line(&mut self, x1: i32, y1: i32, x2: i32, y2: i32, color: u32) {
+        let dx = (x2 - x1).abs();
+        let sx = if x1 < x2 { 1 } else { -1 };
+        let dy = -(y2 - y1).abs();
+        let sy = if y1 < y2 { 1 } else { -1 };
+        let mut err = dx + dy;
+        let (mut x, mut y) = (x1, y1);
+        loop {
+            self.blend(x, y, color);
+            if x == x2 && y == y2 {
+                break;
+            }
+            let e2 = 2 * err;
+            if e2 >= dy {
+                err += dy;
+                x += sx;
+            }
+            if e2 <= dx {
+                err += dx;
+                y += sy;
+            }
+        }
+    }
+
+    /// 画圆环（中点画圆，`thickness` 为线宽）。
+    pub fn draw_circle(&mut self, cx: i32, cy: i32, r: i32, color: u32, thickness: u32) {
+        let t = thickness.max(1) as i32;
+        if r <= 0 {
+            return;
+        }
+        if t == 1 {
+            // 单像素圆环：八分对称绘制。
+            let mut x = r;
+            let mut y = 0;
+            let mut err = 1 - r;
+            while x >= y {
+                for &(px, py) in &[
+                    (x, y),
+                    (y, x),
+                    (-y, x),
+                    (-x, y),
+                    (-x, -y),
+                    (-y, -x),
+                    (y, -x),
+                    (x, -y),
+                ] {
+                    self.put(cx + px, cy + py, color);
+                }
+                y += 1;
+                if err < 0 {
+                    err += 2 * y + 1;
+                } else {
+                    x -= 1;
+                    err += 2 * (y - x) + 1;
+                }
+            }
+            return;
+        }
+        // 粗线：在内、外半径之间填充像素。
+        let outer = r + t / 2;
+        let inner = (r - t / 2).max(0);
+        for y in -outer..=outer {
+            for x in -outer..=outer {
+                let d2 = x * x + y * y;
+                if d2 <= outer * outer && d2 >= inner * inner {
+                    self.blend(cx + x, cy + y, color);
+                }
+            }
+        }
+    }
+
+    /// 填充实心圆。
+    pub fn fill_circle(&mut self, cx: i32, cy: i32, r: i32, color: u32) {
+        if r <= 0 {
+            return;
+        }
+        for y in -r..=r {
+            let dx = (((r * r - y * y) as f64).sqrt()) as i32;
+            self.fill_rect(cx - dx, cy + y, (dx * 2 + 1) as u32, 1, color);
+        }
+    }
+
     /// 画 1px 边框。
     pub fn stroke_rect(&mut self, rect: Rect, color: u32) {
         if rect.w == 0 || rect.h == 0 {
@@ -244,6 +351,80 @@ impl Surface {
         self.fill_rect(rect.x, rect.bottom() - 1, rect.w, 1, color);
         self.fill_rect(rect.x, rect.y, 1, rect.h, color);
         self.fill_rect(rect.right() - 1, rect.y, 1, rect.h, color);
+    }
+
+    /// 画一条直线（Bresenham 整数算法，无浮点、无依赖）。
+    ///
+    /// 供控件层绘制光标、分隔线、箭头等 1px 线条使用。
+    pub fn draw_line(&mut self, x0: i32, y0: i32, x1: i32, y1: i32, color: u32) {
+        let dx = (x1 - x0).abs();
+        let dy = -(y1 - y0).abs();
+        let sx = if x0 < x1 { 1 } else { -1 };
+        let sy = if y0 < y1 { 1 } else { -1 };
+        let mut err = dx + dy;
+        let mut x = x0;
+        let mut y = y0;
+        loop {
+            self.put(x, y, color);
+            if x == x1 && y == y1 {
+                break;
+            }
+            let e2 = 2 * err;
+            if e2 >= dy {
+                err += dy;
+                x += sx;
+            }
+            if e2 <= dx {
+                err += dx;
+                y += sy;
+            }
+        }
+    }
+
+    /// 画矩形边框，`thickness` 可调（1 = 细线，2 = 复选框边框）。
+    pub fn draw_rect(&mut self, x: i32, y: i32, w: u32, h: u32, color: u32, thickness: u32) {
+        if w == 0 || h == 0 {
+            return;
+        }
+        let t = thickness.max(1).min(w).min(h);
+        let ti = t as i32;
+        self.fill_rect(x, y, w, t, color);
+        self.fill_rect(x, y + h as i32 - ti, w, t, color);
+        self.fill_rect(x, y, t, h, color);
+        self.fill_rect(x + w as i32 - ti, y, t, h, color);
+    }
+
+    /// 画圆环（逐像素判定半径区间，够用且简单）。
+    pub fn draw_circle(&mut self, cx: i32, cy: i32, radius: i32, color: u32, thickness: u32) {
+        if radius <= 0 {
+            return;
+        }
+        let t = thickness.max(1) as i32;
+        let outer = radius * radius;
+        let inner = (radius - t).max(0).pow(2);
+        for y in -radius..=radius {
+            for x in -radius..=radius {
+                let d2 = x * x + y * y;
+                if d2 <= outer && d2 >= inner {
+                    self.put(cx + x, cy + y, color);
+                }
+            }
+        }
+    }
+
+    /// 画实心圆。
+    pub fn fill_circle(&mut self, cx: i32, cy: i32, radius: i32, color: u32) {
+        if radius <= 0 {
+            return;
+        }
+        let r2 = radius * radius;
+        for y in -radius..=radius {
+            for x in -radius..=radius {
+                if x * x + y * y <= r2 {
+                    self.put(cx + x, cy + y, color);
+                }
+            }
+        }
     }
 
     /// 圆角矩形（逐行内缩，无依赖）。

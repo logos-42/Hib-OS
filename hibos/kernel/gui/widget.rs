@@ -287,7 +287,7 @@ impl Widget {
     }
 
     /// 返回当前生效的颜色方案（优先使用控件自带，否则全局默认）。
-    pub fn effective_colors<'a>(&self, global: &'a WidgetColors) -> &'a WidgetColors {
+    pub fn effective_colors<'a>(&'a self, global: &'a WidgetColors) -> &'a WidgetColors {
         self.colors.as_ref().unwrap_or(global)
     }
 
@@ -450,7 +450,7 @@ impl Widget {
                 let track_y = y;
                 surface.draw_rect(x, track_y, w, h, border, 1);
                 let thumb_h = (h as f64 * 0.3) as u32;
-                let thumb_y = y + (self.scroll_offset as u32).min(h.saturating_sub(thumb_h));
+                let thumb_y = y + (self.scroll_offset as i32).min(h.saturating_sub(thumb_h) as i32);
                 surface.fill_rect(x, thumb_y, w, thumb_h, fg);
             }
             WidgetKind::Panel => {
@@ -473,9 +473,10 @@ impl Widget {
 // ============================================================================
 
 /// 布局策略。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum LayoutKind {
     /// 绝对定位，使用控件各自的 rect。
+    #[default]
     Absolute,
     /// 流式布局，从左到右自动换行。
     Flow,
@@ -662,7 +663,7 @@ impl WidgetManager {
     {
         if let Some(w) = self.widgets.get_mut(&id) {
             w.on_change = Some(Box::new(handler));
-            true
+            return true;
         }
         false
     }
@@ -931,7 +932,7 @@ impl WidgetManager {
                     let th = w.rect.h;
                     if cx + tw as i32 > container.right() && cx > container.x {
                         cx = container.x + self.layout.margin as i32;
-                        cy += row_h + self.layout.spacing;
+                        cy += (row_h + self.layout.spacing) as i32;
                         row_h = 0;
                     }
                     w.rect.x = cx;
@@ -959,7 +960,7 @@ impl WidgetManager {
                     col += 1;
                     if col >= cols {
                         cx = container.x + self.layout.margin as i32;
-                        cy += row_h + self.layout.spacing;
+                        cy += (row_h + self.layout.spacing) as i32;
                         row_h = 0;
                         col = 0;
                     }

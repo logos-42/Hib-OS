@@ -73,8 +73,8 @@ impl FdTable {
 }
 
 /// 全局 fd 注册表：pid -> FdTable。
-struct FdRegistry {
-    tables: BTreeMap<u64, FdTable>,
+pub(crate) struct FdRegistry {
+    pub(crate) tables: BTreeMap<u64, FdTable>,
 }
 
 static FD_REGISTRY: OnceLock<Mutex<FdRegistry>> = OnceLock::new();
