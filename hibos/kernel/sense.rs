@@ -33,6 +33,7 @@ use crate::ai_os::evolution;
 use crate::ai_os::dream;
 use crate::ai_os::vfs_ai;
 use crate::ai_os::net_ai;
+use crate::ai_os::driver_ai;
 use crate::ai_os::{status as ai_os_status};
 use crate::agent;
 use crate::belief::beliefs;
@@ -946,9 +947,13 @@ fn act_raw(name: &str, payload: &str) -> Option<Result<String, String>> {
         "net_ai://send" | "net_ai://socket" | "net_ai://connect" | "net_ai://sock-send" | "net_ai://sock-recv" | "net_ai://route" | "net_ai://route-intent" | "net_ai://topology" | "net_ai://bandwidth" | "net_ai://latency" | "net_ai://firewall" => {
             Some(crate::ai_os::net_ai::net_ai_act_dispatch(payload))
         }
-        // —— AI 原生智能网络通道 ——
-        "net_ai://send" | "net_ai://socket" | "net_ai://connect" | "net_ai://sock-send" | "net_ai://sock-recv" | "net_ai://route" | "net_ai://route-intent" | "net_ai://topology" | "net_ai://bandwidth" | "net_ai://latency" | "net_ai://firewall" => {
-            Some(crate::ai_os::net_ai::net_ai_act_dispatch(payload))
+        // —— AI 原生智能设备驱动通道 ——
+        "driver_ai://register-device" | "driver_ai://register-driver" | "driver_ai://load-driver" | "driver_ai://init-driver" | "driver_ai://attach" | "driver_ai://set-irq" | "driver_ai://alloc-dma" | "driver_ai://invoke-irq" | "driver_ai://pci-add" | "driver_ai://device-tree-add" | "driver_ai://hotplug-add" | "driver_ai://hotplug-poll" => {
+            Some(crate::ai_os::driver_ai::driver_ai_act_dispatch(payload))
+        }
+        // —— AI 原生智能设备驱动通道 ——
+        "driver_ai://register-device" | "driver_ai://register-driver" | "driver_ai://load-driver" | "driver_ai://init-driver" | "driver_ai://attach" | "driver_ai://set-irq" | "driver_ai://alloc-dma" | "driver_ai://invoke-irq" | "driver_ai://pci-add" | "driver_ai://device-tree-add" | "driver_ai://hotplug-add" | "driver_ai://hotplug-poll" => {
+            Some(crate::ai_os::driver_ai::driver_ai_act_dispatch(payload))
         }
         _ => None,
     }

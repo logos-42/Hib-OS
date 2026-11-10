@@ -677,7 +677,7 @@ impl WindowManager {
         let cell_w = self.screen_w / cols;
         let cell_h = self.screen_h / rows;
         for (i, id) in visible.iter().enumerate() {
-            if let Some(w) = self.windows.get_mut(*id) {
+            if let Some(w) = self.windows.get_mut(id) {
                 if w.state == WinState::Maximized {
                     continue;
                 }
@@ -876,7 +876,11 @@ pub fn wm_act(payload: &str) -> Result<String, String> {
             Ok(format!("已创建窗口 #{}", id))
         }
         "show" => {
-            let id: u64 = it.next().ok_or("缺少 id")?.parse().map_err(|e| e.to_string())?;
+            let id: u64 = it
+                .next()
+                .ok_or("缺少 id")?
+                .parse::<u64>()
+                .map_err(|e| e.to_string())?;
             if m.show(id) {
                 Ok(format!("窗口 #{} 已显示", id))
             } else {

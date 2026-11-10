@@ -74,6 +74,7 @@ impl CongestState {
 ///
 /// cwnd 以字节为单位；MSS 作为增长粒度。Reno 在拥塞避免阶段每个 RTT 增长 1 个 MSS；
 /// Cubic 使用立方函数 W(t) = C*(t-K)^3 + W_max（此处简化为按 RTT 离散近似）。
+#[derive(Clone)]
 pub struct CongestionController {
     /// 所用算法。
     pub alg: CongestAlg,
@@ -219,6 +220,7 @@ impl Default for CongestionController {
 // =======================================================================
 
 /// 单个 TCP 连接的完整状态。
+#[derive(Clone)]
 pub struct TcpConn {
     /// 连接四元组键。
     pub key: TcpConnKey,

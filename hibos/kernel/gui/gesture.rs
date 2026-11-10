@@ -516,7 +516,11 @@ pub fn gesture_act(payload: &str) -> Result<String, String> {
     let mut gr = gr.lock().unwrap();
     match it.next().unwrap_or("") {
         "touch_down" => {
-            let id: u64 = it.next().ok_or("缺少 id")?.parse().map_err(|e| e.to_string())?;
+            let id: u64 = it
+                .next()
+                .ok_or("缺少 id")?
+                .parse::<u64>()
+                .map_err(|e| e.to_string())?;
             let x: i32 = it.next().ok_or("缺少 x")?.parse().map_err(|e| e.to_string())?;
             let y: i32 = it.next().ok_or("缺少 y")?.parse().map_err(|e| e.to_string())?;
             let time: u64 = it.next().and_then(|v| v.parse().ok()).unwrap_or(0);

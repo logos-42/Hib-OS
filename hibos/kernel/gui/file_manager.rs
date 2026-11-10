@@ -274,6 +274,7 @@ impl FileManager {
             let modified = entry
                 .metadata()
                 .and_then(|m| m.modified())
+                .ok()
                 .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
                 .map(|d| d.as_secs())
                 .unwrap_or(0);
@@ -485,7 +486,7 @@ impl FileManager {
                 match result {
                     Ok(()) => ok += 1,
                     Err(e) => {
-                        self.last_message = format!("删除失败 {}：{}", e.path.display(), e);
+                        self.last_message = format!("删除失败：{}", e);
                     }
                 }
             }
@@ -542,7 +543,7 @@ impl FileManager {
     pub fn search(&mut self, pattern: &str) -> Vec<FileEntry> {
         let mut results = Vec::new();
         let pat = pattern.to_ascii_lowercase();
-        self.search_recursive(&self.current, &pat, &mut results);
+        Self::search_recursive(&self.current, &pat, &mut results);
         results.sort_by(|a, b| a.name.cmp(&b.name));
         self.last_message = format!("搜索到 {} 个结果", results.len());
         results
@@ -572,13 +573,14 @@ impl FileManager {
                 let modified = entry
                     .metadata()
                     .and_then(|m| m.modified())
+                    .ok()
                     .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
                     .map(|d| d.as_secs())
                     .unwrap_or(0);
                 results.push(FileEntry::new(&name, path, file_type, size, modified));
             }
             if path.is_dir() && !path.is_symlink() {
-                search_recursive(&path, pat, results);
+                Self::search_recursive(&path, pat, results);
             }
         }
     }
@@ -711,7 +713,11 @@ pub fn file_manager_act(payload: &str) -> Result<String, String> {
             Ok(format!("已返回上级，{} 个条目", n))
         }
         "enter" => {
-            let index: usize = it.next().ok_or("缺少索引")?.parse().map_err(|e| e.to_string())?;
+            let index: usize = it
+                .next()
+                .ok_or("缺少索引")?
+                .parse::<usize>()
+                .map_err(|e| e.to_string())?;
             fm.enter(index)
         }
         "copy" => Ok(format!("已复制 {} 个", fm.copy())),

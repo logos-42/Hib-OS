@@ -836,7 +836,7 @@ pub fn native_act(payload: &str) -> Result<String, String> {
             let activation = it.next().and_then(|s| s.parse().ok()).unwrap_or(0.5);
             let urgency = it.next().and_then(|s| s.parse().ok()).unwrap_or(0.5);
             let mut eng = consciousness_engine().lock().unwrap();
-            let id = eng.submit_to_workspace(content, modality, source, activation, urgency);
+            let id = eng.submit_to_workspace(content.to_string(), modality, source, activation, urgency);
             Ok(format!("已提交到全局工作空间 竞争者={}", id))
         }
         Some("run-competition") => {

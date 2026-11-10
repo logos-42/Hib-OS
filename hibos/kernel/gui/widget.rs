@@ -1185,7 +1185,11 @@ pub fn widget_act(payload: &str) -> Result<String, String> {
             Ok(format!("已添加控件 #{} kind={}", id, kind))
         }
         "set_text" => {
-            let id: u64 = it.next().ok_or("缺少 id")?.parse().map_err(|e| e.to_string())?;
+            let id: u64 = it
+                .next()
+                .ok_or("缺少 id")?
+                .parse::<u64>()
+                .map_err(|e| e.to_string())?;
             let text = it.next().unwrap_or("");
             if m.set_text(id, text) {
                 Ok(format!("控件 #{} 文本已设置", id))

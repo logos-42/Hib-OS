@@ -213,7 +213,7 @@ impl BodySchema {
     }
 
     pub fn children_of(&self, id: u64) -> Vec<&BodyPart> {
-        self.parts.get(id)
+        self.parts.get(&id)
             .map(|p| p.children.iter().filter_map(|cid| self.parts.get(cid)).collect())
             .unwrap_or_default()
     }

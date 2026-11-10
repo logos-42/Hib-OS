@@ -307,7 +307,7 @@ impl MotorExecutor {
         if self.execution_count == 0 {
             0
         } else {
-            self.total_execution_ns / self.execution_count
+            self.total_execution_ns / self.execution_count as u128
         }
     }
 }

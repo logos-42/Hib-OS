@@ -684,7 +684,11 @@ pub fn compositor_ext_act(payload: &str) -> Result<String, String> {
             Ok(format!("已添加图层 #{}", id))
         }
         "set_alpha" => {
-            let id: u64 = it.next().ok_or("缺少图层 id")?.parse().map_err(|e| e.to_string())?;
+            let id: u64 = it
+                .next()
+                .ok_or("缺少图层 id")?
+                .parse::<u64>()
+                .map_err(|e| e.to_string())?;
             let alpha: u8 = it.next().ok_or("缺少 alpha")?.parse().map_err(|e| e.to_string())?;
             if c.set_alpha(id, alpha) {
                 Ok(format!("图层 #{} alpha={}", id, alpha))
@@ -727,7 +731,7 @@ pub fn compositor_ext_act(payload: &str) -> Result<String, String> {
                 "rotate" => AnimTarget::Rotate,
                 _ => AnimTarget::Opacity,
             };
-            let anim = Animation::new(0, prop_enum, from, to, dur, easing, Easing::Linear);
+            let anim = Animation::new(0, prop_enum, from, to, dur, easing);
             let id = c.add_animation(anim);
             Ok(format!("已添加动画 #{}", id))
         }

@@ -616,7 +616,7 @@ impl SemanticEngine {
     }
 
     pub fn cluster_kmeans(&mut self, k: usize) -> Vec<Cluster> {
-        let vectors: Vec<&SemanticVector> = self.space.all().collect();
+        let vectors: Vec<&SemanticVector> = self.space.all();
         self.total_operations += 1;
         self.cluster.kmeans(&vectors, k, 50)
     }
@@ -636,7 +636,7 @@ impl SemanticEngine {
             self.namespace.list_paths().iter().any(|p| self.namespace.resolve(p).map(|rv| rv.id == v.id).unwrap_or(false))
         });
         // 简化：直接对前三个向量做类比
-        let all: Vec<&SemanticVector> = self.space.all().collect();
+        let all: Vec<&SemanticVector> = self.space.all();
         if all.len() < 3 { return None; }
         let predicted = SemanticAnalogy::solve(all[0], all[1], all[2]);
         // 找最接近的

@@ -786,7 +786,7 @@ impl MindEngine {
     }
 
     pub fn set_mode(&mut self, mode: MindMode) {
-        self.state = self.state.with_mode(mode);
+        self.state = self.state.clone().with_mode(mode);
         self.cognitive_load.record(
             LoadType::Intrinsic,
             self.state.cognitive_load,
@@ -940,7 +940,7 @@ pub fn mind_act(payload: &str) -> Result<String, String> {
                 _ => crate::ai_os::native::QualiaModality::Abstract,
             };
             let mut eng = mind_engine().lock().unwrap();
-            let id = eng.write_working_memory(content, modality);
+            let id = eng.write_working_memory(content.to_string(), modality);
             Ok(format!("已写入工作记忆 id={} 使用率={:.2}", id, eng.working_memory.usage_ratio()))
         }
         Some("wm-read") => {
@@ -1007,7 +1007,7 @@ pub fn mind_act(payload: &str) -> Result<String, String> {
                 let utility = it.next().and_then(|s| s.parse().ok()).unwrap_or(0.5);
                 let prob = it.next().and_then(|s| s.parse().ok()).unwrap_or(0.5);
                 let cost = it.next().and_then(|s| s.parse().ok()).unwrap_or(0.1);
-                options.push(DecisionOption { id: i as u64, description: desc, expected_utility: utility, probability: prob, cost });
+                options.push(DecisionOption { id: i as u64, description: desc.to_string(), expected_utility: utility, probability: prob, cost });
             }
             let mut eng = mind_engine().lock().unwrap();
             let result = eng.decide(options)?;

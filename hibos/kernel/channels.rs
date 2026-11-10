@@ -109,6 +109,8 @@ pub enum ChannelKind {
     VfsAi,
     /// AI 原生：智能网络层（net_ai://*）
     NetAi,
+    /// AI 原生：智能设备驱动层（driver_ai://*）
+    DriverAi,
 }
 
 impl ChannelKind {
@@ -162,6 +164,7 @@ impl ChannelKind {
             ChannelKind::Dream => "dream",
             ChannelKind::VfsAi => "vfs_ai",
             ChannelKind::NetAi => "net_ai",
+            ChannelKind::DriverAi => "driver_ai",
         }
     }
 }
@@ -578,6 +581,19 @@ pub fn bootstrap() -> ChannelRegistry {
         (ChannelKind::NetAi, "net_ai://bandwidth", Access::Write),
         (ChannelKind::NetAi, "net_ai://latency", Access::Write),
         (ChannelKind::NetAi, "net_ai://firewall", Access::Write),
+        // —— AI 原生智能设备驱动通道 ——
+        (ChannelKind::DriverAi, "driver_ai://register-device", Access::Write),
+        (ChannelKind::DriverAi, "driver_ai://register-driver", Access::Write),
+        (ChannelKind::DriverAi, "driver_ai://load-driver", Access::Write),
+        (ChannelKind::DriverAi, "driver_ai://init-driver", Access::Write),
+        (ChannelKind::DriverAi, "driver_ai://attach", Access::Write),
+        (ChannelKind::DriverAi, "driver_ai://set-irq", Access::Write),
+        (ChannelKind::DriverAi, "driver_ai://alloc-dma", Access::Write),
+        (ChannelKind::DriverAi, "driver_ai://invoke-irq", Access::Write),
+        (ChannelKind::DriverAi, "driver_ai://pci-add", Access::Write),
+        (ChannelKind::DriverAi, "driver_ai://device-tree-add", Access::Write),
+        (ChannelKind::DriverAi, "driver_ai://hotplug-add", Access::Write),
+        (ChannelKind::DriverAi, "driver_ai://hotplug-poll", Access::Read),
     ];
     for (kind, name, access) in defaults {
         let _ = reg.open(kind, name, access);
@@ -592,7 +608,7 @@ mod tests {
     #[test]
     fn bootstrap_opens_all_channels() {
         let reg = bootstrap();
-        assert_eq!(reg.len(), 210);
+        assert_eq!(reg.len(), 222);
         assert_eq!(reg.of_kind(ChannelKind::Net).count(), 5);
         assert_eq!(reg.of_kind(ChannelKind::Will).count(), 4);
         assert_eq!(reg.of_kind(ChannelKind::Context).count(), 2);
@@ -629,6 +645,7 @@ mod tests {
         assert_eq!(reg.of_kind(ChannelKind::Dream).count(), 6);
         assert_eq!(reg.of_kind(ChannelKind::VfsAi).count(), 11);
         assert_eq!(reg.of_kind(ChannelKind::NetAi).count(), 11);
+        assert_eq!(reg.of_kind(ChannelKind::DriverAi).count(), 12);
         assert!(reg.find("file://vfs").is_some());
         assert!(reg.find("desktop://screen").is_some());
         assert!(reg.find("trace://exec").is_some());
@@ -658,6 +675,8 @@ mod tests {
         assert!(reg.find("vfs_ai://semantic-search").is_some());
         assert!(reg.find("net_ai://send").is_some());
         assert!(reg.find("net_ai://route-intent").is_some());
+        assert!(reg.find("driver_ai://register-device").is_some());
+        assert!(reg.find("driver_ai://hotplug-poll").is_some());
     }
 
     #[test]

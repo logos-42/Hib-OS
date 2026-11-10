@@ -151,13 +151,14 @@ impl WorkingMemory {
         let id = self.next_id;
         self.next_id += 1;
         let now = crate::ai_os::native::now_ns();
+        let chunk_size = content.len() as u64;
         self.chunks.insert(id, WMEntry {
             id,
             content,
             activation: 1.0,
             last_access_ns: now,
             rehearsal_count: 1,
-            chunk_size: content.len() as u64,
+            chunk_size,
         });
         id
     }
@@ -971,7 +972,7 @@ pub fn memory_act(payload: &str) -> Result<String, String> {
         Some("wm-store") => {
             let content = it.next().ok_or("用法: memory:// wm-store <内容>")?;
             let mut eng = memory_engine().lock().unwrap();
-            let id = eng.wm_store(content);
+            let id = eng.wm_store(content.to_string());
             Ok(format!("工作记忆存储 id={}", id))
         }
         Some("wm-retrieve") => {
@@ -992,7 +993,7 @@ pub fn memory_act(payload: &str) -> Result<String, String> {
             let content = it.next().ok_or("用法: memory:// stm-encode <内容> <重要性>")?;
             let importance = it.next().and_then(|s| s.parse::<f32>().ok()).unwrap_or(0.5);
             let mut eng = memory_engine().lock().unwrap();
-            let id = eng.stm_encode(content, importance);
+            let id = eng.stm_encode(content.to_string(), importance);
             Ok(format!("短时记忆编码 id={}", id))
         }
         Some("stm-access") => {
