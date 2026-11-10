@@ -34,6 +34,7 @@ use crate::ai_os::dream;
 use crate::ai_os::vfs_ai;
 use crate::ai_os::net_ai;
 use crate::ai_os::driver_ai;
+use crate::ai_os::shell_ai;
 use crate::ai_os::{status as ai_os_status};
 use crate::agent;
 use crate::belief::beliefs;
@@ -951,9 +952,13 @@ fn act_raw(name: &str, payload: &str) -> Option<Result<String, String>> {
         "driver_ai://register-device" | "driver_ai://register-driver" | "driver_ai://load-driver" | "driver_ai://init-driver" | "driver_ai://attach" | "driver_ai://set-irq" | "driver_ai://alloc-dma" | "driver_ai://invoke-irq" | "driver_ai://pci-add" | "driver_ai://device-tree-add" | "driver_ai://hotplug-add" | "driver_ai://hotplug-poll" => {
             Some(crate::ai_os::driver_ai::driver_ai_act_dispatch(payload))
         }
-        // —— AI 原生智能设备驱动通道 ——
-        "driver_ai://register-device" | "driver_ai://register-driver" | "driver_ai://load-driver" | "driver_ai://init-driver" | "driver_ai://attach" | "driver_ai://set-irq" | "driver_ai://alloc-dma" | "driver_ai://invoke-irq" | "driver_ai://pci-add" | "driver_ai://device-tree-add" | "driver_ai://hotplug-add" | "driver_ai://hotplug-poll" => {
-            Some(crate::ai_os::driver_ai::driver_ai_act_dispatch(payload))
+        // —— AI 原生智能命令行通道 ——
+        "shell_ai://parse" | "shell_ai://execute" | "shell_ai://execute-nl" | "shell_ai://complete" | "shell_ai://alias" | "shell_ai://resolve-alias" | "shell_ai://cd" | "shell_ai://pwd" | "shell_ai://env" | "shell_ai://set-env" | "shell_ai://pipeline" | "shell_ai://pipeline-add" | "shell_ai://history" => {
+            Some(crate::ai_os::shell_ai::shell_ai_act_dispatch(payload))
+        }
+        // —— AI 原生智能命令行通道 ——
+        "shell_ai://parse" | "shell_ai://execute" | "shell_ai://execute-nl" | "shell_ai://complete" | "shell_ai://alias" | "shell_ai://resolve-alias" | "shell_ai://cd" | "shell_ai://pwd" | "shell_ai://env" | "shell_ai://set-env" | "shell_ai://pipeline" | "shell_ai://pipeline-add" | "shell_ai://history" => {
+            Some(crate::ai_os::shell_ai::shell_ai_act_dispatch(payload))
         }
         _ => None,
     }
