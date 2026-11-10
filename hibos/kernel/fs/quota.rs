@@ -1,4 +1,4 @@
-//! 磁盘配额（用户/组配额、块和 inode 限制）。
+﻿//! 磁盘配额（用户/组配额、块和 inode 限制）。
 //!
 //! 提供 `QuotaManager`：按用户 ID 设置块/inode 上限，检查与扣费
 //!（charge/release），支持宽限期与警告阈值。项目配额（目录级）简化版。
@@ -382,12 +382,12 @@ impl QuotaManagerLeased {
 
     /// 申请配额修改租约，返回当前 epoch。
     pub fn acquire_quota_lease(&self, owner: u64) -> Result<Epoch, crate::lease::LeaseConflict> {
-        lease::acquire(&self.channel, crate::exec::ExecId(owner), None)
+        lease::acquire(&self.channel, owner, None)
     }
 
     /// 释放配额修改租约。
     pub fn release_quota_lease(&self, owner: u64) -> bool {
-        lease::release(&self.channel, crate::exec::ExecId(owner))
+        lease::release(&self.channel, owner)
     }
 
     /// 查询用户配额（只读，无需租约）。
@@ -409,7 +409,7 @@ impl QuotaManagerLeased {
         self.inner.set_quota(uid, block_limit, inode_limit)?;
         let new_ep = lease::commit(
             &self.channel,
-            crate::exec::ExecId(owner),
+            owner,
             expected_epoch,
             &format!("quota set uid={} blocks={} inodes={}", uid, block_limit, inode_limit),
         )
@@ -431,7 +431,7 @@ impl QuotaManagerLeased {
         self.inner.charge(uid, blocks, inodes)?;
         let new_ep = lease::commit(
             &self.channel,
-            crate::exec::ExecId(owner),
+            owner,
             expected_epoch,
             &format!("quota charge uid={} blocks={} inodes={}", uid, blocks, inodes),
         )
@@ -453,7 +453,7 @@ impl QuotaManagerLeased {
         self.inner.release(uid, blocks, inodes)?;
         let new_ep = lease::commit(
             &self.channel,
-            crate::exec::ExecId(owner),
+            owner,
             expected_epoch,
             &format!("quota release uid={} blocks={} inodes={}", uid, blocks, inodes),
         )
@@ -756,7 +756,7 @@ mod tests {
         let mgr = QuotaManagerLeased::new("quota://test-lease");
         assert!(mgr.acquire_quota_lease(101).is_ok());
         let err = mgr.acquire_quota_lease(102).unwrap_err();
-        assert_eq!(err.holder, crate::exec::ExecId(101));
+        assert_eq!(err.holder, crate::exec::101);
         assert!(mgr.release_quota_lease(101));
         assert!(mgr.acquire_quota_lease(102).is_ok());
         assert!(mgr.release_quota_lease(102));
@@ -842,3 +842,4 @@ mod tests {
         assert!(r.contains("epoch="));
     }
 }
+

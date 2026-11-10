@@ -1,4 +1,4 @@
-//! 目录项缓存（dcache）与 inode 缓存。
+﻿//! 目录项缓存（dcache）与 inode 缓存。
 //!
 //! 提供名称查找（dentry lookup）、dentry/inode 缓存、LRU 淘汰、inode 引用计数。
 //! 哈希键为 (父 inode 号，名称)，支持 `lookup` / `insert` / `invalidate` / `prune`。
@@ -301,12 +301,12 @@ impl DentryCacheLeased {
 
     /// 申请 dcache 修改租约，返回当前 epoch。
     pub fn acquire_dcache_lease(&self, owner: u64) -> Result<Epoch, crate::lease::LeaseConflict> {
-        lease::acquire(&self.channel, crate::exec::ExecId(owner), None)
+        lease::acquire(&self.channel, owner, None)
     }
 
     /// 释放 dcache 修改租约。
     pub fn release_dcache_lease(&self, owner: u64) -> bool {
-        lease::release(&self.channel, crate::exec::ExecId(owner))
+        lease::release(&self.channel, owner)
     }
 
     /// 查找 dentry（只读，无需租约）。
@@ -328,7 +328,7 @@ impl DentryCacheLeased {
         self.inner.insert(dentry);
         let new_ep = lease::commit(
             &self.channel,
-            crate::exec::ExecId(owner),
+            owner,
             expected_epoch,
             &format!("dcache insert {} parent={}", dentry.name, dentry.parent_ino),
         )?;
@@ -350,7 +350,7 @@ impl DentryCacheLeased {
         let _ = self.inner.invalidate(parent_ino, name);
         let new_ep = lease::commit(
             &self.channel,
-            crate::exec::ExecId(owner),
+            owner,
             expected_epoch,
             &format!("dcache invalidate {} parent={}", name, parent_ino),
         )?;
@@ -792,7 +792,7 @@ mod tests {
         let cache = DentryCacheLeased::new(16, "dcache://test-lease");
         assert!(cache.acquire_dcache_lease(101).is_ok());
         let err = cache.acquire_dcache_lease(102).unwrap_err();
-        assert_eq!(err.holder, crate::exec::ExecId(101));
+        assert_eq!(err.holder, crate::exec::101);
         assert!(cache.release_dcache_lease(101));
         assert!(cache.acquire_dcache_lease(102).is_ok());
         assert!(cache.release_dcache_lease(102));
@@ -895,3 +895,4 @@ fn now_nanos() -> u64 {
         .map(|d| d.as_nanos() as u64)
         .unwrap_or(0)
 }
+

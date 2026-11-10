@@ -1,4 +1,4 @@
-//! 缓冲区缓存（Buffer Cache，LRU 淘汰 + 脏页写回）。
+﻿//! 缓冲区缓存（Buffer Cache，LRU 淘汰 + 脏页写回）。
 //!
 //! 以扇区为单位缓存块设备数据，提供 `BufferHandle` 句柄与缓冲区锁
 //!（锁定/引用计数）。脏块在 `mark_dirty` 后标记，由 `sync_all` /
@@ -523,12 +523,12 @@ impl BufferCacheLeased {
 
     /// 申请回写租约，返回当前 epoch。
     pub fn acquire_sync_lease(&self, owner: u64) -> Result<Epoch, crate::lease::LeaseConflict> {
-        lease::acquire(&self.channel, crate::exec::ExecId(owner), None)
+        lease::acquire(&self.channel, owner, None)
     }
 
     /// 释放回写租约。
     pub fn release_sync_lease(&self, owner: u64) -> bool {
-        lease::release(&self.channel, crate::exec::ExecId(owner))
+        lease::release(&self.channel, owner)
     }
 
     /// 在租约保护下回写指定设备的脏块，然后 commit 推进 epoch。
@@ -547,7 +547,7 @@ impl BufferCacheLeased {
         // 提交：epoch 必须等于 expected，否则拒绝（乐观 CAS）。
         lease::commit(
             &self.channel,
-            crate::exec::ExecId(owner),
+            owner,
             expected_epoch,
             &format!("sync_device dev={} wrote={}", dev_id, done),
         )
@@ -566,7 +566,7 @@ impl BufferCacheLeased {
         let done = self.inner.sync_all()?;
         lease::commit(
             &self.channel,
-            crate::exec::ExecId(owner),
+            owner,
             expected_epoch,
             &format!("sync_all wrote={}", done),
         )
@@ -873,7 +873,7 @@ mod tests {
         cache.register_device(Box::new(MemBlockDevice::new("ram0", 64)));
         assert!(cache.acquire_sync_lease(101).is_ok());
         let err = cache.acquire_sync_lease(102).unwrap_err();
-        assert_eq!(err.holder, crate::exec::ExecId(101));
+        assert_eq!(err.holder, crate::exec::101);
         assert!(cache.release_sync_lease(101));
         assert!(cache.acquire_sync_lease(102).is_ok());
         assert!(cache.release_sync_lease(102));
@@ -990,3 +990,4 @@ fn write_sector_inner(cache: &BufferCacheLeased, dev_id: u64, sector: u64, byte:
     let mut data = [byte; BLOCK_SIZE];
     dev.write_at(sector, &data).unwrap();
 }
+

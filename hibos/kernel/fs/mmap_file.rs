@@ -1,4 +1,4 @@
-//! 文件内存映射（页故障按需加载）。
+﻿//! 文件内存映射（页故障按需加载）。
 //!
 //! 提供 `MmapRegion` 与 `MmapManager`，模拟进程地址空间中的文件映射：
 //! 页故障时从文件加载页、映射到虚拟地址、脏页回写（MSYNC）。
@@ -539,12 +539,12 @@ impl MmapManagerLeased {
 
     /// 申请映射操作租约，返回当前 epoch。
     pub fn acquire_map_lease(&self, owner: u64) -> Result<Epoch, crate::lease::LeaseConflict> {
-        lease::acquire(&self.channel, crate::exec::ExecId(owner), None)
+        lease::acquire(&self.channel, owner, None)
     }
 
     /// 释放映射操作租约。
     pub fn release_map_lease(&self, owner: u64) -> bool {
-        lease::release(&self.channel, crate::exec::ExecId(owner))
+        lease::release(&self.channel, owner)
     }
 
     /// 在租约保护下 mmap，然后 commit 推进 epoch。
@@ -564,7 +564,7 @@ impl MmapManagerLeased {
         let id = self.inner.mmap(addr, length, prot, flags, fd, offset)?;
         let new_ep = lease::commit(
             &self.channel,
-            crate::exec::ExecId(owner),
+            owner,
             expected_epoch,
             &format!("mmap mmap addr={} len={} fd={}", addr, length, fd),
         )
@@ -584,7 +584,7 @@ impl MmapManagerLeased {
         self.inner.munmap(addr)?;
         let new_ep = lease::commit(
             &self.channel,
-            crate::exec::ExecId(owner),
+            owner,
             expected_epoch,
             &format!("mmap munmap addr={}", addr),
         )
@@ -937,7 +937,7 @@ mod tests {
         let mgr = MmapManagerLeased::new("mmap://test-lease");
         assert!(mgr.acquire_map_lease(101).is_ok());
         let err = mgr.acquire_map_lease(102).unwrap_err();
-        assert_eq!(err.holder, crate::exec::ExecId(101));
+        assert_eq!(err.holder, crate::exec::101);
         assert!(mgr.release_map_lease(101));
         assert!(mgr.acquire_map_lease(102).is_ok());
         assert!(mgr.release_map_lease(102));
@@ -1041,3 +1041,4 @@ mod tests {
         assert!(r.contains("epoch="));
     }
 }
+

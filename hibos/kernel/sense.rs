@@ -27,6 +27,10 @@ use crate::ai_os::memory_ws;
 use crate::ai_os::body_schema;
 use crate::ai_os::action;
 use crate::ai_os::temporal;
+use crate::ai_os::social;
+use crate::ai_os::ethics;
+use crate::ai_os::evolution;
+use crate::ai_os::dream;
 use crate::ai_os::{status as ai_os_status};
 use crate::agent;
 use crate::belief::beliefs;
@@ -918,6 +922,19 @@ fn act_raw(name: &str, payload: &str) -> Option<Result<String, String>> {
         }
         "temporal://clock" | "temporal://circadian" | "temporal://ultradian" | "temporal://sequence" | "temporal://schedule" | "temporal://memory" | "temporal://prediction" => {
             Some(crate::ai_os::temporal::temporal_act_dispatch(payload))
+        }
+        // —— AI 原生社会/伦理/进化/梦境层通道 ——
+        "society://register" | "society://send" | "society://poll" | "society://conversation" | "society://edge" | "society://negotiate" | "society://reputation" => {
+            Some(crate::ai_os::social::society_act_dispatch(payload))
+        }
+        "ethics://principle" | "ethics://evaluate" | "ethics://safety" | "ethics://rule" | "ethics://value" | "ethics://alignment" | "ethics://dilemma" | "ethics://audit" => {
+            Some(crate::ai_os::ethics::ethics_act_dispatch(payload))
+        }
+        "evolution://genome" | "evolution://gene" | "evolution://mutate" | "evolution://fitness" | "evolution://select" | "evolution://snapshot" | "evolution://adapt" => {
+            Some(crate::ai_os::evolution::evolution_act_dispatch(payload))
+        }
+        "dream://cycle" | "dream://stage" | "dream://replay" | "dream://synthesize" | "dream://associate" | "dream://insight" => {
+            Some(crate::ai_os::dream::dream_act_dispatch(payload))
         }
         _ => None,
     }

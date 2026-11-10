@@ -1,4 +1,4 @@
-//! 中断控制器（kernel/drivers/irq_ctrl.rs）。
+﻿//! 中断控制器（kernel/drivers/irq_ctrl.rs）。
 //!
 //! 实现中断描述符表（IDT）、中断门描述符、中断处理器注册与分发。
 //! 与现有 `kernel/irq.rs`（轻量 signal 投递）并存，面向更完整的中断控制器模型：
@@ -477,7 +477,7 @@ mod tests {
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
 
-    fn test_owner() -> ExecId { ExecId(1) }
+    fn test_owner() -> ExecId { 1 }
 
     #[test]
     fn idt_entry_roundtrip() {
@@ -618,3 +618,4 @@ mod tests {
         assert!(irq_ctrl_act_raw("raise 3").is_ok());
     }
 }
+

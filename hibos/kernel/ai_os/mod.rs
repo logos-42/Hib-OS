@@ -33,6 +33,10 @@ pub mod memory_ws;
 pub mod body_schema;
 pub mod action;
 pub mod temporal;
+pub mod social;
+pub mod ethics;
+pub mod evolution;
+pub mod dream;
 
 /// AI 原生子系统初始化：在 `kernel::boot_subsystems` 或 shell 启动时调用一次。
 pub fn init() {
@@ -53,6 +57,10 @@ pub fn init() {
     body_schema::init();
     action::init();
     temporal::init();
+    social::init();
+    ethics::init();
+    evolution::init();
+    dream::init();
 }
 
 /// 聚合状态摘要，供 `sense aios://status` 使用。
@@ -75,6 +83,10 @@ pub fn status() -> String {
     lines.push(format!("body={}", body_schema::status()));
     lines.push(format!("action={}", action::status()));
     lines.push(format!("temporal={}", temporal::status()));
+    lines.push(format!("society={}", social::status()));
+    lines.push(format!("ethics={}", ethics::status()));
+    lines.push(format!("evolution={}", evolution::status()));
+    lines.push(format!("dream={}", dream::status()));
     lines.join(" | ")
 }
 
@@ -103,5 +115,9 @@ mod tests {
         assert!(s.contains("body="));
         assert!(s.contains("action="));
         assert!(s.contains("temporal="));
+        assert!(s.contains("society="));
+        assert!(s.contains("ethics="));
+        assert!(s.contains("evolution="));
+        assert!(s.contains("dream="));
     }
 }

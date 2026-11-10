@@ -1,4 +1,4 @@
-//! 日志文件系统（WAL 预写日志 + 崩溃恢复）。
+﻿//! 日志文件系统（WAL 预写日志 + 崩溃恢复）。
 //!
 //! 实现简化的预写日志：所有对块设备的修改先写入日志（事务），提交后
 //! 再回写到主文件系统。崩溃恢复时重放已提交事务、回滚未提交事务，
@@ -20,7 +20,7 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::fs::block::{BlockDevice, BlockError, BLOCK_SIZE};
-use crate::fs::disk_img::DiskImage;
+use crate::fs::diskimg::DiskImage;
 use crate::lease::{self, Epoch};
 use crate::caps;
 
@@ -470,12 +470,12 @@ impl JournalLeased {
 
     /// 申请事务写租约，返回当前 epoch。
     pub fn acquire_txn_lease(&self, owner: u64) -> Result<Epoch, crate::lease::LeaseConflict> {
-        lease::acquire(&self.channel, crate::exec::ExecId(owner), None)
+        lease::acquire(&self.channel, owner, None)
     }
 
     /// 释放事务写租约。
     pub fn release_txn_lease(&self, owner: u64) -> bool {
-        lease::release(&self.channel, crate::exec::ExecId(owner))
+        lease::release(&self.channel, owner)
     }
 
     /// 开启事务（需先持有租约）。
@@ -515,13 +515,13 @@ impl JournalLeased {
         let mut j = self.inner.lock().unwrap();
         j.commit(txn_id).map_err(|e| {
             crate::lease::CommitError::NotLeaseOwner {
-                holder: Some(crate::exec::ExecId(owner)),
+                holder: Some(owner),
             }
         })?; // journal 内部不返回 CommitError，这里简化映射
         // 推进 epoch。
         lease::commit(
             &self.channel,
-            crate::exec::ExecId(owner),
+            owner,
             expected_epoch,
             &format!("journal commit txn={}", txn_id),
         )
@@ -838,7 +838,7 @@ mod tests {
         );
         assert!(journal.acquire_txn_lease(101).is_ok());
         let err = journal.acquire_txn_lease(102).unwrap_err();
-        assert_eq!(err.holder, crate::exec::ExecId(101));
+        assert_eq!(err.holder, crate::exec::101);
         assert!(journal.release_txn_lease(101));
         assert!(journal.acquire_txn_lease(102).is_ok());
         assert!(journal.release_txn_lease(102));
@@ -951,3 +951,5 @@ mod tests {
         assert!(r.contains("epoch="));
     }
 }
+
+

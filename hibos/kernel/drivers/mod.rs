@@ -17,8 +17,8 @@ pub mod irq_ctrl;
 pub mod dma;
 
 // 公共类型（已在本模块定义）
-pub use pci_enumerator::{PciDevice, PciClass, pci_enumerate, pci_lookup};
-pub use irq_dispatcher::{IrqLine, IrqHandler, irq_bind, irq_fire, irq_unbind};
+pub use pci_enumerator::{pci_enumerate, pci_lookup};
+pub use irq_dispatcher::{irq_bind, irq_fire, irq_unbind};
 pub use devtree::{DeviceTree, devtree_insert, devtree_lookup};
 
 // 驱动状态。

@@ -97,6 +97,14 @@ pub enum ChannelKind {
     ActionAi,
     /// AI 原生：时间处理层（temporal://*）
     Temporal,
+    /// AI 原生：多智能体社会层（society://*）
+    Social,
+    /// AI 原生：伦理对齐层（ethics://*）
+    Ethics,
+    /// AI 原生：自我进化层（evolution://*）
+    Evolution,
+    /// AI 原生：离线巩固层（dream://*）
+    Dream,
 }
 
 impl ChannelKind {
@@ -144,6 +152,10 @@ impl ChannelKind {
             ChannelKind::BodySchema => "body",
             ChannelKind::ActionAi => "action",
             ChannelKind::Temporal => "temporal",
+            ChannelKind::Social => "society",
+            ChannelKind::Ethics => "ethics",
+            ChannelKind::Evolution => "evolution",
+            ChannelKind::Dream => "dream",
         }
     }
 }
@@ -507,6 +519,35 @@ pub fn bootstrap() -> ChannelRegistry {
         (ChannelKind::Temporal, "temporal://schedule", Access::ReadWrite),
         (ChannelKind::Temporal, "temporal://memory", Access::ReadWrite),
         (ChannelKind::Temporal, "temporal://prediction", Access::ReadWrite),
+        // —— AI 原生社会/伦理/进化/梦境层通道 ——
+        (ChannelKind::Social, "society://register", Access::Write),
+        (ChannelKind::Social, "society://send", Access::Write),
+        (ChannelKind::Social, "society://poll", Access::Read),
+        (ChannelKind::Social, "society://conversation", Access::ReadWrite),
+        (ChannelKind::Social, "society://edge", Access::ReadWrite),
+        (ChannelKind::Social, "society://negotiate", Access::Write),
+        (ChannelKind::Social, "society://reputation", Access::Read),
+        (ChannelKind::Ethics, "ethics://principle", Access::Write),
+        (ChannelKind::Ethics, "ethics://evaluate", Access::ReadWrite),
+        (ChannelKind::Ethics, "ethics://safety", Access::Write),
+        (ChannelKind::Ethics, "ethics://rule", Access::Write),
+        (ChannelKind::Ethics, "ethics://value", Access::Write),
+        (ChannelKind::Ethics, "ethics://alignment", Access::Read),
+        (ChannelKind::Ethics, "ethics://dilemma", Access::ReadWrite),
+        (ChannelKind::Ethics, "ethics://audit", Access::Read),
+        (ChannelKind::Evolution, "evolution://genome", Access::Write),
+        (ChannelKind::Evolution, "evolution://gene", Access::Write),
+        (ChannelKind::Evolution, "evolution://mutate", Access::Write),
+        (ChannelKind::Evolution, "evolution://fitness", Access::ReadWrite),
+        (ChannelKind::Evolution, "evolution://select", Access::Write),
+        (ChannelKind::Evolution, "evolution://snapshot", Access::ReadWrite),
+        (ChannelKind::Evolution, "evolution://adapt", Access::Write),
+        (ChannelKind::Dream, "dream://cycle", Access::Write),
+        (ChannelKind::Dream, "dream://stage", Access::Write),
+        (ChannelKind::Dream, "dream://replay", Access::ReadWrite),
+        (ChannelKind::Dream, "dream://synthesize", Access::Write),
+        (ChannelKind::Dream, "dream://associate", Access::Write),
+        (ChannelKind::Dream, "dream://insight", Access::Write),
     ];
     for (kind, name, access) in defaults {
         let _ = reg.open(kind, name, access);
@@ -521,7 +562,7 @@ mod tests {
     #[test]
     fn bootstrap_opens_all_channels() {
         let reg = bootstrap();
-        assert_eq!(reg.len(), 160);
+        assert_eq!(reg.len(), 188);
         assert_eq!(reg.of_kind(ChannelKind::Net).count(), 5);
         assert_eq!(reg.of_kind(ChannelKind::Will).count(), 4);
         assert_eq!(reg.of_kind(ChannelKind::Context).count(), 2);
@@ -552,6 +593,10 @@ mod tests {
         assert_eq!(reg.of_kind(ChannelKind::BodySchema).count(), 5);
         assert_eq!(reg.of_kind(ChannelKind::ActionAi).count(), 5);
         assert_eq!(reg.of_kind(ChannelKind::Temporal).count(), 7);
+        assert_eq!(reg.of_kind(ChannelKind::Social).count(), 7);
+        assert_eq!(reg.of_kind(ChannelKind::Ethics).count(), 8);
+        assert_eq!(reg.of_kind(ChannelKind::Evolution).count(), 7);
+        assert_eq!(reg.of_kind(ChannelKind::Dream).count(), 6);
         assert!(reg.find("file://vfs").is_some());
         assert!(reg.find("desktop://screen").is_some());
         assert!(reg.find("trace://exec").is_some());
@@ -573,6 +618,10 @@ mod tests {
         assert!(reg.find("body://schema").is_some());
         assert!(reg.find("action://primitive").is_some());
         assert!(reg.find("temporal://clock").is_some());
+        assert!(reg.find("society://register").is_some());
+        assert!(reg.find("ethics://principle").is_some());
+        assert!(reg.find("evolution://genome").is_some());
+        assert!(reg.find("dream://cycle").is_some());
     }
 
     #[test]

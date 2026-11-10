@@ -1,4 +1,4 @@
-//! ext2 兼容文件系统。
+﻿//! ext2 兼容文件系统。
 //!
 //! 参考 ext2/ext3 布局实现一个可在块设备上格式化、挂载与读写的文件系统：
 //! 超级块（魔数 0xEF53）、块组、inode 位图、数据块位图、inode 表、
@@ -14,7 +14,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::fs::block::{BlockDevice, BlockError, BLOCK_SIZE};
 use crate::fs::buffer_cache::BufferCache;
-use crate::fs::disk_img::DiskImage;
+use crate::fs::diskimg::DiskImage;
 use crate::lease::{self, Epoch};
 use crate::caps;
 
@@ -1126,12 +1126,12 @@ impl Ext2FsLeased {
         &self,
         owner: u64,
     ) -> Result<Epoch, crate::lease::LeaseConflict> {
-        lease::acquire(&self.channel, crate::exec::ExecId(owner), None)
+        lease::acquire(&self.channel, owner, None)
     }
 
     /// 释放元数据写租约。
     pub fn release_write_lease(&self, owner: u64) -> bool {
-        lease::release(&self.channel, crate::exec::ExecId(owner))
+        lease::release(&self.channel, owner)
     }
 
     /// 只读 stat（无需租约）。
@@ -1175,7 +1175,7 @@ impl Ext2FsLeased {
         // 提交 epoch（乐观 CAS）。
         let new_ep = lease::commit(
             &self.channel,
-            crate::exec::ExecId(owner),
+            owner,
             expected_epoch,
             &format!("ext2 create {} ino={}", name, ino),
         )
@@ -1197,7 +1197,7 @@ impl Ext2FsLeased {
         drop(fs);
         let new_ep = lease::commit(
             &self.channel,
-            crate::exec::ExecId(owner),
+            owner,
             expected_epoch,
             &format!("ext2 write ino={} offset={} len={}", ino, offset, data.len()),
         )
@@ -1218,7 +1218,7 @@ impl Ext2FsLeased {
         drop(fs);
         let new_ep = lease::commit(
             &self.channel,
-            crate::exec::ExecId(owner),
+            owner,
             expected_epoch,
             &format!("ext2 unlink {} ino={}", name, child_ino),
         )
@@ -1243,7 +1243,7 @@ impl Ext2FsLeased {
         drop(fs);
         let new_ep = lease::commit(
             &self.channel,
-            crate::exec::ExecId(owner),
+            owner,
             expected_epoch,
             &format!("ext2 mkdir {} ino={}", name, ino),
         )
@@ -1583,7 +1583,7 @@ mod tests {
         ));
         let _ = std::fs::remove_file(&path);
         {
-            let mut img = crate::fs::disk_img::DiskImage::create(&path, 4096 * 512).unwrap();
+            let mut img = crate::fs::diskimg::DiskImage::create(&path, 4096 * 512).unwrap();
             // 将 DiskImage 包装为 BlockDevice（简化：直接用 MemBlockDevice 测试 mount/format）。
         }
         let _ = std::fs::remove_file(&path);
@@ -1630,14 +1630,14 @@ mod tests {
             std::thread::current().id().as_u64()
         ));
         let _ = std::fs::remove_file(&path);
-        let mut img = crate::fs::disk_img::DiskImage::create(&path, 4096 * 512).unwrap();
+        let mut img = crate::fs::diskimg::DiskImage::create(&path, 4096 * 512).unwrap();
         let fs = Ext2FsLeased::format(
             Box::new(img),
             "ext2://test-lease",
         ).unwrap();
         assert!(fs.acquire_write_lease(101).is_ok());
         let err = fs.acquire_write_lease(102).unwrap_err();
-        assert_eq!(err.holder, crate::exec::ExecId(101));
+        assert_eq!(err.holder, crate::exec::101);
         assert!(fs.release_write_lease(101));
         assert!(fs.acquire_write_lease(102).is_ok());
         assert!(fs.release_write_lease(102));
@@ -1652,7 +1652,7 @@ mod tests {
             std::thread::current().id().as_u64()
         ));
         let _ = std::fs::remove_file(&path);
-        let mut img = crate::fs::disk_img::DiskImage::create(&path, 4096 * 512).unwrap();
+        let mut img = crate::fs::diskimg::DiskImage::create(&path, 4096 * 512).unwrap();
         let fs = Ext2FsLeased::format(
             Box::new(img),
             "ext2://test-lease2",
@@ -1686,7 +1686,7 @@ mod tests {
             std::thread::current().id().as_u64()
         ));
         let _ = std::fs::remove_file(&path);
-        let mut img = crate::fs::disk_img::DiskImage::create(&path, 4096 * 512).unwrap();
+        let mut img = crate::fs::diskimg::DiskImage::create(&path, 4096 * 512).unwrap();
         let fs = Ext2FsLeased::format(
             Box::new(img),
             "ext2://test-lease3",
@@ -1710,7 +1710,7 @@ mod tests {
             std::thread::current().id().as_u64()
         ));
         let _ = std::fs::remove_file(&path);
-        let mut img = crate::fs::disk_img::DiskImage::create(&path, 4096 * 512).unwrap();
+        let mut img = crate::fs::diskimg::DiskImage::create(&path, 4096 * 512).unwrap();
         let mut fs = Ext2FsLeased::format(
             Box::new(img),
             "ext2://test-lease4",
@@ -1797,4 +1797,6 @@ mod tests {
         assert!(r.contains("epoch="));
     }
 }
+
+
 

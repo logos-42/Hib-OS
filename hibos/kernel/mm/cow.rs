@@ -1,4 +1,4 @@
-//! 写时复制（Copy-On-Write, COW）。
+﻿//! 写时复制（Copy-On-Write, COW）。
 //! 
 //! AI 原生映射：单写者租约共享页框，写入时复制 = 模型权重页共享 + 推理时私有化上下文页。
 //! fork 操作：只读共享物理页 + 打 COW 标记；子空间首次写入触发缺页 → 真正复制那一页。
@@ -176,8 +176,8 @@ mod tests {
 
     #[test]
     fn cow_fork_shares_pages() {
-        let source = ExecId(300);
-        let target = ExecId(301);
+        let source = 300;
+        let target = 301;
         create_address_space(source).unwrap();
         create_address_space(target).unwrap();
         // 在源空间映射一个可写页。
@@ -199,8 +199,8 @@ mod tests {
 
     #[test]
     fn cow_copy_on_write_privatizes() {
-        let source = ExecId(302);
-        let target = ExecId(303);
+        let source = 302;
+        let target = 303;
         create_address_space(source).unwrap();
         create_address_space(target).unwrap();
         map_vaddr(
@@ -225,3 +225,4 @@ mod tests {
         assert!(s.contains("cow_regions"));
     }
 }
+

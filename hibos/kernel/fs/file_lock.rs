@@ -1,4 +1,4 @@
-//! 文件锁（顾问锁 + 强制锁 + 范围锁）。
+﻿//! 文件锁（顾问锁 + 强制锁 + 范围锁）。
 //!
 //! 提供对打开文件描述符（fd）的字节范围加锁：
 //! - 顾问锁（默认）：仅在通过本管理器检查时生效，不强制阻塞实际 IO。
@@ -393,12 +393,12 @@ impl FileLockManagerLeased {
 
     /// 申请锁操作租约，返回当前 epoch。
     pub fn acquire_lock_lease(&self, owner: u64) -> Result<Epoch, crate::lease::LeaseConflict> {
-        lease::acquire(&self.channel, crate::exec::ExecId(owner), None)
+        lease::acquire(&self.channel, owner, None)
     }
 
     /// 释放锁操作租约。
     pub fn release_lock_lease(&self, owner: u64) -> bool {
-        lease::release(&self.channel, crate::exec::ExecId(owner))
+        lease::release(&self.channel, owner)
     }
 
     /// 注册 fd（委托内部管理器，无需租约）。
@@ -422,7 +422,7 @@ impl FileLockManagerLeased {
         self.inner.lock_with_pid(fd, pid, lock_type, start, len)?;
         let new_ep = lease::commit(
             &self.channel,
-            crate::exec::ExecId(owner),
+            owner,
             expected_epoch,
             &format!("file_lock lock fd={} start={} len={}", fd, start, len),
         )
@@ -445,7 +445,7 @@ impl FileLockManagerLeased {
         self.inner.unlock(fd, pid, start, len)?;
         let new_ep = lease::commit(
             &self.channel,
-            crate::exec::ExecId(owner),
+            owner,
             expected_epoch,
             &format!("file_lock unlock fd={} start={} len={}", fd, start, len),
         )
@@ -465,7 +465,7 @@ impl FileLockManagerLeased {
         self.inner.release_fd(fd)?;
         let new_ep = lease::commit(
             &self.channel,
-            crate::exec::ExecId(owner),
+            owner,
             expected_epoch,
             &format!("file_lock release_fd fd={}", fd),
         )
@@ -761,7 +761,7 @@ mod tests {
         mgr.register_fd(1).unwrap();
         assert!(mgr.acquire_lock_lease(101).is_ok());
         let err = mgr.acquire_lock_lease(102).unwrap_err();
-        assert_eq!(err.holder, crate::exec::ExecId(101));
+        assert_eq!(err.holder, crate::exec::101);
         assert!(mgr.release_lock_lease(101));
         assert!(mgr.acquire_lock_lease(102).is_ok());
         assert!(mgr.release_lock_lease(102));
@@ -855,3 +855,4 @@ mod tests {
         assert!(r.contains("epoch="));
     }
 }
+

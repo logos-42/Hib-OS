@@ -1,4 +1,4 @@
-//! 异步 IO（提交队列 SQ / 完成队列 CQ，io_uring 简化版）。
+﻿//! 异步 IO（提交队列 SQ / 完成队列 CQ，io_uring 简化版）。
 //!
 //! 提供 `AioContext`：提交读/写请求到 SQ，后台工作线程模拟异步处理，
 //! 结果写入 CQ，通过 `poll` / `poll_many` 查询完成。支持 `cancel` 与
@@ -397,12 +397,12 @@ impl AioContextLeased {
 
     /// 申请 SQ 提交租约，返回当前 epoch。
     pub fn acquire_sq_lease(&self, owner: u64) -> Result<Epoch, crate::lease::LeaseConflict> {
-        lease::acquire(&self.channel, crate::exec::ExecId(owner), None)
+        lease::acquire(&self.channel, owner, None)
     }
 
     /// 释放 SQ 提交租约。
     pub fn release_sq_lease(&self, owner: u64) -> bool {
-        lease::release(&self.channel, crate::exec::ExecId(owner))
+        lease::release(&self.channel, owner)
     }
 
     /// 注册设备（委托内部上下文，无需租约）。
@@ -425,7 +425,7 @@ impl AioContextLeased {
         let req_id = self.inner.submit(op, fd, buf, offset)?;
         let new_ep = lease::commit(
             &self.channel,
-            crate::exec::ExecId(owner),
+            owner,
             expected_epoch,
             &format!("aio submit op={:?} fd={} offset={}", op, fd, offset),
         )
@@ -815,7 +815,7 @@ mod tests {
         let ctx = AioContextLeased::new(32, "aio://test-lease");
         assert!(ctx.acquire_sq_lease(101).is_ok());
         let err = ctx.acquire_sq_lease(102).unwrap_err();
-        assert_eq!(err.holder, crate::exec::ExecId(101));
+        assert_eq!(err.holder, crate::exec::101);
         assert!(ctx.release_sq_lease(101));
         assert!(ctx.acquire_sq_lease(102).is_ok());
         assert!(ctx.release_sq_lease(102));
@@ -923,3 +923,4 @@ mod tests {
         assert!(r.contains("epoch="));
     }
 }
+

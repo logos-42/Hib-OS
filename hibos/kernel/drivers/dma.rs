@@ -1,4 +1,4 @@
-//! DMA 引擎（kernel/drivers/dma.rs）。
+﻿//! DMA 引擎（kernel/drivers/dma.rs）。
 //!
 //! 实现散射聚合（Scatter-Gather，S-G）列表、DMA 通道、传输提交与完成中断。
 //! 与现有设备驱动框架并存，为网卡/块设备等提供高性能无 CPU 拷贝的数据传输原语。
@@ -501,7 +501,7 @@ mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::Arc;
 
-    fn test_owner() -> ExecId { ExecId(7) }
+    fn test_owner() -> ExecId { 7 }
 
     #[test]
     fn sg_list_push_and_total() {
@@ -631,3 +631,4 @@ mod tests {
         assert!(dma_act_raw("chan 0").is_err()); // 默认无通道
     }
 }
+

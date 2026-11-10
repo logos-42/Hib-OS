@@ -1,4 +1,4 @@
-//! 磁盘镜像文件（块设备后端）。
+﻿//! 磁盘镜像文件（块设备后端）。
 //!
 //! `DiskImage` 把宿主机上的一个普通文件当作磁盘镜像（块设备）来使用：
 //! 按固定扇区大小（默认 512 字节）读写，支持稀疏写（写超出当前容量时
@@ -381,13 +381,13 @@ impl DiskImageLeased {
         owner: u64,
     ) -> Result<Epoch, crate::lease::LeaseConflict> {
         use crate::lease::acquire;
-        acquire(&self.channel, crate::exec::ExecId(owner), None)
+        acquire(&self.channel, owner, None)
     }
 
     /// 释放写租约。
     pub fn release_write_lease(&self, owner: u64) -> bool {
         use crate::lease::release;
-        release(&self.channel, crate::exec::ExecId(owner))
+        release(&self.channel, owner)
     }
 
     /// 读一个扇区（无需租约，直接快照读）。
@@ -413,7 +413,7 @@ impl DiskImageLeased {
     ) -> Result<Epoch, crate::lease::CommitError> {
         // 先校验租约所有权与 epoch（乐观 CAS）。
         use crate::lease::{commit, acquire};
-        let _ = acquire(&self.channel, crate::exec::ExecId(owner), None)
+        let _ = acquire(&self.channel, owner, None)
             .map_err(|c| crate::lease::CommitError::NotLeaseOwner {
                 holder: Some(c.holder),
             })?;
@@ -421,7 +421,7 @@ impl DiskImageLeased {
             let mut img = self.inner.lock().unwrap();
             img.write_block(sector_idx, buf)?;
         }
-        commit(&self.channel, crate::exec::ExecId(owner), expected_epoch, &format!("write sector {}", sector_idx))
+        commit(&self.channel, owner, expected_epoch, &format!("write sector {}", sector_idx))
     }
 
     /// 刷新所有脏块，并提交一次 epoch（force 模式，无需租约）。
@@ -810,7 +810,7 @@ mod tests {
         // 两个不同 owner 不能同时持有写租约。
         assert!(img.acquire_write_lease(101).is_ok());
         let err = img.acquire_write_lease(102).unwrap_err();
-        assert_eq!(err.holder, Some(crate::exec::ExecId(101)));
+        assert_eq!(err.holder, Some(crate::exec::101));
         assert!(img.release_write_lease(101));
         assert!(img.acquire_write_lease(102).is_ok());
         assert!(img.release_write_lease(102));
@@ -952,3 +952,4 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 }
+

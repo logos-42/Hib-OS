@@ -1,4 +1,4 @@
-//! 分区表解析（MBR / GPT 简化版）。
+﻿//! 分区表解析（MBR / GPT 简化版）。
 //!
 //! 把磁盘镜像（`DiskImage` 或任意实现块读写的设备）上的主引导记录
 //! 与 GUID 分区表解析成 `Partition` 列表，供上层文件系统挂载使用。
@@ -18,7 +18,8 @@
 //!
 //! ## GPT 简化版（LBA 1 开始）
 //! - LBA 1：GPT 头（签名、头大小、头 CRC、当前 LBA、备份 LBA、分区入口
-//!   开始 LBA、分区入口数量、分区入口大小、分区入口数组 CRC）
+
+//!   开始 LBA\nuse std::path::Path;、分区入口数量、分区入口大小、分区入口数组 CRC）
 //! - LBA 2..：分区入口数组（每项 128 字节：类型 GUID、唯一 GUID、起始 LBA、
 //!   结束 LBA、属性、名称 36 字符 UTF-16LE）
 //!
@@ -27,7 +28,7 @@
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, OnceLock};
 
-use crate::fs::disk_img::DiskImage;
+use crate::fs::diskimg::DiskImage;
 use crate::lease::{self, Epoch};
 use crate::caps;
 
@@ -518,12 +519,12 @@ impl PartitionTableLeased {
         &self,
         owner: u64,
     ) -> Result<Epoch, crate::lease::LeaseConflict> {
-        lease::acquire(&self.channel, crate::exec::ExecId(owner), None)
+        lease::acquire(&self.channel, owner, None)
     }
 
     /// 释放写租约。
     pub fn release_write_lease(&self, owner: u64) -> bool {
-        lease::release(&self.channel, crate::exec::ExecId(owner))
+        lease::release(&self.channel, owner)
     }
 
     /// 只读快照：返回当前分区表 clone（无需租约）。
@@ -595,7 +596,7 @@ impl PartitionCaps {
     ) -> Result<Epoch, String> {
         self.check_admin()?;
         // 先获取写租约（乐观 CAS）。
-        let ep = lease::acquire(&self.channel, crate::exec::ExecId(owner), None)
+        let ep = lease::acquire(&self.channel, owner, None)
             .map_err(|c| format!("租约冲突: holder={:?}", c.holder))?;
         // 修改内存表。
         {
@@ -610,7 +611,7 @@ impl PartitionCaps {
         // 提交 epoch。
         let new_ep = lease::commit(
             &self.channel,
-            crate::exec::ExecId(owner),
+            owner,
             ep,
             &format!("set partition index={}", index),
         )
@@ -951,7 +952,7 @@ mod tests {
         let table = PartitionTableLeased::parse_from(&mut disk).unwrap();
         assert!(table.acquire_write_lease(101).is_ok());
         let err = table.acquire_write_lease(102).unwrap_err();
-        assert_eq!(err.holder, crate::exec::ExecId(101));
+        assert_eq!(err.holder, crate::exec::101);
         assert!(table.release_write_lease(101));
         assert!(table.acquire_write_lease(102).is_ok());
         assert!(table.release_write_lease(102));
@@ -1068,3 +1069,6 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 }
+
+
+
