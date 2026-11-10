@@ -826,6 +826,190 @@ pub fn socket_close(fd: SockFd) {
 }
 
 // =====================================================================================
+// 信号量（Semaphore）—— IPC 扩展第五种原语
+// =====================================================================================
+
+/// 信号量标识符。
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct SemId(pub u64);
+
+/// 信号量：维护一个计数器，P 操作（wait）将计数器减 1（若为 0 则阻塞），
+// V 操作（post）将计数器加 1 并唤醒一个等待者。本模拟版本为非阻谢式：
+// P 成功返回 true，计数器为 0 时返回 false。
+pub struct Semaphore {
+    pub id: SemId,
+    pub name: String,
+    pub value: i64,
+    pub max_value: i64,
+    pub wait_count: u64,
+    pub post_count: u64,
+    pub destroy: bool,
+}
+
+impl Semaphore {
+    pub fn new(id: SemId, name: &str, initial_value: i64, max_value: i64) -> Self {
+        Self {
+            id,
+            name: name.to_string(),
+            value: initial_value,
+            max_value,
+            wait_count: 0,
+            post_count: 0,
+            destroy: false,
+        }
+    }
+
+    /// P 操作：尝试将信号量计数器减 1。若计数器 > 0 则成功并返回 true；
+    // 若计数器 <= 0 则失败并返回 false（模拟非阻塞尝试）。
+    pub fn wait(&mut self) -> Result<bool, String> {
+        if self.destroy {
+            return Err("信号量已销毁".to_string());
+        }
+        if self.value > 0 {
+            self.value -= 1;
+            self.wait_count += 1;
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+
+    /// V 操作：将信号量计数器加 1（不超过 max_value），返回操作后的值。
+    pub fn post(&mut self) -> Result<i64, String> {
+        if self.destroy {
+            return Err("信号量已销毁".to_string());
+        }
+        if self.value < self.max_value {
+            self.value += 1;
+        }
+        self.post_count += 1;
+        Ok(self.value)
+    }
+
+    /// 返回当前值。
+    pub fn value(&self) -> i64 {
+        self.value
+    }
+
+    /// 销毁信号量。
+    pub fn destroy(&mut self) {
+        self.destroy = true;
+    }
+
+    pub fn summary(&self) -> String {
+        format!(
+            "sem name={} id={:?} value={} max={} waits={} posts={} destroyed={}",
+            self.name, self.id.0, self.value, self.max_value, self.wait_count, self.post_count, self.destroy
+        )
+    }
+}
+
+/// 信号量管理器。
+pub struct SemaphoreManager {
+    semaphores: HashMap<String, Semaphore>,
+    name_to_id: HashMap<String, SemId>,
+    next_id: u64,
+}
+
+impl SemaphoreManager {
+    pub fn new() -> Self {
+        Self {
+            semaphores: HashMap::new(),
+            name_to_id: HashMap::new(),
+            next_id: 1,
+        }
+    }
+
+    pub fn create(&mut self, name: &str, initial_value: i64, max_value: i64) -> Result<SemId, String> {
+        if self.name_to_id.contains_key(name) {
+            return Err(format!("信号量已存在: {}", name));
+        }
+        let id = SemId(self.next_id);
+        self.next_id += 1;
+        let sem = Semaphore::new(id, name, initial_value, max_value);
+        self.name_to_id.insert(name.to_string(), id);
+        self.semaphores.insert(name.to_string(), sem);
+        Ok(id)
+    }
+
+    pub fn wait(&mut self, id: SemId) -> Result<bool, String> {
+        let name = self.sem_name(id).ok_or_else(|| format!("信号量不存在: {:?}", id))?;
+        self.semaphores.get_mut(&name).unwrap().wait()
+    }
+
+    pub fn post(&mut self, id: SemId) -> Result<i64, String> {
+        let name = self.sem_name(id).ok_or_else(|| format!("信号量不存在: {:?}", id))?;
+        self.semaphores.get_mut(&name).unwrap().post()
+    }
+
+    pub fn destroy(&mut self, id: SemId) -> Result<(), String> {
+        let name = self.sem_name(id).ok_or_else(|| format!("信号量不存在: {:?}", id))?;
+        if let Some(s) = self.semaphores.get_mut(&name) {
+            s.destroy();
+        }
+        self.name_to_id.remove(&name);
+        self.semaphores.remove(&name);
+        Ok(())
+    }
+
+    fn sem_name(&self, id: SemId) -> Option<String> {
+        self.semaphores
+            .iter()
+            .find(|(_, s)| s.id == id)
+            .map(|(n, _)| n.clone())
+    }
+
+    pub fn len(&self) -> usize {
+        self.semaphores.len()
+    }
+
+    pub fn summary(&self) -> String {
+        format!("sem_manager semaphores={}", self.len())
+    }
+}
+
+impl Default for SemaphoreManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// =====================================================================================
+// 信号量全局单例与 API
+// =====================================================================================
+
+static SEM_MGR: OnceLock<Mutex<SemaphoreManager>> = OnceLock::new();
+
+fn sem_mgr() -> &'static Mutex<SemaphoreManager> {
+    SEM_MGR.get_or_init(|| Mutex::new(SemaphoreManager::new()))
+}
+
+/// 创建信号量（全局）。
+pub fn sem_create(name: &str, initial_value: i64, max_value: i64) -> Result<SemId, String> {
+    sem_mgr().lock().unwrap().create(name, initial_value, max_value)
+}
+
+/// P 操作（全局）。
+pub fn sem_wait(id: SemId) -> Result<bool, String> {
+    sem_mgr().lock().unwrap().wait(id)
+}
+
+/// V 操作（全局）。
+pub fn sem_post(id: SemId) -> Result<i64, String> {
+    sem_mgr().lock().unwrap().post(id)
+}
+
+/// 销毁信号量（全局）。
+pub fn sem_destroy(id: SemId) -> Result<(), String> {
+    sem_mgr().lock().unwrap().destroy(id)
+}
+
+/// 返回信号量摘要（全局）。
+pub fn sem_summary() -> String {
+    sem_mgr().lock().unwrap().summary()
+}
+
+// =====================================================================================
 // 单元测试
 // =====================================================================================
 
@@ -977,5 +1161,64 @@ mod tests {
         let _ = pm.create(16);
         let _s = pm.summary();
         let _ = _s;
+    }
+
+    #[test]
+    fn semaphore_wait_post() {
+        let mut mgr = SemaphoreManager::new();
+        let id = mgr.create("sem://test", 1, 5).unwrap();
+        assert_eq!(mgr.wait(id).unwrap(), true); // 计数器 1 -> 0
+        assert_eq!(mgr.wait(id).unwrap(), false); // 计数器 0，失败
+        assert_eq!(mgr.post(id).unwrap(), 1); // 计数器 0 -> 1
+        assert_eq!(mgr.wait(id).unwrap(), true); // 计数器 1 -> 0
+        assert!(mgr.destroy(id).is_ok());
+    }
+
+    #[test]
+    fn semaphore_max_value_clamp() {
+        let mut mgr = SemaphoreManager::new();
+        let id = mgr.create("sem://cap", 2, 3).unwrap();
+        // post 多次不应超过 max_value
+        let _ = mgr.post(id);
+        let _ = mgr.post(id);
+        let _ = mgr.post(id);
+        assert_eq!(mgr.post(id).unwrap(), 3); // 已达到上限，保持 3
+    }
+
+    #[test]
+    fn semaphore_destroyed_rejected() {
+        let mut mgr = SemaphoreManager::new();
+        let id = mgr.create("sem://dead", 1, 5).unwrap();
+        mgr.destroy(id).unwrap();
+        assert_eq!(mgr.wait(id).unwrap_err().as_str(), "信号量已销毁");
+        assert_eq!(mgr.post(id).unwrap_err().as_str(), "信号量已销毁");
+    }
+
+    #[test]
+    fn semaphore_duplicate_create_rejected() {
+        let mut mgr = SemaphoreManager::new();
+        let _ = mgr.create("sem://dup", 1, 5);
+        assert_eq!(
+            mgr.create("sem://dup", 1, 5).unwrap_err().as_str(),
+            "信号量已存在: sem://dup"
+        );
+    }
+
+    #[test]
+    fn global_semaphore_functions() {
+        let id = sem_create("gsem", 3, 10).unwrap();
+        assert_eq!(sem_wait(id).unwrap(), true);
+        assert_eq!(sem_post(id).unwrap(), 3);
+        assert!(sem_destroy(id).is_ok());
+        let s = sem_summary();
+        assert!(s.contains("sem_manager"));
+    }
+
+    #[test]
+    fn semaphore_summary_text() {
+        let mut mgr = SemaphoreManager::new();
+        let _ = mgr.create("s1", 0, 5);
+        let s = mgr.summary();
+        assert!(s.contains("semaphores="));
     }
 }

@@ -86,6 +86,16 @@ pub mod async_runtime;
 pub mod signal;
 pub mod ipc_ext;
 
+// —— P0 路线图：内核基础设施 ——
+pub mod process;       // P0-2 进程隔离与 PCB
+pub mod fs;            // P0-3 文件系统 VFS
+pub mod block;         // P0-4 块设备层
+pub mod simplefs;      // P0-4 简单文件系统
+
+// —— P1 路线图：重要组件 ——
+pub mod drivers;       // P1-2 设备驱动框架
+pub mod smp;           // P1-3 多核 SMP 支持
+
 use ai_token::{ActionProcess, AIConsciousness, ComputeGraph, GraphOpType, TokenCreateRequest};
 use scheduler::{CpuPriority, GpuScheduler};
 use syscall::{AiSystemCall, AiSystemCallResult};

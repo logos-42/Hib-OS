@@ -7,8 +7,11 @@
 //! `check_block_quota` / `check_inode_quota` 进行准入控制。
 
 use std::collections::{BTreeMap, HashMap};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+use crate::lease::{self, Epoch};
+use crate::caps;
 
 /// 用户/组 ID。
 pub type Uid = u64;
@@ -357,6 +360,234 @@ impl QuotaManager {
     }
 }
 
+// ============================================================================
+// 并发控制：基于 lease.rs 的单写者租约 + epoch CAS
+// ============================================================================
+
+/// 基于 lease 的配额管理器包装器：对配额设置/扣费/释放加单写者租约，
+/// 避免多线程并发修改同一用户配额时发生竞争。
+pub struct QuotaManagerLeased {
+    inner: QuotaManager,
+    channel: String,
+}
+
+impl QuotaManagerLeased {
+    /// 创建租约保护的配额管理器。
+    pub fn new(channel: &str) -> Self {
+        Self {
+            inner: QuotaManager::new(),
+            channel: channel.to_string(),
+        }
+    }
+
+    /// 申请配额修改租约，返回当前 epoch。
+    pub fn acquire_quota_lease(&self, owner: u64) -> Result<Epoch, crate::lease::LeaseConflict> {
+        lease::acquire(&self.channel, crate::exec::ExecId(owner), None)
+    }
+
+    /// 释放配额修改租约。
+    pub fn release_quota_lease(&self, owner: u64) -> bool {
+        lease::release(&self.channel, crate::exec::ExecId(owner))
+    }
+
+    /// 查询用户配额（只读，无需租约）。
+    pub fn get_quota(&self, uid: Uid) -> Result<QuotaInfo, QuotaError> {
+        self.inner.get_quota(uid)
+    }
+
+    /// 在租约保护下设置用户配额，然后 commit 推进 epoch。
+    pub fn set_quota_under_lease(
+        &self,
+        owner: u64,
+        expected_epoch: Epoch,
+        uid: Uid,
+        block_limit: u64,
+        inode_limit: u64,
+    ) -> Result<Epoch, QuotaError> {
+        let _ = self.acquire_quota_lease(owner)?;
+        self.inner.set_quota(uid, block_limit, inode_limit)?;
+        let new_ep = lease::commit(
+            &self.channel,
+            crate::exec::ExecId(owner),
+            expected_epoch,
+            &format!("quota set uid={} blocks={} inodes={}", uid, block_limit, inode_limit),
+        )
+        .map_err(|e| QuotaError::Invalid)?;
+        Ok(new_ep)
+    }
+
+    /// 在租约保护下扣费，然后 commit 推进 epoch。
+    pub fn charge_under_lease(
+        &self,
+        owner: u64,
+        expected_epoch: Epoch,
+        uid: Uid,
+        blocks: u64,
+        inodes: u64,
+    ) -> Result<Epoch, QuotaError> {
+        let _ = self.acquire_quota_lease(owner)?;
+        self.inner.charge(uid, blocks, inodes)?;
+        let new_ep = lease::commit(
+            &self.channel,
+            crate::exec::ExecId(owner),
+            expected_epoch,
+            &format!("quota charge uid={} blocks={} inodes={}", uid, blocks, inodes),
+        )
+        .map_err(|e| QuotaError::Invalid)?;
+        Ok(new_ep)
+    }
+
+    /// 在租约保护下释放配额，然后 commit 推进 epoch。
+    pub fn release_under_lease(
+        &self,
+        owner: u64,
+        expected_epoch: Epoch,
+        uid: Uid,
+        blocks: u64,
+        inodes: u64,
+    ) -> Result<Epoch, QuotaError> {
+        let _ = self.acquire_quota_lease(owner)?;
+        self.inner.release(uid, blocks, inodes)?;
+        let new_ep = lease::commit(
+            &self.channel,
+            crate::exec::ExecId(owner),
+            expected_epoch,
+            &format!("quota release uid={} blocks={} inodes={}", uid, blocks, inodes),
+        )
+        .map_err(|e| QuotaError::Invalid)?;
+        Ok(new_ep)
+    }
+
+    /// 返回用户数。
+    pub fn user_count(&self) -> usize {
+        self.inner.user_count()
+    }
+
+    /// 返回项目数。
+    pub fn project_count(&self) -> usize {
+        self.inner.project_count()
+    }
+
+    /// 强制刷新（force 模式，绕过租约）。
+    pub fn force_set_default(&self, owner: u64, block_limit: u64, inode_limit: u64) -> Epoch {
+        lease::force(
+            &self.channel,
+            &format!("quota force_default blocks={} inodes={} owner={}", block_limit, inode_limit, owner),
+        )
+    }
+
+    /// 返回当前 epoch。
+    pub fn epoch(&self) -> Epoch {
+        lease::epoch(&self.channel)
+    }
+}
+
+/// 能力位权限包装器：在配额操作上加 `caps` 校验。
+///
+/// `CAP_SYS_ADMIN` 允许设置/修改配额；查询无需能力。
+pub struct QuotaManagerCaps {
+    inner: QuotaManager,
+    caps: Arc<Mutex<caps::Caps>>,
+}
+
+impl QuotaManagerCaps {
+    /// 包装一个已有配额管理器，绑定全局能力表。
+    pub fn new(mgr: QuotaManager) -> Self {
+        Self {
+            inner: mgr,
+            caps: Arc::new(Mutex::new(caps::caps().lock().unwrap().clone())),
+        }
+    }
+
+    fn check_admin(&self) -> Result<(), String> {
+        let c = self.caps.lock().unwrap();
+        if c.has("CAP_SYS_ADMIN") {
+            Ok(())
+        } else {
+            Err("缺少 CAP_SYS_ADMIN 能力".to_string())
+        }
+    }
+
+    /// 设置用户配额（需 CAP_SYS_ADMIN）。
+    pub fn set_quota(
+        &self,
+        uid: Uid,
+        block_limit: u64,
+        inode_limit: u64,
+    ) -> Result<(), String> {
+        self.check_admin()?;
+        self.inner.set_quota(uid, block_limit, inode_limit).map_err(|e| e.to_string())
+    }
+
+    /// 扣费（需 CAP_SYS_ADMIN）。
+    pub fn charge(
+        &self,
+        uid: Uid,
+        blocks: u64,
+        inodes: u64,
+    ) -> Result<(), String> {
+        self.check_admin()?;
+        self.inner.charge(uid, blocks, inodes).map_err(|e| e.to_string())
+    }
+
+    /// 释放（需 CAP_SYS_ADMIN）。
+    pub fn release(
+        &self,
+        uid: Uid,
+        blocks: u64,
+        inodes: u64,
+    ) -> Result<(), String> {
+        self.check_admin()?;
+        self.inner.release(uid, blocks, inodes).map_err(|e| e.to_string())
+    }
+
+    /// 查询配额（只读，无需能力）。
+    pub fn get_quota(&self, uid: Uid) -> Result<QuotaInfo, String> {
+        self.inner.get_quota(uid).map_err(|e| e.to_string())
+    }
+
+    /// 返回用户数（无需能力）。
+    pub fn user_count(&self) -> usize {
+        self.inner.user_count()
+    }
+}
+
+// ============================================================================
+// sense/act 通道接口：quota://<设备名>
+// ============================================================================
+
+/// 感知磁盘配额通道：返回配额管理器状态摘要。
+///
+/// 通道名形式：`quota://<设备名>`
+pub fn probe_quota(name: &str) -> Option<String> {
+    let channel = format!("quota://{}", name);
+    let epoch = lease::epoch(&channel);
+    Some(format!(
+        "channel={} type=quota_manager epoch={} ops=set_quota|charge|release|get_quota|warn_users",
+        name, epoch
+    ))
+}
+
+/// 对磁盘配额通道执行行动。
+///
+/// 支持子命令：
+/// - `status` —— 返回配额状态摘要（占位）
+/// - `epoch` —— 返回当前 epoch
+pub fn act_quota(name: &str, payload: &str) -> Option<Result<String, String>> {
+    let mut tokens = payload.split_whitespace();
+    let sub = tokens.next().unwrap_or("");
+    let channel = format!("quota://{}", name);
+    match sub {
+        "status" => Some(Ok(format!(
+            "quota://{} status=active epoch={}",
+            name,
+            lease::epoch(&channel)
+        ))),
+        "epoch" => Some(Ok(format!("epoch={}", lease::epoch(&channel)))),
+        _ => Some(Err("用法: status | epoch".to_string())),
+    }
+}
+
 impl Default for QuotaManager {
     fn default() -> Self {
         Self::new()
@@ -513,5 +744,98 @@ mod tests {
         mgr.set_quota(1000, 1000, 1000).unwrap();
         mgr.charge(1000, 250, 0).unwrap();
         assert_eq!(mgr.get_quota(1000).unwrap().block_pct(), 25);
+    }
+
+    // ----- lease 并发控制测试 -----
+
+    #[test]
+    fn quota_leased_single_writer() {
+        let mgr = QuotaManagerLeased::new("quota://test-lease");
+        assert!(mgr.acquire_quota_lease(101).is_ok());
+        let err = mgr.acquire_quota_lease(102).unwrap_err();
+        assert_eq!(err.holder, crate::exec::ExecId(101));
+        assert!(mgr.release_quota_lease(101));
+        assert!(mgr.acquire_quota_lease(102).is_ok());
+        assert!(mgr.release_quota_lease(102));
+    }
+
+    #[test]
+    fn quota_leased_set_charge_commit_epoch() {
+        let mgr = QuotaManagerLeased::new("quota://test-lease2");
+        let ep0 = mgr.epoch();
+        let ep1 = mgr.acquire_quota_lease(201).unwrap();
+        assert_eq!(ep1, ep0);
+        let new_ep = mgr.set_quota_under_lease(201, ep0, 1000, 10000, 500).unwrap();
+        assert_eq!(new_ep, ep0 + 1);
+        let new_ep2 = mgr.charge_under_lease(201, new_ep, 1000, 100, 10).unwrap();
+        assert_eq!(new_ep2, new_ep + 1);
+        let info = mgr.get_quota(1000).unwrap();
+        assert_eq!(info.used_blocks, 100);
+        assert!(mgr.release_quota_lease(201));
+    }
+
+    #[test]
+    fn quota_leased_stale_epoch_rejected() {
+        let mgr = QuotaManagerLeased::new("quota://test-lease3");
+        let ep = mgr.acquire_quota_lease(301).unwrap();
+        let _ = mgr.set_quota_under_lease(301, ep, 2000, 5000, 100).unwrap();
+        // 再用旧 epoch 设置应被拒绝。
+        let ep2 = mgr.acquire_quota_lease(301).unwrap();
+        let err = mgr.set_quota_under_lease(301, ep, 3000, 6000, 200).unwrap_err();
+        assert!(matches!(err, QuotaError::Invalid));
+        let _ = mgr.release_quota_lease(301);
+    }
+
+    #[test]
+    fn quota_leased_force_set_default() {
+        let mgr = QuotaManagerLeased::new("quota://test-lease4");
+        let ep0 = mgr.epoch();
+        let ep1 = mgr.force_set_default(401, 100000, 1000);
+        assert!(ep1 > ep0);
+    }
+
+    // ----- caps 权限测试 -----
+
+    #[test]
+    fn quota_caps_admin_required() {
+        let mgr = QuotaManager::new();
+        let caps_mgr = QuotaManagerCaps::new(mgr);
+        {
+            let mut c = caps::caps().lock().unwrap();
+            let _ = c.revoke("CAP_SYS_ADMIN");
+        }
+        assert!(caps_mgr.set_quota(1000, 1000, 100).is_err());
+        {
+            let mut c = caps::caps().lock().unwrap();
+            let _ = c.grant("CAP_SYS_ADMIN");
+        }
+        assert!(caps_mgr.set_quota(1000, 1000, 100).is_ok());
+    }
+
+    #[test]
+    fn quota_caps_get_quota_no_cap() {
+        let mgr = QuotaManager::new();
+        mgr.set_quota(1000, 1000, 100).unwrap();
+        let caps_mgr = QuotaManagerCaps::new(mgr);
+        // 查询不需要能力。
+        assert!(caps_mgr.get_quota(1000).is_ok());
+    }
+
+    // ----- sense/act 通道测试 -----
+
+    #[test]
+    fn quota_probe_channel() {
+        let snap = probe_quota("quota://ram0").unwrap();
+        assert!(snap.contains("quota://ram0"));
+        assert!(snap.contains("epoch="));
+        assert!(snap.contains("ops="));
+    }
+
+    #[test]
+    fn quota_act_channel_status_epoch() {
+        let r = act_quota("quota://ram0", "status").unwrap().unwrap();
+        assert!(r.contains("status=active"));
+        let r = act_quota("quota://ram0", "epoch").unwrap().unwrap();
+        assert!(r.contains("epoch="));
     }
 }

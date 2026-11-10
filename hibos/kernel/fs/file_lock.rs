@@ -12,6 +12,9 @@ use std::collections::{BTreeMap, VecDeque};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use crate::lease::{self, Epoch};
+use crate::caps;
+
 /// 锁类型。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LockType {
@@ -368,6 +371,232 @@ impl FileLockManager {
     }
 }
 
+// ============================================================================
+// 并发控制：基于 lease.rs 的单写者租约 + epoch CAS
+// ============================================================================
+
+/// 基于 lease 的文件锁管理器包装器：对跨 fd 的锁操作加单写者租约，
+/// 避免多线程并发加锁/解锁同一 fd 的范围时发生竞争。
+pub struct FileLockManagerLeased {
+    inner: FileLockManager,
+    channel: String,
+}
+
+impl FileLockManagerLeased {
+    /// 创建租约保护的文件锁管理器。
+    pub fn new(channel: &str) -> Self {
+        Self {
+            inner: FileLockManager::new(),
+            channel: channel.to_string(),
+        }
+    }
+
+    /// 申请锁操作租约，返回当前 epoch。
+    pub fn acquire_lock_lease(&self, owner: u64) -> Result<Epoch, crate::lease::LeaseConflict> {
+        lease::acquire(&self.channel, crate::exec::ExecId(owner), None)
+    }
+
+    /// 释放锁操作租约。
+    pub fn release_lock_lease(&self, owner: u64) -> bool {
+        lease::release(&self.channel, crate::exec::ExecId(owner))
+    }
+
+    /// 注册 fd（委托内部管理器，无需租约）。
+    pub fn register_fd(&self, fd: u64) -> Result<(), LockError> {
+        self.inner.register_fd(fd)
+    }
+
+    /// 在租约保护下加锁，然后 commit 推进 epoch。
+    pub fn lock_under_lease(
+        &self,
+        owner: u64,
+        expected_epoch: Epoch,
+        fd: u64,
+        lock_type: LockType,
+        start: u64,
+        len: u64,
+        pid: u64,
+    ) -> Result<Epoch, LockError> {
+        let _ = self.acquire_lock_lease(owner)?;
+        self.inner.lock_with_pid(fd, pid, lock_type, start, len)?;
+        let new_ep = lease::commit(
+            &self.channel,
+            crate::exec::ExecId(owner),
+            expected_epoch,
+            &format!("file_lock lock fd={} start={} len={}", fd, start, len),
+        )
+        .map_err(|e| LockError::Internal(format!("lease commit failed: {:?}", e)))?;
+        Ok(new_ep)
+    }
+
+    /// 在租约保护下解锁，然后 commit 推进 epoch。
+    pub fn unlock_under_lease(
+        &self,
+        owner: u64,
+        expected_epoch: Epoch,
+        fd: u64,
+        pid: u64,
+        start: u64,
+        len: u64,
+    ) -> Result<Epoch, LockError> {
+        let _ = self.acquire_lock_lease(owner)?;
+        self.inner.unlock(fd, pid, start, len)?;
+        let new_ep = lease::commit(
+            &self.channel,
+            crate::exec::ExecId(owner),
+            expected_epoch,
+            &format!("file_lock unlock fd={} start={} len={}", fd, start, len),
+        )
+        .map_err(|e| LockError::Internal(format!("lease commit failed: {:?}", e)))?;
+        Ok(new_ep)
+    }
+
+    /// 释放 fd 上的全部锁（进程退出时调用，需租约）。
+    pub fn release_fd_under_lease(
+        &self,
+        owner: u64,
+        expected_epoch: Epoch,
+        fd: u64,
+    ) -> Result<Epoch, LockError> {
+        let _ = self.acquire_lock_lease(owner)?;
+        self.inner.release_fd(fd)?;
+        let new_ep = lease::commit(
+            &self.channel,
+            crate::exec::ExecId(owner),
+            expected_epoch,
+            &format!("file_lock release_fd fd={}", fd),
+        )
+        .map_err(|e| LockError::Internal(format!("lease commit failed: {:?}", e)))?;
+        Ok(new_ep)
+    }
+
+    /// 列出 fd 上的全部锁（只读，无需租约）。
+    pub fn list_locks(&self, fd: u64) -> Result<Vec<LockInfo>, LockError> {
+        self.inner.list_locks(fd)
+    }
+
+    /// 强制刷新（force 模式，绕过租约）。
+    pub fn force_unlock_all(&self, owner: u64) -> Epoch {
+        lease::force(&self.channel, &format!("file_lock force_unlock_all owner={}", owner))
+    }
+
+    /// 返回当前 epoch。
+    pub fn epoch(&self) -> Epoch {
+        lease::epoch(&self.channel)
+    }
+}
+
+/// 能力位权限包装器：在文件锁操作上加 `caps` 校验。
+///
+/// `CAP_SYS_ADMIN` 允许所有锁操作；无此能力则拒绝加锁/解锁。
+pub struct FileLockManagerCaps {
+    inner: FileLockManager,
+    caps: Arc<Mutex<caps::Caps>>,
+}
+
+impl FileLockManagerCaps {
+    /// 包装一个已有锁管理器，绑定全局能力表。
+    pub fn new(mgr: FileLockManager) -> Self {
+        Self {
+            inner: mgr,
+            caps: Arc::new(Mutex::new(caps::caps().lock().unwrap().clone())),
+        }
+    }
+
+    fn check_admin(&self) -> Result<(), String> {
+        let c = self.caps.lock().unwrap();
+        if c.has("CAP_SYS_ADMIN") {
+            Ok(())
+        } else {
+            Err("缺少 CAP_SYS_ADMIN 能力".to_string())
+        }
+    }
+
+    /// 注册 fd（需 CAP_SYS_ADMIN）。
+    pub fn register_fd(&self, fd: u64) -> Result<(), String> {
+        self.check_admin()?;
+        self.inner.register_fd(fd).map_err(|e| e.to_string())
+    }
+
+    /// 加锁（需 CAP_SYS_ADMIN）。
+    pub fn lock_with_pid(
+        &self,
+        fd: u64,
+        pid: u64,
+        lock_type: LockType,
+        start: u64,
+        len: u64,
+    ) -> Result<(), String> {
+        self.check_admin()?;
+        self.inner.lock_with_pid(fd, pid, lock_type, start, len).map_err(|e| e.to_string())
+    }
+
+    /// 解锁（需 CAP_SYS_ADMIN）。
+    pub fn unlock(&self, fd: u64, pid: u64, start: u64, len: u64) -> Result<(), String> {
+        self.check_admin()?;
+        self.inner.unlock(fd, pid, start, len).map_err(|e| e.to_string())
+    }
+
+    /// 测试锁（只读，无需能力）。
+    pub fn test_lock(
+        &self,
+        fd: u64,
+        pid: u64,
+        lock_type: LockType,
+        start: u64,
+        len: u64,
+    ) -> Result<Option<LockInfo>, String> {
+        self.inner.test_lock(fd, pid, lock_type, start, len).map_err(|e| e.to_string())
+    }
+
+    /// 列出锁（只读，无需能力）。
+    pub fn list_locks(&self, fd: u64) -> Result<Vec<LockInfo>, String> {
+        self.inner.list_locks(fd).map_err(|e| e.to_string())
+    }
+
+    /// 释放 fd（需 CAP_SYS_ADMIN）。
+    pub fn release_fd(&self, fd: u64) -> Result<(), String> {
+        self.check_admin()?;
+        self.inner.release_fd(fd).map_err(|e| e.to_string())
+    }
+}
+
+// ============================================================================
+// sense/act 通道接口：filelock://<设备名>
+// ============================================================================
+
+/// 感知文件锁通道：返回锁管理器状态摘要。
+///
+/// 通道名形式：`filelock://<设备名>`
+pub fn probe_file_lock(name: &str) -> Option<String> {
+    let channel = format!("filelock://{}", name);
+    let epoch = lease::epoch(&channel);
+    Some(format!(
+        "channel={} type=file_lock epoch={} ops=lock|unlock|test_lock|list_locks|release_fd",
+        name, epoch
+    ))
+}
+
+/// 对文件锁通道执行行动。
+///
+/// 支持子命令：
+/// - `status` —— 返回锁状态摘要（占位）
+/// - `epoch` —— 返回当前 epoch
+pub fn act_file_lock(name: &str, payload: &str) -> Option<Result<String, String>> {
+    let mut tokens = payload.split_whitespace();
+    let sub = tokens.next().unwrap_or("");
+    let channel = format!("filelock://{}", name);
+    match sub {
+        "status" => Some(Ok(format!(
+            "filelock://{} status=active epoch={}",
+            name,
+            lease::epoch(&channel)
+        ))),
+        "epoch" => Some(Ok(format!("epoch={}", lease::epoch(&channel)))),
+        _ => Some(Err("用法: status | epoch".to_string())),
+    }
+}
+
 impl Default for FileLockManager {
     fn default() -> Self {
         Self::new()
@@ -519,5 +748,107 @@ mod tests {
             mgr.test_lock(99, 10, LockType::WrLock, 0, 100).unwrap_err(),
             LockError::NoFd
         );
+    }
+
+    // ----- lease 并发控制测试 -----
+
+    #[test]
+    fn file_lock_leased_single_writer() {
+        let mgr = FileLockManagerLeased::new("filelock://test-lease");
+        mgr.register_fd(1).unwrap();
+        assert!(mgr.acquire_lock_lease(101).is_ok());
+        let err = mgr.acquire_lock_lease(102).unwrap_err();
+        assert_eq!(err.holder, crate::exec::ExecId(101));
+        assert!(mgr.release_lock_lease(101));
+        assert!(mgr.acquire_lock_lease(102).is_ok());
+        assert!(mgr.release_lock_lease(102));
+    }
+
+    #[test]
+    fn file_lock_leased_lock_unlock_commit_epoch() {
+        let mgr = FileLockManagerLeased::new("filelock://test-lease2");
+        mgr.register_fd(1).unwrap();
+        let ep0 = mgr.epoch();
+        let ep1 = mgr.acquire_lock_lease(201).unwrap();
+        assert_eq!(ep1, ep0);
+        let new_ep = mgr.lock_under_lease(201, ep0, 1, LockType::WrLock, 0, 100, 201).unwrap();
+        assert_eq!(new_ep, ep0 + 1);
+        let new_ep2 = mgr.unlock_under_lease(201, new_ep, 1, 201, 0, 100).unwrap();
+        assert_eq!(new_ep2, new_ep + 1);
+        assert!(mgr.release_lock_lease(201));
+    }
+
+    #[test]
+    fn file_lock_leased_stale_epoch_rejected() {
+        let mgr = FileLockManagerLeased::new("filelock://test-lease3");
+        mgr.register_fd(1).unwrap();
+        let ep = mgr.acquire_lock_lease(301).unwrap();
+        let _ = mgr.lock_under_lease(301, ep, 1, LockType::WrLock, 0, 100, 301).unwrap();
+        // 再用旧 epoch 加锁应被拒绝。
+        let ep2 = mgr.acquire_lock_lease(301).unwrap();
+        let err = mgr.lock_under_lease(301, ep, 1, LockType::WrLock, 0, 100, 301).unwrap_err();
+        assert!(matches!(err, LockError::Internal(_)));
+        let _ = mgr.release_lock_lease(301);
+    }
+
+    #[test]
+    fn file_lock_leased_force_unlock_all() {
+        let mgr = FileLockManagerLeased::new("filelock://test-lease4");
+        let ep0 = mgr.epoch();
+        let ep1 = mgr.force_unlock_all(401);
+        assert!(ep1 > ep0);
+    }
+
+    // ----- caps 权限测试 -----
+
+    #[test]
+    fn file_lock_caps_admin_required() {
+        let mgr = FileLockManager::new();
+        let caps_mgr = FileLockManagerCaps::new(mgr);
+        {
+            let mut c = caps::caps().lock().unwrap();
+            let _ = c.revoke("CAP_SYS_ADMIN");
+        }
+        assert!(caps_mgr.register_fd(1).is_err());
+        {
+            let mut c = caps::caps().lock().unwrap();
+            let _ = c.grant("CAP_SYS_ADMIN");
+        }
+        assert!(caps_mgr.register_fd(1).is_ok());
+    }
+
+    #[test]
+    fn file_lock_caps_admin_required_for_lock() {
+        let mgr = FileLockManager::new();
+        mgr.register_fd(1).unwrap();
+        let caps_mgr = FileLockManagerCaps::new(mgr);
+        {
+            let mut c = caps::caps().lock().unwrap();
+            let _ = c.revoke("CAP_SYS_ADMIN");
+        }
+        assert!(caps_mgr.lock_with_pid(1, 10, LockType::WrLock, 0, 100).is_err());
+        {
+            let mut c = caps::caps().lock().unwrap();
+            let _ = c.grant("CAP_SYS_ADMIN");
+        }
+        assert!(caps_mgr.lock_with_pid(1, 10, LockType::WrLock, 0, 100).is_ok());
+    }
+
+    // ----- sense/act 通道测试 -----
+
+    #[test]
+    fn file_lock_probe_channel() {
+        let snap = probe_file_lock("filelock://ram0").unwrap();
+        assert!(snap.contains("filelock://ram0"));
+        assert!(snap.contains("epoch="));
+        assert!(snap.contains("ops="));
+    }
+
+    #[test]
+    fn file_lock_act_channel_status_epoch() {
+        let r = act_file_lock("filelock://ram0", "status").unwrap().unwrap();
+        assert!(r.contains("status=active"));
+        let r = act_file_lock("filelock://ram0", "epoch").unwrap().unwrap();
+        assert!(r.contains("epoch="));
     }
 }

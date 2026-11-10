@@ -9,6 +9,7 @@
 //! 所有颜色为 32bpp ARGB（0xAARRGGBB），与 `kernel/gui/surface.rs` 共享像素格式。
 
 use super::surface::{argb, palette, Rect, Surface};
+use super::window::WindowId;
 use crate::monitor::get_time_ns;
 use std::collections::BTreeMap;
 use std::sync::{Mutex, OnceLock};
@@ -121,7 +122,9 @@ pub fn blend_surfaces(src: &Surface, dst: &mut Surface, mode: BlendMode, offset:
 // ============================================================================
 
 /// 合成图层：离屏缓冲区 + 透明度 + 变换。
-#[derive(Clone, Debug)]
+///
+/// `Surface` 不实现 `Debug`，故此处手动实现以避免派生失败。
+#[derive(Clone)]
 pub struct Layer {
     pub id: u64,
     pub surface: Surface,
@@ -129,6 +132,19 @@ pub struct Layer {
     pub visible: bool,
     pub blend_mode: BlendMode,
     pub offset: (i32, i32),
+}
+
+impl std::fmt::Debug for Layer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Layer")
+            .field("id", &self.id)
+            .field("surface", &format_args!("{}x{}", self.surface.width(), self.surface.height()))
+            .field("alpha", &self.alpha)
+            .field("visible", &self.visible)
+            .field("blend_mode", &self.blend_mode)
+            .field("offset", &self.offset)
+            .finish()
+    }
 }
 
 impl Layer {
@@ -161,7 +177,7 @@ impl Layer {
                     let r = ((p >> 16) as u8 as u32 * factor / 255) as u8;
                     let g = ((p >> 8) as u8 as u32 * factor / 255) as u8;
                     let b = ((p as u8 as u32 * factor / 255) as u8);
-                    self.surface.set(x, y, argb(a, r, g, b));
+                    self.surface.put(x, y, argb(a, r, g, b));
                 }
             }
         }
@@ -503,7 +519,7 @@ impl CompositorExt {
                             let r = ((p >> 16) as u8 as u32 * factor / 255) as u8;
                             let g = ((p >> 8) as u8 as u32 * factor / 255) as u8;
                             let b = ((p as u8 as u32 * factor / 255) as u8);
-                            surf.set(x, y, argb(a, r, g, b));
+                            surf.put(x, y, argb(a, r, g, b));
                         }
                     }
                 }

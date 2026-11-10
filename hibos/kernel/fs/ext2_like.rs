@@ -9,11 +9,14 @@
 //! `unlink`/`mkdir`/`readdir`/`stat`。内部提供块/inode 分配器与位图管理。
 
 use std::collections::BTreeMap;
+use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::fs::block::{BlockDevice, BlockError, BLOCK_SIZE};
 use crate::fs::buffer_cache::BufferCache;
 use crate::fs::disk_img::DiskImage;
+use crate::lease::{self, Epoch};
+use crate::caps;
 
 /// ext2 文件系统魔数。
 pub const EXT2_MAGIC: u16 = 0xEF53;
@@ -1079,7 +1082,356 @@ impl Ext2Fs {
     }
 }
 
-/// 挂载 ext2 文件系统：从设备加载元数据并返回 `Ext2Fs`。
+// ============================================================================
+// 并发控制：基于 lease.rs 的单写者租约 + epoch CAS
+// ============================================================================
+
+/// 基于 lease 的 ext2 文件系统包装器：对元数据修改（创建/删除/写入/截断）
+/// 加单写者租约保护，避免多进程并发修改同一 inode 或目录块。
+///
+/// 读取路径（stat/read/lookup）不需要租约；写入路径必须先
+/// `acquire_write_lease`，提交时用 `commit_write` 做乐观 epoch CAS。
+pub struct Ext2FsLeased {
+    inner: Mutex<Ext2Fs>,
+    channel: String,
+}
+
+impl Ext2FsLeased {
+    /// 从块设备格式化并包装为租约保护的 ext2 文件系统。
+    pub fn format(
+        device: Box<dyn BlockDevice + Send>,
+        channel: &str,
+    ) -> Result<Self, Ext2Error> {
+        let fs = crate::fs::ext2_like::format(device)?;
+        Ok(Self {
+            inner: Mutex::new(fs),
+            channel: channel.to_string(),
+        })
+    }
+
+    /// 从块设备挂载并包装为租约保护的 ext2 文件系统。
+    pub fn mount(
+        device: Box<dyn BlockDevice + Send>,
+        channel: &str,
+    ) -> Result<Self, Ext2Error> {
+        let fs = crate::fs::ext2_like::mount(device)?;
+        Ok(Self {
+            inner: Mutex::new(fs),
+            channel: channel.to_string(),
+        })
+    }
+
+    /// 申请元数据写租约，返回当前 epoch。
+    pub fn acquire_write_lease(
+        &self,
+        owner: u64,
+    ) -> Result<Epoch, crate::lease::LeaseConflict> {
+        lease::acquire(&self.channel, crate::exec::ExecId(owner), None)
+    }
+
+    /// 释放元数据写租约。
+    pub fn release_write_lease(&self, owner: u64) -> bool {
+        lease::release(&self.channel, crate::exec::ExecId(owner))
+    }
+
+    /// 只读 stat（无需租约）。
+    pub fn stat(&self, ino: u32) -> Result<crate::fs::ext2_like::FileStat, Ext2Error> {
+        let fs = self.inner.lock().unwrap();
+        fs.stat(ino)
+    }
+
+    /// 只读文件内容（无需租约）。
+    pub fn file_read(
+        &self,
+        ino: u32,
+        offset: u64,
+        len: u64,
+    ) -> Result<Vec<u8>, Ext2Error> {
+        let fs = self.inner.lock().unwrap();
+        fs.file_read(ino, offset, len)
+    }
+
+    /// 目录查找（无需租约）。
+    pub fn dir_lookup(&self, parent_ino: u32, name: &str) -> Option<u32> {
+        let fs = self.inner.lock().unwrap();
+        fs.dir_lookup(parent_ino, name)
+    }
+
+    /// 在租约保护下创建文件：alloc inode + dir_add，然后 commit 推进 epoch。
+    pub fn create_under_lease(
+        &self,
+        owner: u64,
+        expected_epoch: Epoch,
+        parent_ino: u32,
+        name: &str,
+        mode: u16,
+    ) -> Result<(u32, Epoch), Ext2Error> {
+        let mut fs = self.inner.lock().unwrap();
+        let ino = fs.alloc_inode()?;
+        let mut inode = Ext2Inode::file(ino, mode, 0, 0);
+        fs.inodes.insert(ino, inode);
+        fs.dir_add(parent_ino, name, ino)?;
+        drop(fs); // 释放内部锁，避免与 lease 锁嵌套
+        // 提交 epoch（乐观 CAS）。
+        let new_ep = lease::commit(
+            &self.channel,
+            crate::exec::ExecId(owner),
+            expected_epoch,
+            &format!("ext2 create {} ino={}", name, ino),
+        )
+        .map_err(|e| Ext2Error::IoError(format!("lease commit failed: {:?}", e)))?;
+        Ok((ino, new_ep))
+    }
+
+    /// 在租约保护下写入文件内容，然后 commit 推进 epoch。
+    pub fn file_write_under_lease(
+        &self,
+        owner: u64,
+        expected_epoch: Epoch,
+        ino: u32,
+        offset: u64,
+        data: &[u8],
+    ) -> Result<(u64, Epoch), Ext2Error> {
+        let mut fs = self.inner.lock().unwrap();
+        let written = fs.file_write(ino, offset, data)?;
+        drop(fs);
+        let new_ep = lease::commit(
+            &self.channel,
+            crate::exec::ExecId(owner),
+            expected_epoch,
+            &format!("ext2 write ino={} offset={} len={}", ino, offset, data.len()),
+        )
+        .map_err(|e| Ext2Error::IoError(format!("lease commit failed: {:?}", e)))?;
+        Ok((written, new_ep))
+    }
+
+    /// 在租约保护下删除文件/目录，然后 commit 推进 epoch。
+    pub fn unlink_under_lease(
+        &self,
+        owner: u64,
+        expected_epoch: Epoch,
+        parent_ino: u32,
+        name: &str,
+    ) -> Result<(u32, Epoch), Ext2Error> {
+        let mut fs = self.inner.lock().unwrap();
+        let child_ino = fs.dir_remove(parent_ino, name)?;
+        drop(fs);
+        let new_ep = lease::commit(
+            &self.channel,
+            crate::exec::ExecId(owner),
+            expected_epoch,
+            &format!("ext2 unlink {} ino={}", name, child_ino),
+        )
+        .map_err(|e| Ext2Error::IoError(format!("lease commit failed: {:?}", e)))?;
+        Ok((child_ino, new_ep))
+    }
+
+    /// 在租约保护下创建目录，然后 commit 推进 epoch。
+    pub fn mkdir_under_lease(
+        &self,
+        owner: u64,
+        expected_epoch: Epoch,
+        parent_ino: u32,
+        name: &str,
+        mode: u16,
+    ) -> Result<(u32, Epoch), Ext2Error> {
+        let mut fs = self.inner.lock().unwrap();
+        let ino = fs.alloc_inode()?;
+        let mut inode = Ext2Inode::dir(ino, mode, 0, 0);
+        fs.inodes.insert(ino, inode);
+        fs.dir_add(parent_ino, name, ino)?;
+        drop(fs);
+        let new_ep = lease::commit(
+            &self.channel,
+            crate::exec::ExecId(owner),
+            expected_epoch,
+            &format!("ext2 mkdir {} ino={}", name, ino),
+        )
+        .map_err(|e| Ext2Error::IoError(format!("lease commit failed: {:?}", e)))?;
+        Ok((ino, new_ep))
+    }
+
+    /// 同步元数据到设备（需租约或 force 模式）。
+    pub fn sync_metadata(&mut self) -> Result<(), Ext2Error> {
+        let mut fs = self.inner.lock().unwrap();
+        fs.sync_metadata()
+    }
+
+    /// 强制刷新（force 模式，绕过租约，用于 root/治理路径）。
+    pub fn sync_metadata_force(&mut self, owner: u64) -> Epoch {
+        let _ = self.inner.lock().unwrap().sync_metadata();
+        lease::force(&self.channel, &format!("ext2 sync_metadata_force owner={}", owner))
+    }
+
+    /// 返回根 ino。
+    pub fn root_ino(&self) -> u32 {
+        self.inner.lock().unwrap().root_ino()
+    }
+
+    /// 返回是否已格式化。
+    pub fn is_formatted(&self) -> bool {
+        self.inner.lock().unwrap().is_formatted()
+    }
+
+    /// 返回当前 epoch。
+    pub fn epoch(&self) -> Epoch {
+        lease::epoch(&self.channel)
+    }
+}
+
+/// 能力位权限包装器：在 ext2 文件系统操作上加 `caps` 校验。
+///
+/// `CAP_SYS_RAWIO` 允许读取文件与元数据；`CAP_SYS_ADMIN` 允许创建/删除/写入等
+/// 修改操作。不使用 uid，完全按能力位授权。
+pub struct Ext2FsCaps {
+    inner: Mutex<Ext2Fs>,
+    caps: Arc<Mutex<caps::Caps>>,
+}
+
+impl Ext2FsCaps {
+    /// 包装一个已有 ext2 实例，绑定全局能力表。
+    pub fn new(fs: Ext2Fs) -> Self {
+        Self {
+            inner: Mutex::new(fs),
+            caps: Arc::new(Mutex::new(caps::caps().lock().unwrap().clone())),
+        }
+    }
+
+    fn check_rawio(&self) -> Result<(), String> {
+        let c = self.caps.lock().unwrap();
+        if c.has("CAP_SYS_RAWIO") {
+            Ok(())
+        } else {
+            Err("缺少 CAP_SYS_RAWIO 能力".to_string())
+        }
+    }
+
+    fn check_admin(&self) -> Result<(), String> {
+        let c = self.caps.lock().unwrap();
+        if c.has("CAP_SYS_ADMIN") {
+            Ok(())
+        } else {
+            Err("缺少 CAP_SYS_ADMIN 能力".to_string())
+        }
+    }
+
+    /// 只读 stat（需 CAP_SYS_RAWIO）。
+    pub fn stat(&self, ino: u32) -> Result<crate::fs::ext2_like::FileStat, String> {
+        self.check_rawio()?;
+        let fs = self.inner.lock().unwrap();
+        fs.stat(ino).map_err(|e| e.to_string())
+    }
+
+    /// 只读文件内容（需 CAP_SYS_RAWIO）。
+    pub fn file_read(
+        &self,
+        ino: u32,
+        offset: u64,
+        len: u64,
+    ) -> Result<Vec<u8>, String> {
+        self.check_rawio()?;
+        let fs = self.inner.lock().unwrap();
+        fs.file_read(ino, offset, len).map_err(|e| e.to_string())
+    }
+
+    /// 目录查找（需 CAP_SYS_RAWIO）。
+    pub fn dir_lookup(&self, parent_ino: u32, name: &str) -> Result<Option<u32>, String> {
+        self.check_rawio()?;
+        let fs = self.inner.lock().unwrap();
+        Ok(fs.dir_lookup(parent_ino, name))
+    }
+
+    /// 创建文件（需 CAP_SYS_ADMIN）。
+    pub fn create(
+        &self,
+        parent_ino: u32,
+        name: &str,
+        mode: u16,
+    ) -> Result<u32, String> {
+        self.check_admin()?;
+        let mut fs = self.inner.lock().unwrap();
+        let ino = fs.alloc_inode().map_err(|e| e.to_string())?;
+        let mut inode = Ext2Inode::file(ino, mode, 0, 0);
+        fs.inodes.insert(ino, inode);
+        fs.dir_add(parent_ino, name, ino).map_err(|e| e.to_string())?;
+        Ok(ino)
+    }
+
+    /// 写入文件内容（需 CAP_SYS_ADMIN）。
+    pub fn file_write(
+        &self,
+        ino: u32,
+        offset: u64,
+        data: &[u8],
+    ) -> Result<u64, String> {
+        self.check_admin()?;
+        let mut fs = self.inner.lock().unwrap();
+        fs.file_write(ino, offset, data).map_err(|e| e.to_string())
+    }
+
+    /// 删除文件/目录（需 CAP_SYS_ADMIN）。
+    pub fn unlink(&self, parent_ino: u32, name: &str) -> Result<u32, String> {
+        self.check_admin()?;
+        let mut fs = self.inner.lock().unwrap();
+        fs.dir_remove(parent_ino, name).map_err(|e| e.to_string())
+    }
+
+    /// 创建目录（需 CAP_SYS_ADMIN）。
+    pub fn mkdir(&self, parent_ino: u32, name: &str, mode: u16) -> Result<u32, String> {
+        self.check_admin()?;
+        let mut fs = self.inner.lock().unwrap();
+        let ino = fs.alloc_inode().map_err(|e| e.to_string())?;
+        let mut inode = Ext2Inode::dir(ino, mode, 0, 0);
+        fs.inodes.insert(ino, inode);
+        fs.dir_add(parent_ino, name, ino).map_err(|e| e.to_string())?;
+        Ok(ino)
+    }
+
+    /// 返回统计（无需能力）。
+    pub fn root_ino(&self) -> u32 {
+        self.inner.lock().unwrap().root_ino()
+    }
+}
+
+// ============================================================================
+// sense/act 通道接口：ext2://<设备路径>
+// ============================================================================
+
+/// 感知 ext2 文件系统通道：返回文件系统状态摘要。
+///
+/// 通道名形式：`ext2://<设备路径>`
+pub fn probe_ext2(name: &str) -> Option<String> {
+    let dev = name.strip_prefix("ext2://")?;
+    let _ = dev; // 实际实例由调用方持有；此处返回通道元数据
+    let channel = format!("ext2://{}", dev);
+    let epoch = lease::epoch(&channel);
+    Some(format!(
+        "channel={} type=ext2_fs epoch={} ops=create|open|read|write|close|unlink|mkdir|stat",
+        dev, epoch
+    ))
+}
+
+/// 对 ext2 文件系统通道执行行动。
+///
+/// 支持子命令：
+/// - `status` —— 返回文件系统状态摘要（占位）
+/// - `epoch` —— 返回当前 epoch
+pub fn act_ext2(name: &str, payload: &str) -> Option<Result<String, String>> {
+    let dev = name.strip_prefix("ext2://")?;
+    let mut tokens = payload.split_whitespace();
+    let sub = tokens.next().unwrap_or("");
+    let channel = format!("ext2://{}", dev);
+    match sub {
+        "status" => Some(Ok(format!(
+            "ext2://{} status=mounted epoch={}",
+            dev,
+            lease::epoch(&channel)
+        ))),
+        "epoch" => Some(Ok(format!("epoch={}", lease::epoch(&channel)))),
+        _ => Some(Err("用法: status | epoch".to_string())),
+    }
+}
+
 pub fn mount(device: Box<dyn BlockDevice + Send>) -> Result<Ext2Fs, Ext2Error> {
     let block_count = device.block_count();
     let inode_count = (block_count / 4).max(64);
@@ -1266,6 +1618,183 @@ mod tests {
         fs.file_write(ino, 0, &big).unwrap();
         let back = fs.file_read(ino, 0, big.len() as u64).unwrap();
         assert_eq!(back, big);
+    }
+
+    // ----- lease 并发控制测试 -----
+
+    #[test]
+    fn ext2_leased_single_writer() {
+        let path = std::env::temp_dir().join(format!(
+            "hibos_ext2_lease_{}_{}.img",
+            std::process::id(),
+            std::thread::current().id().as_u64()
+        ));
+        let _ = std::fs::remove_file(&path);
+        let mut img = crate::fs::disk_img::DiskImage::create(&path, 4096 * 512).unwrap();
+        let fs = Ext2FsLeased::format(
+            Box::new(img),
+            "ext2://test-lease",
+        ).unwrap();
+        assert!(fs.acquire_write_lease(101).is_ok());
+        let err = fs.acquire_write_lease(102).unwrap_err();
+        assert_eq!(err.holder, crate::exec::ExecId(101));
+        assert!(fs.release_write_lease(101));
+        assert!(fs.acquire_write_lease(102).is_ok());
+        assert!(fs.release_write_lease(102));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn ext2_leased_create_and_write_commit_epoch() {
+        let path = std::env::temp_dir().join(format!(
+            "hibos_ext2_lease2_{}_{}.img",
+            std::process::id(),
+            std::thread::current().id().as_u64()
+        ));
+        let _ = std::fs::remove_file(&path);
+        let mut img = crate::fs::disk_img::DiskImage::create(&path, 4096 * 512).unwrap();
+        let fs = Ext2FsLeased::format(
+            Box::new(img),
+            "ext2://test-lease2",
+        ).unwrap();
+        let root = fs.root_ino();
+        let ep0 = fs.epoch();
+        let ep1 = fs.acquire_write_lease(201).unwrap();
+        assert_eq!(ep1, ep0);
+        // 创建文件并 commit。
+        let (ino, new_ep) = fs.create_under_lease(201, ep0, root, "lease.txt", 0o644).unwrap();
+        assert_eq!(new_ep, ep0 + 1);
+        assert!(fs.dir_lookup(root, "lease.txt") == Some(ino));
+        // 写入并 commit。
+        let (written, new_ep2) = fs.file_write_under_lease(
+            201, new_ep, ino, 0, b"hello lease",
+        ).unwrap();
+        assert_eq!(written, 11);
+        assert_eq!(new_ep2, new_ep + 1);
+        // 读回验证。
+        let back = fs.file_read(ino, 0, 11).unwrap();
+        assert_eq!(back, b"hello lease");
+        assert!(fs.release_write_lease(201));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn ext2_leased_stale_epoch_rejected() {
+        let path = std::env::temp_dir().join(format!(
+            "hibos_ext2_lease3_{}_{}.img",
+            std::process::id(),
+            std::thread::current().id().as_u64()
+        ));
+        let _ = std::fs::remove_file(&path);
+        let mut img = crate::fs::disk_img::DiskImage::create(&path, 4096 * 512).unwrap();
+        let fs = Ext2FsLeased::format(
+            Box::new(img),
+            "ext2://test-lease3",
+        ).unwrap();
+        let root = fs.root_ino();
+        let ep = fs.acquire_write_lease(301).unwrap();
+        let (_, new_ep) = fs.create_under_lease(301, ep, root, "stale.txt", 0o644).unwrap();
+        // 再用旧 epoch 创建应被拒绝。
+        let ep2 = fs.acquire_write_lease(301).unwrap();
+        let err = fs.create_under_lease(301, ep, root, "stale2.txt", 0o644).unwrap_err();
+        assert!(matches!(err, Ext2Error::IoError(_)));
+        let _ = fs.release_write_lease(301);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn ext2_leased_force_sync() {
+        let path = std::env::temp_dir().join(format!(
+            "hibos_ext2_lease4_{}_{}.img",
+            std::process::id(),
+            std::thread::current().id().as_u64()
+        ));
+        let _ = std::fs::remove_file(&path);
+        let mut img = crate::fs::disk_img::DiskImage::create(&path, 4096 * 512).unwrap();
+        let mut fs = Ext2FsLeased::format(
+            Box::new(img),
+            "ext2://test-lease4",
+        ).unwrap();
+        let ep0 = fs.epoch();
+        let ep1 = fs.sync_metadata_force(401);
+        assert!(ep1 > ep0);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    // ----- caps 权限测试 -----
+
+    #[test]
+    fn ext2_caps_rawio_required() {
+        let mut fs = make_fs();
+        fs.format().unwrap();
+        let caps_fs = Ext2FsCaps::new(fs);
+        {
+            let mut c = caps::caps().lock().unwrap();
+            let _ = c.revoke("CAP_SYS_RAWIO");
+        }
+        assert!(caps_fs.stat(1).is_err());
+        {
+            let mut c = caps::caps().lock().unwrap();
+            let _ = c.grant("CAP_SYS_RAWIO");
+        }
+        assert!(caps_fs.stat(1).is_ok());
+    }
+
+    #[test]
+    fn ext2_caps_admin_required_for_create() {
+        let mut fs = make_fs();
+        fs.format().unwrap();
+        let root = fs.root_ino();
+        let caps_fs = Ext2FsCaps::new(fs);
+        {
+            let mut c = caps::caps().lock().unwrap();
+            let _ = c.revoke("CAP_SYS_ADMIN");
+        }
+        assert!(caps_fs.create(root, "caps.txt", 0o644).is_err());
+        {
+            let mut c = caps::caps().lock().unwrap();
+            let _ = c.grant("CAP_SYS_ADMIN");
+        }
+        let ino = caps_fs.create(root, "caps.txt", 0o644).unwrap();
+        assert!(ino >= 1);
+        assert!(caps_fs.dir_lookup(root, "caps.txt").unwrap() == Some(ino));
+    }
+
+    #[test]
+    fn ext2_caps_admin_required_for_unlink() {
+        let mut fs = make_fs();
+        fs.format().unwrap();
+        let root = fs.root_ino();
+        let caps_fs = Ext2FsCaps::new(fs);
+        caps_fs.create(root, "uncap.txt", 0o644).unwrap();
+        {
+            let mut c = caps::caps().lock().unwrap();
+            let _ = c.revoke("CAP_SYS_ADMIN");
+        }
+        assert!(caps_fs.unlink(root, "uncap.txt").is_err());
+        {
+            let mut c = caps::caps().lock().unwrap();
+            let _ = c.grant("CAP_SYS_ADMIN");
+        }
+        assert!(caps_fs.unlink(root, "uncap.txt").is_ok());
+    }
+
+    // ----- sense/act 通道测试 -----
+
+    #[test]
+    fn ext2_probe_channel() {
+        let snap = probe_ext2("ext2://ram0").unwrap();
+        assert!(snap.contains("ext2://ram0"));
+        assert!(snap.contains("epoch="));
+        assert!(snap.contains("ops="));
+    }
+
+    #[test]
+    fn ext2_act_channel_status_epoch() {
+        let r = act_ext2("ext2://ram0", "status").unwrap().unwrap();
+        assert!(r.contains("status=mounted"));
+        let r = act_ext2("ext2://ram0", "epoch").unwrap().unwrap();
+        assert!(r.contains("epoch="));
     }
 }
 

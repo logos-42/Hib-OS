@@ -3,6 +3,14 @@
 //! 把磁盘镜像（`DiskImage` 或任意实现块读写的设备）上的主引导记录
 //! 与 GUID 分区表解析成 `Partition` 列表，供上层文件系统挂载使用。
 //!
+//! ## 设计信条
+//! - **双表优先级**：GPT 优先于 MBR（符合 UEFI 规范），MBR 作为回退。
+//! - **单写者租约 + epoch CAS**：分区表的创建/修改通过 `lease::acquire`/`commit`
+//!   做乐观并发控制，避免悲观锁。读取只做快照，不阻塞。
+//! - **能力位权限**：通过 `caps::CAP_SYS_ADMIN` 校验分区表写入权限，而非 uid。
+//! - **通道接口**：提供 `probe_partition` / `act_partition`，供 `sense`/`act` 框架以
+//!   `partition://<设备>` 通道形式查询与操作分区表。
+//!
 //! ## MBR 布局（512 字节）
 //! - [0, 446)   引导代码区（446 字节）
 //! - [446, 510) 四个分区表项，每项 16 字节
@@ -17,9 +25,11 @@
 //! CRC32 用于校验 GPT 头与分区入口数组。
 
 use std::collections::BTreeMap;
-use std::sync::OnceLock;
+use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::fs::disk_img::DiskImage;
+use crate::lease::{self, Epoch};
+use crate::caps;
 
 /// 分区类型标识符（MBR 用 1 字节 ID，GPT 用 16 字节 GUID，此处统一用 u128）。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -481,14 +491,191 @@ pub fn crc32(data: &[u8]) -> u32 {
     crc ^ 0xFFFF_FFFF
 }
 
+// ============================================================================
+// 并发控制：基于 lease.rs 的单写者租约 + epoch CAS
+// ============================================================================
+
+/// 分区表并发包装器：对解析后的分区表加 lease 保护，供多文件系统
+/// 并发挂载同一磁盘时使用。
+pub struct PartitionTableLeased {
+    inner: Mutex<PartitionTable>,
+    channel: String,
+}
+
+impl PartitionTableLeased {
+    /// 从磁盘解析并包装为租约保护的分区表。
+    pub fn parse_from(disk: &mut DiskImage) -> Result<Self, PartitionError> {
+        let table = parse(disk)?;
+        let channel = format!("partition://{}", disk.path().display());
+        Ok(Self {
+            inner: Mutex::new(table),
+            channel,
+        })
+    }
+
+    /// 申请写租约（用于修改分区表，如增删分区）。
+    pub fn acquire_write_lease(
+        &self,
+        owner: u64,
+    ) -> Result<Epoch, crate::lease::LeaseConflict> {
+        lease::acquire(&self.channel, crate::exec::ExecId(owner), None)
+    }
+
+    /// 释放写租约。
+    pub fn release_write_lease(&self, owner: u64) -> bool {
+        lease::release(&self.channel, crate::exec::ExecId(owner))
+    }
+
+    /// 只读快照：返回当前分区表 clone（无需租约）。
+    pub fn snapshot(&self) -> PartitionTable {
+        self.inner.lock().unwrap().clone()
+    }
+
+    /// 返回当前 epoch。
+    pub fn epoch(&self) -> Epoch {
+        lease::epoch(&self.channel)
+    }
+
+    /// 按名称查找分区（快照读）。
+    pub fn partition_by_name(&self, name: &str) -> Option<Partition> {
+        self.inner.lock().unwrap().partition_by_name(name).cloned()
+    }
+
+    /// 按索引查找分区（快照读）。
+    pub fn partition_by_index(&self, idx: u32) -> Option<Partition> {
+        self.inner.lock().unwrap().partition_by_index(idx).cloned()
+    }
+}
+
+/// 能力位权限包装器：在分区表操作上加 `caps` 校验。
+///
+/// 仅 `CAP_SYS_ADMIN` 允许修改分区表；读取无需能力（元数据公开）。
+pub struct PartitionCaps {
+    inner: Mutex<PartitionTable>,
+    caps: Arc<Mutex<caps::Caps>>,
+    channel: String,
+}
+
+impl PartitionCaps {
+    /// 包装一个已解析的分区表，绑定全局能力表。
+    pub fn new(table: PartitionTable, channel: String) -> Self {
+        Self {
+            inner: Mutex::new(table),
+            caps: Arc::new(Mutex::new(caps::caps().lock().unwrap().clone())),
+            channel,
+        }
+    }
+
+    /// 校验管理能力（CAP_SYS_ADMIN）。
+    fn check_admin(&self) -> Result<(), String> {
+        let c = self.caps.lock().unwrap();
+        if c.has("CAP_SYS_ADMIN") {
+            Ok(())
+        } else {
+            Err("缺少 CAP_SYS_ADMIN 能力".to_string())
+        }
+    }
+
+    /// 只读查询（无需能力）。
+    pub fn summary(&self) -> String {
+        self.inner.lock().unwrap().summary()
+    }
+
+    /// 按名称查找（无需能力）。
+    pub fn partition_by_name(&self, name: &str) -> Option<Partition> {
+        self.inner.lock().unwrap().partition_by_name(name).cloned()
+    }
+
+    /// 修改分区表（需 CAP_SYS_ADMIN + 写租约）。
+    pub fn set_partition(
+        &self,
+        owner: u64,
+        index: u32,
+        part: Partition,
+    ) -> Result<Epoch, String> {
+        self.check_admin()?;
+        // 先获取写租约（乐观 CAS）。
+        let ep = lease::acquire(&self.channel, crate::exec::ExecId(owner), None)
+            .map_err(|c| format!("租约冲突: holder={:?}", c.holder))?;
+        // 修改内存表。
+        {
+            let mut t = self.inner.lock().unwrap();
+            // 移除同索引旧项（若存在）。
+            t.partitions.retain(|p| p.index != index);
+            if !part.is_empty() {
+                t.partitions.push(part);
+                t.partitions.sort_by_key(|p| p.index);
+            }
+        }
+        // 提交 epoch。
+        let new_ep = lease::commit(
+            &self.channel,
+            crate::exec::ExecId(owner),
+            ep,
+            &format!("set partition index={}", index),
+        )
+        .map_err(|e| format!("提交失败: {:?}", e))?;
+        Ok(new_ep)
+    }
+}
+
+// ============================================================================
+// sense/act 通道接口：partition://<设备路径>
+// ============================================================================
+
+/// 感知分区表通道：返回磁盘的分区表摘要。
+////// 通道名形式：`partition://<设备路径>`
+pub fn probe_partition(name: &str) -> Option<String> {
+    let dev = name.strip_prefix("partition://")?;
+    let path = Path::new(dev);
+    let mut disk = match DiskImage::open(path, true) {
+        Ok(d) => d,
+        Err(_) => return Some(format!("设备打开失败: {}", dev)),
+    };
+    match parse(&mut disk) {
+        Ok(table) => Some(table.summary()),
+        Err(e) => Some(Err(format!("分区表解析失败: {}", e))),
+    }
+}
+
+/// 对分区表通道执行行动。
+////// 支持子命令：
+/// - `parse` —— 解析并返回分区表摘要
+/// - `epoch` —— 返回当前 epoch
+pub fn act_partition(name: &str, payload: &str) -> Option<Result<String, String>> {
+    let dev = name.strip_prefix("partition://")?;
+    let path = Path::new(dev);
+    let mut tokens = payload.split_whitespace();
+    let sub = tokens.next().unwrap_or("");
+    match sub {
+        "parse" => {
+            let mut disk = match DiskImage::open(path, true) {
+                Ok(d) => d,
+                Err(e) => return Some(Err(format!("打开失败: {}", e))),
+            };
+            match parse(&mut disk) {
+                Ok(table) => Some(Ok(table.summary())),
+                Err(e) => Some(Err(format!("解析失败: {}", e))),
+            }
+        }
+        "epoch" => {
+            let channel = format!("partition://{}", dev);
+            let ep = lease::epoch(&channel);
+            Some(Ok(format!("epoch={}", ep)))
+        }
+        _ => Some(Err("用法: parse | epoch".to_string())),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::thread;
 
     fn make_disk(sectors: u64) -> DiskImage {
         let path = std::env::temp_dir().join(format!(
             "hibos_partition_{}_{}.img",
-            std::thread::current().id().as_u64(),
+            thread::current().id().as_u64(),
             std::process::id()
         ));
         let _ = std::fs::remove_file(&path);
@@ -748,10 +935,134 @@ mod tests {
         assert_eq!(table.table_type, TableType::Unknown);
     }
 
-    /// 将缓冲区写入磁盘指定扇区（测试辅助）。
-    fn disk_write_lba(disk: &mut DiskImage, lba: u64, buf: &[u8]) {
-        let mut sector = vec![0u8; 512];
-        sector[..buf.len().min(512)].copy_from_slice(&buf[..buf.len().min(512)]);
-        disk.write_block(lba, &sector).unwrap();
+    // ----- lease 并发控制测试 -----
+
+    #[test]
+    fn partition_leased_single_writer() {
+        let path = std::env::temp_dir().join(format!(
+            "hibos_part_lease_{}_{}.img",
+            thread::current().id().as_u64(),
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&path);
+        let mut disk = DiskImage::create(&path, 1024 * 512).unwrap();
+        let table = PartitionTableLeased::parse_from(&mut disk).unwrap();
+        assert!(table.acquire_write_lease(101).is_ok());
+        let err = table.acquire_write_lease(102).unwrap_err();
+        assert_eq!(err.holder, crate::exec::ExecId(101));
+        assert!(table.release_write_lease(101));
+        assert!(table.acquire_write_lease(102).is_ok());
+        assert!(table.release_write_lease(102));
+        let _ = std::fs::remove_file(&path);
     }
-}
+
+    #[test]
+    fn partition_leased_epoch_bumps() {
+        let path = std::env::temp_dir().join(format!(
+            "hibos_part_lease2_{}_{}.img",
+            thread::current().id().as_u64(),
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&path);
+        let mut disk = DiskImage::create(&path, 1024 * 512).unwrap();
+        let table = PartitionTableLeased::parse_from(&mut disk).unwrap();
+        let ep0 = table.epoch();
+        let ep1 = table.acquire_write_lease(201).unwrap();
+        assert_eq!(ep1, ep0); // acquire 返回当前 epoch，不推进
+        let _ = table.release_write_lease(201);
+        let ep2 = table.epoch();
+        assert_eq!(ep2, ep0); // 释放也不推进 epoch（只有 commit 推进）
+        let _ = std::fs::remove_file(&path);
+    }
+
+    // ----- caps 权限测试 -----
+
+    #[test]
+    fn partition_caps_admin_required() {
+        let path = std::env::temp_dir().join(format!(
+            "hibos_part_caps_{}_{}.img",
+            thread::current().id().as_u64(),
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&path);
+        let mut disk = DiskImage::create(&path, 1024 * 512).unwrap();
+        let table = parse(&mut disk).unwrap();
+        let caps_part = PartitionCaps::new(table, "partition://test".to_string());
+        // 只读摘要无需能力。
+        let _ = caps_part.summary();
+        // 修改分区需 CAP_SYS_ADMIN。
+        {
+            let mut c = caps::caps().lock().unwrap();
+            let _ = c.revoke("CAP_SYS_ADMIN");
+        }
+        let p = Partition {
+            index: 0, start_sector: 2048, sector_count: 1024,
+            part_type: PartType::LINUX, guid: 0, name: String::new(), bootable: true,
+        };
+        let err = caps_part.set_partition(301, 0, p).unwrap_err();
+        assert!(err.contains("CAP_SYS_ADMIN"));
+        // 恢复能力后成功。
+        {
+            let mut c = caps::caps().lock().unwrap();
+            let _ = c.grant("CAP_SYS_ADMIN");
+        }
+        let ep = caps_part.set_partition(301, 0, p).unwrap();
+        assert!(ep >= 1);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    // ----- sense/act 通道测试 -----
+
+    #[test]
+    fn partition_probe_channel() {
+        let path = std::env::temp_dir().join(format!(
+            "hibos_part_probe_{}_{}.img",
+            thread::current().id().as_u64(),
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&path);
+        let mut disk = DiskImage::create(&path, 1024 * 512).unwrap();
+        let mut lba0 = [0u8; 512];
+        let mut e1 = [0u8; 16];
+        e1[4] = 0x83;
+        e1[8..12].copy_from_slice(&2048u32.to_le_bytes());
+        e1[12..16].copy_from_slice(&1024u32.to_le_bytes());
+        lba0[446..462].copy_from_slice(&e1);
+        lba0[510] = 0x55;
+        lba0[511] = 0xAA;
+        disk.write_block(0, &lba0).unwrap();
+        disk.flush().unwrap();
+        let name = format!("partition://{}", path.display());
+        let snap = probe_partition(&name).unwrap();
+        assert!(snap.contains("Mbr"));
+        assert!(snap.contains("2048"));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn partition_act_channel_parse_epoch() {
+        let path = std::env::temp_dir().join(format!(
+            "hibos_part_act_{}_{}.img",
+            thread::current().id().as_u64(),
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&path);
+        let mut disk = DiskImage::create(&path, 1024 * 512).unwrap();
+        let mut lba0 = [0u8; 512];
+        let mut e1 = [0u8; 16];
+        e1[4] = 0x83;
+        e1[8..12].copy_from_slice(&2048u32.to_le_bytes());
+        e1[12..16].copy_from_slice(&1024u32.to_le_bytes());
+        lba0[446..462].copy_from_slice(&e1);
+        lba0[510] = 0x55;
+        lba0[511] = 0xAA;
+        disk.write_block(0, &lba0).unwrap();
+        disk.flush().unwrap();
+        let name = format!("partition://{}", path.display());
+        let r = act_partition(&name, "parse").unwrap().unwrap();
+        assert!(r.contains("Mbr"));
+        let r = act_partition(&name, "epoch").unwrap().unwrap();
+        assert!(r.contains("epoch="));
+        let _ = std::fs::remove_file(&path);
+    }
+}

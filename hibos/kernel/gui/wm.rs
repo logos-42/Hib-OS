@@ -10,7 +10,7 @@
 //! 逻辑状态，Compositor 负责像素合成输出。
 
 use super::surface::{argb, palette, Rect, Surface};
-use super::window::{Hit, Window, WindowId, TITLEBAR_H, BORDER, CLOSE_BTN, TRAFFIC_RIGHT_GAP, TRAFFIC_GAP};
+use super::window::{Hit, WindowId, TITLEBAR_H, BORDER, CLOSE_BTN, TRAFFIC_RIGHT_GAP, TRAFFIC_GAP};
 use std::collections::BTreeMap;
 use std::sync::{Mutex, OnceLock};
 
@@ -785,7 +785,7 @@ impl WindowManager {
         // 窗口边框。
         surface.draw_rect(win.x, win.y, win.w, win.h, self.border_color, 1);
 
-        if !win.flags.contains(super::window::WindowFlags::NO_DECORATION.bits() as u32) {
+        if !win.flags.contains(WindowFlags::NO_DECORATION) {
             // 关闭按钮（红）。
             let cr = win.close_rect();
             surface.fill_rect(cr.x, cr.y, cr.w, cr.h, palette::RED);
@@ -803,7 +803,7 @@ impl WindowManager {
                 surface.draw_rect(mxr.x + 2, mxr.y + 2, mxr.w.saturating_sub(4), mxr.h.saturating_sub(4), palette::BASE, 1);
             }
             // 调整大小角。
-            if win.flags.contains(super::window::WindowFlags::RESIZABLE.bits() as u32) {
+            if win.flags.contains(WindowFlags::RESIZABLE) {
                 let rr = win.resize_corner_rect();
                 surface.draw_rect(rr.x, rr.y, rr.w, rr.h, self.border_color, 1);
             }

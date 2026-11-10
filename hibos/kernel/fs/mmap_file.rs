@@ -11,6 +11,8 @@ use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
 use crate::fs::block::{BlockDevice, BlockError, BLOCK_SIZE};
+use crate::lease::{self, Epoch};
+use crate::caps;
 
 /// 页大小（与块大小一致）。
 pub const MMAP_PAGE_SIZE: usize = BLOCK_SIZE;
@@ -515,6 +517,214 @@ impl MmapManager {
     }
 }
 
+// ============================================================================
+// 并发控制：基于 lease.rs 的单写者租约 + epoch CAS
+// ============================================================================
+
+/// 基于 lease 的内存映射管理器包装器：对 mmap/munmap/msync 操作加单写者租约，
+/// 避免多线程并发映射/取消映射同一地址范围时发生竞争。
+pub struct MmapManagerLeased {
+    inner: MmapManager,
+    channel: String,
+}
+
+impl MmapManagerLeased {
+    /// 创建租约保护的映射管理器。
+    pub fn new(channel: &str) -> Self {
+        Self {
+            inner: MmapManager::new(),
+            channel: channel.to_string(),
+        }
+    }
+
+    /// 申请映射操作租约，返回当前 epoch。
+    pub fn acquire_map_lease(&self, owner: u64) -> Result<Epoch, crate::lease::LeaseConflict> {
+        lease::acquire(&self.channel, crate::exec::ExecId(owner), None)
+    }
+
+    /// 释放映射操作租约。
+    pub fn release_map_lease(&self, owner: u64) -> bool {
+        lease::release(&self.channel, crate::exec::ExecId(owner))
+    }
+
+    /// 在租约保护下 mmap，然后 commit 推进 epoch。
+    pub fn mmap_under_lease(
+        &self,
+        owner: u64,
+        expected_epoch: Epoch,
+        addr: u64,
+        length: u64,
+        prot: MmapProt,
+        flags: MmapFlags,
+        fd: u64,
+        offset: u64,
+    ) -> Result<(crate::fs::mmap_file::MmapId, Epoch), crate::fs::mmap_file::MmapError> {
+        let _ = self.acquire_map_lease(owner)?;
+        let id = self.inner.mmap(addr, length, prot, flags, fd, offset)?;
+        let new_ep = lease::commit(
+            &self.channel,
+            crate::exec::ExecId(owner),
+            expected_epoch,
+            &format!("mmap mmap addr={} len={} fd={}", addr, length, fd),
+        )
+        .map_err(|e| crate::fs::mmap_file::MmapError::Fault(format!("lease commit failed: {:?}", e)))?;
+        Ok((id, new_ep))
+    }
+
+    /// 在租约保护下 munmap，然后 commit 推进 epoch。
+    pub fn munmap_under_lease(
+        &self,
+        owner: u64,
+        expected_epoch: Epoch,
+        addr: u64,
+    ) -> Result<Epoch, crate::fs::mmap_file::MmapError> {
+        let _ = self.acquire_map_lease(owner)?;
+        self.inner.munmap(addr)?;
+        let new_ep = lease::commit(
+            &self.channel,
+            crate::exec::ExecId(owner),
+            expected_epoch,
+            &format!("mmap munmap addr={}", addr),
+        )
+        .map_err(|e| crate::fs::mmap_file::MmapError::Fault(format!("lease commit failed: {:?}", e)))?;
+        Ok(new_ep)
+    }
+
+    /// 查找包含地址的映射区域（只读，无需租约）。
+    pub fn find_region(&self, vaddr: u64) -> Option<&crate::fs::mmap_file::MmapRegion> {
+        self.inner.find_region(vaddr)
+    }
+
+    /// 列出全部映射区域（只读，无需租约）。
+    pub fn list(&self) -> Vec<(crate::fs::mmap_file::MmapId, u64, u64, MmapProt, MmapFlags, u64)> {
+        self.inner.list()
+    }
+
+    /// 强制刷新（force 模式，绕过租约）。
+    pub fn force_unmap_all(&self, owner: u64) -> Epoch {
+        lease::force(&self.channel, &format!("mmap force_unmap_all owner={}", owner))
+    }
+
+    /// 返回当前 epoch。
+    pub fn epoch(&self) -> Epoch {
+        lease::epoch(&self.channel)
+    }
+}
+
+/// 能力位权限包装器：在内存映射操作上加 `caps` 校验。
+///
+/// `CAP_SYS_RAWIO` 允许映射文件；`CAP_SYS_ADMIN` 允许 munmap/msync 等管理操作。
+pub struct MmapManagerCaps {
+    inner: MmapManager,
+    caps: Arc<Mutex<caps::Caps>>,
+}
+
+impl MmapManagerCaps {
+    /// 包装一个已有映射管理器，绑定全局能力表。
+    pub fn new(mgr: MmapManager) -> Self {
+        Self {
+            inner: mgr,
+            caps: Arc::new(Mutex::new(caps::caps().lock().unwrap().clone())),
+        }
+    }
+
+    fn check_rawio(&self) -> Result<(), String> {
+        let c = self.caps.lock().unwrap();
+        if c.has("CAP_SYS_RAWIO") {
+            Ok(())
+        } else {
+            Err("缺少 CAP_SYS_RAWIO 能力".to_string())
+        }
+    }
+
+    fn check_admin(&self) -> Result<(), String> {
+        let c = self.caps.lock().unwrap();
+        if c.has("CAP_SYS_ADMIN") {
+            Ok(())
+        } else {
+            Err("缺少 CAP_SYS_ADMIN 能力".to_string())
+        }
+    }
+
+    /// mmap（需 CAP_SYS_RAWIO）。
+    pub fn mmap(
+        &self,
+        addr: u64,
+        length: u64,
+        prot: MmapProt,
+        flags: MmapFlags,
+        fd: u64,
+        offset: u64,
+    ) -> Result<crate::fs::mmap_file::MmapId, String> {
+        self.check_rawio()?;
+        self.inner.mmap(addr, length, prot, flags, fd, offset).map_err(|e| e.to_string())
+    }
+
+    /// munmap（需 CAP_SYS_ADMIN）。
+    pub fn munmap(&self, addr: u64) -> Result<(), String> {
+        self.check_admin()?;
+        self.inner.munmap(addr).map_err(|e| e.to_string())
+    }
+
+    /// msync（需 CAP_SYS_ADMIN）。
+    pub fn msync(
+        &self,
+        addr: u64,
+        length: u64,
+        flags: MsyncFlags,
+        file: &mut dyn MmapFile,
+    ) -> Result<usize, String> {
+        self.check_admin()?;
+        self.inner.msync(addr, length, flags, file).map_err(|e| e.to_string())
+    }
+
+    /// 查找区域（只读，无需能力）。
+    pub fn find_region(&self, vaddr: u64) -> Option<&crate::fs::mmap_file::MmapRegion> {
+        self.inner.find_region(vaddr)
+    }
+
+    /// 返回区域总数（无需能力）。
+    pub fn region_count(&self) -> usize {
+        self.inner.region_count()
+    }
+}
+
+// ============================================================================
+// sense/act 通道接口：mmap://<设备名>
+// ============================================================================
+
+/// 感知内存映射通道：返回映射管理器状态摘要。
+///
+/// 通道名形式：`mmap://<设备名>`
+pub fn probe_mmap(name: &str) -> Option<String> {
+    let channel = format!("mmap://{}", name);
+    let epoch = lease::epoch(&channel);
+    Some(format!(
+        "channel={} type=mmap_manager epoch={} ops=mmap|munmap|msync|find_region|list",
+        name, epoch
+    ))
+}
+
+/// 对内存映射通道执行行动。
+///
+/// 支持子命令：
+/// - `status` —— 返回映射状态摘要（占位）
+/// - `epoch` —— 返回当前 epoch
+pub fn act_mmap(name: &str, payload: &str) -> Option<Result<String, String>> {
+    let mut tokens = payload.split_whitespace();
+    let sub = tokens.next().unwrap_or("");
+    let channel = format!("mmap://{}", name);
+    match sub {
+        "status" => Some(Ok(format!(
+            "mmap://{} status=active epoch={}",
+            name,
+            lease::epoch(&channel)
+        ))),
+        "epoch" => Some(Ok(format!("epoch={}", lease::epoch(&channel)))),
+        _ => Some(Err("用法: status | epoch".to_string())),
+    }
+}
+
 impl Default for MmapManager {
     fn default() -> Self {
         Self::new()
@@ -716,5 +926,116 @@ mod tests {
         file.read_page(0, &mut back).unwrap();
         assert_eq!(back, data);
         assert_eq!(file.size(), 4096);
+    }
+
+    // ----- lease 并发控制测试 -----
+
+    #[test]
+    fn mmap_leased_single_writer() {
+        let mgr = MmapManagerLeased::new("mmap://test-lease");
+        assert!(mgr.acquire_map_lease(101).is_ok());
+        let err = mgr.acquire_map_lease(102).unwrap_err();
+        assert_eq!(err.holder, crate::exec::ExecId(101));
+        assert!(mgr.release_map_lease(101));
+        assert!(mgr.acquire_map_lease(102).is_ok());
+        assert!(mgr.release_map_lease(102));
+    }
+
+    #[test]
+    fn mmap_leased_mmap_munmap_commit_epoch() {
+        let mgr = MmapManagerLeased::new("mmap://test-lease2");
+        let ep0 = mgr.epoch();
+        let ep1 = mgr.acquire_map_lease(201).unwrap();
+        assert_eq!(ep1, ep0);
+        let (id, new_ep) = mgr.mmap_under_lease(
+            201, ep0, 0x1000_0000, 4096,
+            MmapProt::Read | MmapProt::Write, MmapFlags::Private, 1, 0,
+        ).unwrap();
+        assert_eq!(new_ep, ep0 + 1);
+        assert_eq!(id, 1);
+        let new_ep2 = mgr.munmap_under_lease(201, new_ep, 0x1000_0000).unwrap();
+        assert_eq!(new_ep2, new_ep + 1);
+        assert_eq!(mgr.region_count(), 0);
+        assert!(mgr.release_map_lease(201));
+    }
+
+    #[test]
+    fn mmap_leased_stale_epoch_rejected() {
+        let mgr = MmapManagerLeased::new("mmap://test-lease3");
+        let ep = mgr.acquire_map_lease(301).unwrap();
+        let (_, new_ep) = mgr.mmap_under_lease(
+            301, ep, 0x2000_0000, 4096,
+            MmapProt::Read, MmapFlags::Private, 2, 0,
+        ).unwrap();
+        // 再用旧 epoch mmap 应被拒绝。
+        let ep2 = mgr.acquire_map_lease(301).unwrap();
+        let err = mgr.mmap_under_lease(
+            301, ep, 0x3000_0000, 4096,
+            MmapProt::Read, MmapFlags::Private, 2, 0,
+        ).unwrap_err();
+        assert!(matches!(err, MmapError::Fault(_)));
+        let _ = mgr.release_map_lease(301);
+    }
+
+    #[test]
+    fn mmap_leased_force_unmap_all() {
+        let mgr = MmapManagerLeased::new("mmap://test-lease4");
+        let ep0 = mgr.epoch();
+        let ep1 = mgr.force_unmap_all(401);
+        assert!(ep1 > ep0);
+    }
+
+    // ----- caps 权限测试 -----
+
+    #[test]
+    fn mmap_caps_rawio_required() {
+        let mgr = MmapManager::new();
+        let caps_mgr = MmapManagerCaps::new(mgr);
+        {
+            let mut c = caps::caps().lock().unwrap();
+            let _ = c.revoke("CAP_SYS_RAWIO");
+        }
+        assert!(caps_mgr.mmap(0, 4096, MmapProt::Read, MmapFlags::Private, 1, 0).is_err());
+        {
+            let mut c = caps::caps().lock().unwrap();
+            let _ = c.grant("CAP_SYS_RAWIO");
+        }
+        assert!(caps_mgr.mmap(0, 4096, MmapProt::Read, MmapFlags::Private, 1, 0).is_ok());
+    }
+
+    #[test]
+    fn mmap_caps_admin_required_for_munmap() {
+        let mut mgr = MmapManager::new();
+        let id = mgr.mmap(0, 4096, MmapProt::Read, MmapFlags::Private, 1, 0).unwrap();
+        let vaddr = mgr.list()[0].1;
+        let caps_mgr = MmapManagerCaps::new(mgr);
+        {
+            let mut c = caps::caps().lock().unwrap();
+            let _ = c.revoke("CAP_SYS_ADMIN");
+        }
+        assert!(caps_mgr.munmap(vaddr).is_err());
+        {
+            let mut c = caps::caps().lock().unwrap();
+            let _ = c.grant("CAP_SYS_ADMIN");
+        }
+        assert!(caps_mgr.munmap(vaddr).is_ok());
+    }
+
+    // ----- sense/act 通道测试 -----
+
+    #[test]
+    fn mmap_probe_channel() {
+        let snap = probe_mmap("mmap://ram0").unwrap();
+        assert!(snap.contains("mmap://ram0"));
+        assert!(snap.contains("epoch="));
+        assert!(snap.contains("ops="));
+    }
+
+    #[test]
+    fn mmap_act_channel_status_epoch() {
+        let r = act_mmap("mmap://ram0", "status").unwrap().unwrap();
+        assert!(r.contains("status=active"));
+        let r = act_mmap("mmap://ram0", "epoch").unwrap().unwrap();
+        assert!(r.contains("epoch="));
     }
 }

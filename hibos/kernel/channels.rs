@@ -81,6 +81,16 @@ pub enum ChannelKind {
     Deadlock,
     /// AI 原生：模型容器沙箱（container://*）
     Container,
+    /// AI 原生：意识原子层（native://*）
+    Native,
+    /// AI 原生：心智架构层（mind://*）
+    Mind,
+    /// AI 原生：注意力层（attention://*）
+    Attention,
+    /// AI 原生：语义空间层（semantic://*）
+    Semantic,
+    /// AI 原生：工作记忆层（memory://*）
+    MemoryWs,
 }
 
 impl ChannelKind {
@@ -120,6 +130,11 @@ impl ChannelKind {
             ChannelKind::Security => "security",
             ChannelKind::Deadlock => "deadlock",
             ChannelKind::Container => "container",
+            ChannelKind::Native => "native",
+            ChannelKind::Mind => "mind",
+            ChannelKind::Attention => "attention",
+            ChannelKind::Semantic => "semantic",
+            ChannelKind::MemoryWs => "memory",
         }
     }
 }
@@ -442,6 +457,29 @@ pub fn bootstrap() -> ChannelRegistry {
         (ChannelKind::Deadlock, "deadlock://graph", Access::Read),
         (ChannelKind::Deadlock, "deadlock://wait", Access::ReadWrite),
         (ChannelKind::Container, "container://status", Access::Read),
+        // —— AI 原生意识层通道：意识原子 / 心智 / 注意力 / 语义空间 / 工作记忆 ——
+        (ChannelKind::Native, "native://qualia", Access::ReadWrite),
+        (ChannelKind::Native, "native://stream", Access::Read),
+        (ChannelKind::Native, "native://status", Access::Read),
+        (ChannelKind::Mind, "mind://state", Access::ReadWrite),
+        (ChannelKind::Mind, "mind://goal", Access::ReadWrite),
+        (ChannelKind::Mind, "mind://wm", Access::ReadWrite),
+        (ChannelKind::Mind, "mind://decide", Access::Write),
+        (ChannelKind::Attention, "attention://lens", Access::ReadWrite),
+        (ChannelKind::Attention, "attention://saliency", Access::Read),
+        (ChannelKind::Attention, "attention://focus", Access::ReadWrite),
+        (ChannelKind::Attention, "attention://cycle", Access::Read),
+        (ChannelKind::Semantic, "semantic://index", Access::Write),
+        (ChannelKind::Semantic, "semantic://search", Access::Read),
+        (ChannelKind::Semantic, "semantic://concept", Access::ReadWrite),
+        (ChannelKind::Semantic, "semantic://namespace", Access::ReadWrite),
+        (ChannelKind::MemoryWs, "memory://sensory", Access::Write),
+        (ChannelKind::MemoryWs, "memory://wm", Access::ReadWrite),
+        (ChannelKind::MemoryWs, "memory://stm", Access::ReadWrite),
+        (ChannelKind::MemoryWs, "memory://ltm", Access::ReadWrite),
+        (ChannelKind::MemoryWs, "memory://episode", Access::ReadWrite),
+        (ChannelKind::MemoryWs, "memory://semantic", Access::ReadWrite),
+        (ChannelKind::MemoryWs, "memory://skill", Access::ReadWrite),
     ];
     for (kind, name, access) in defaults {
         let _ = reg.open(kind, name, access);
@@ -456,7 +494,7 @@ mod tests {
     #[test]
     fn bootstrap_opens_all_channels() {
         let reg = bootstrap();
-        assert_eq!(reg.len(), 121);
+        assert_eq!(reg.len(), 143);
         assert_eq!(reg.of_kind(ChannelKind::Net).count(), 5);
         assert_eq!(reg.of_kind(ChannelKind::Will).count(), 4);
         assert_eq!(reg.of_kind(ChannelKind::Context).count(), 2);
@@ -479,6 +517,11 @@ mod tests {
         assert_eq!(reg.of_kind(ChannelKind::Security).count(), 1);
         assert_eq!(reg.of_kind(ChannelKind::Deadlock).count(), 2);
         assert_eq!(reg.of_kind(ChannelKind::Container).count(), 1);
+        assert_eq!(reg.of_kind(ChannelKind::Native).count(), 3);
+        assert_eq!(reg.of_kind(ChannelKind::Mind).count(), 4);
+        assert_eq!(reg.of_kind(ChannelKind::Attention).count(), 4);
+        assert_eq!(reg.of_kind(ChannelKind::Semantic).count(), 4);
+        assert_eq!(reg.of_kind(ChannelKind::MemoryWs).count(), 7);
         assert!(reg.find("file://vfs").is_some());
         assert!(reg.find("desktop://screen").is_some());
         assert!(reg.find("trace://exec").is_some());
@@ -492,6 +535,11 @@ mod tests {
         assert!(reg.find("security://status").is_some());
         assert!(reg.find("deadlock://graph").is_some());
         assert!(reg.find("container://status").is_some());
+        assert!(reg.find("native://qualia").is_some());
+        assert!(reg.find("mind://state").is_some());
+        assert!(reg.find("attention://lens").is_some());
+        assert!(reg.find("semantic://search").is_some());
+        assert!(reg.find("memory://wm").is_some());
     }
 
     #[test]

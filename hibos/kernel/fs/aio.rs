@@ -16,6 +16,8 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use crate::fs::block::{BlockDevice, BlockError, BLOCK_SIZE};
+use crate::lease::{self, Epoch};
+use crate::caps;
 
 /// 异步请求 ID。
 pub type AioReqId = u64;
@@ -370,6 +372,213 @@ impl AioContext {
     /// 返回是否运行中。
     pub fn is_running(&self) -> bool {
         self.inner.running.load(Ordering::SeqCst)
+    }
+}
+
+// ============================================================================
+// 并发控制：基于 lease.rs 的单写者租约 + epoch CAS
+// ============================================================================
+
+/// 基于 lease 的异步 IO 上下文包装器：对 SQ 提交/完成队列操作加单写者租约，
+/// 避免多线程并发提交 IO 请求时发生竞争。
+pub struct AioContextLeased {
+    inner: AioContext,
+    channel: String,
+}
+
+impl AioContextLeased {
+    /// 创建租约保护的 AIO 上下文。
+    pub fn new(capacity: usize, channel: &str) -> Self {
+        Self {
+            inner: AioContext::new(capacity),
+            channel: channel.to_string(),
+        }
+    }
+
+    /// 申请 SQ 提交租约，返回当前 epoch。
+    pub fn acquire_sq_lease(&self, owner: u64) -> Result<Epoch, crate::lease::LeaseConflict> {
+        lease::acquire(&self.channel, crate::exec::ExecId(owner), None)
+    }
+
+    /// 释放 SQ 提交租约。
+    pub fn release_sq_lease(&self, owner: u64) -> bool {
+        lease::release(&self.channel, crate::exec::ExecId(owner))
+    }
+
+    /// 注册设备（委托内部上下文，无需租约）。
+    pub fn register_device(&self, fd: u64, device: Box<dyn BlockDevice + Send>) {
+        self.inner.register_device(fd, device);
+    }
+
+    /// 在租约保护下提交异步请求，然后 commit 推进 epoch。
+    pub fn submit_under_lease(
+        &self,
+        owner: u64,
+        expected_epoch: Epoch,
+        op: AioOp,
+        fd: u64,
+        buf: Vec<u8>,
+        offset: u64,
+    ) -> Result<(crate::fs::aio::AioReqId, Epoch), crate::fs::aio::AioError> {
+        let _ = self.acquire_sq_lease(owner)?;
+        let req_id = self.inner.submit(op, fd, buf, offset)?;
+        let new_ep = lease::commit(
+            &self.channel,
+            crate::exec::ExecId(owner),
+            expected_epoch,
+            &format!("aio submit op={:?} fd={} offset={}", op, fd, offset),
+        )
+        .map_err(|e| crate::fs::aio::AioError::IoError(format!("lease commit failed: {:?}", e)))?;
+        Ok((req_id, new_ep))
+    }
+
+    /// 启动工作线程（无需租约）。
+    pub fn start(&self) -> Result<(), crate::fs::aio::AioError> {
+        self.inner.start()
+    }
+
+    /// 轮询请求完成（只读，无需租约）。
+    pub fn poll(
+        &self,
+        req_id: crate::fs::aio::AioReqId,
+        timeout: Duration,
+    ) -> Result<crate::fs::aio::AioResult, crate::fs::aio::AioError> {
+        self.inner.poll(req_id, timeout)
+    }
+
+    /// 关闭上下文（无需租约）。
+    pub fn shutdown(&self) -> Result<(), crate::fs::aio::AioError> {
+        self.inner.shutdown()
+    }
+
+    /// 返回 SQ 长度。
+    pub fn sq_len(&self) -> usize {
+        self.inner.sq_len()
+    }
+
+    /// 返回 CQ 长度。
+    pub fn cq_len(&self) -> usize {
+        self.inner.cq_len()
+    }
+
+    /// 强制刷新（force 模式，绕过租约）。
+    pub fn force_shutdown(&self, owner: u64) -> Epoch {
+        lease::force(&self.channel, &format!("aio force_shutdown owner={}", owner))
+    }
+
+    /// 返回当前 epoch。
+    pub fn epoch(&self) -> Epoch {
+        lease::epoch(&self.channel)
+    }
+}
+
+/// 能力位权限包装器：在 AIO 操作上加 `caps` 校验。
+///
+/// `CAP_SYS_RAWIO` 允许提交读写请求；`CAP_SYS_ADMIN` 允许启动/关闭上下文。
+pub struct AioContextCaps {
+    inner: AioContext,
+    caps: Arc<Mutex<caps::Caps>>,
+}
+
+impl AioContextCaps {
+    /// 包装一个已有 AIO 上下文，绑定全局能力表。
+    pub fn new(ctx: AioContext) -> Self {
+        Self {
+            inner: ctx,
+            caps: Arc::new(Mutex::new(caps::caps().lock().unwrap().clone())),
+        }
+    }
+
+    fn check_rawio(&self) -> Result<(), String> {
+        let c = self.caps.lock().unwrap();
+        if c.has("CAP_SYS_RAWIO") {
+            Ok(())
+        } else {
+            Err("缺少 CAP_SYS_RAWIO 能力".to_string())
+        }
+    }
+
+    fn check_admin(&self) -> Result<(), String> {
+        let c = self.caps.lock().unwrap();
+        if c.has("CAP_SYS_ADMIN") {
+            Ok(())
+        } else {
+            Err("缺少 CAP_SYS_ADMIN 能力".to_string())
+        }
+    }
+
+    /// 提交异步请求（需 CAP_SYS_RAWIO）。
+    pub fn submit(
+        &self,
+        op: AioOp,
+        fd: u64,
+        buf: Vec<u8>,
+        offset: u64,
+    ) -> Result<crate::fs::aio::AioReqId, String> {
+        self.check_rawio()?;
+        self.inner.submit(op, fd, buf, offset).map_err(|e| e.to_string())
+    }
+
+    /// 轮询完成（只读，无需能力）。
+    pub fn poll(
+        &self,
+        req_id: crate::fs::aio::AioReqId,
+        timeout: Duration,
+    ) -> Result<crate::fs::aio::AioResult, String> {
+        self.inner.poll(req_id, timeout).map_err(|e| e.to_string())
+    }
+
+    /// 启动工作线程（需 CAP_SYS_ADMIN）。
+    pub fn start(&self) -> Result<(), String> {
+        self.check_admin()?;
+        self.inner.start().map_err(|e| e.to_string())
+    }
+
+    /// 关闭上下文（需 CAP_SYS_ADMIN）。
+    pub fn shutdown(&self) -> Result<(), String> {
+        self.check_admin()?;
+        self.inner.shutdown().map_err(|e| e.to_string())
+    }
+
+    /// 返回 SQ 长度（无需能力）。
+    pub fn sq_len(&self) -> usize {
+        self.inner.sq_len()
+    }
+}
+
+// ============================================================================
+// sense/act 通道接口：aio://<设备名>
+// ============================================================================
+
+/// 感知异步 IO 通道：返回 AIO 上下文状态摘要。
+///
+/// 通道名形式：`aio://<设备名>`
+pub fn probe_aio(name: &str) -> Option<String> {
+    let channel = format!("aio://{}", name);
+    let epoch = lease::epoch(&channel);
+    Some(format!(
+        "channel={} type=aio_context epoch={} ops=submit|poll|start|shutdown",
+        name, epoch
+    ))
+}
+
+/// 对异步 IO 通道执行行动。
+///
+/// 支持子命令：
+/// - `status` —— 返回 AIO 状态摘要（占位）
+/// - `epoch` —— 返回当前 epoch
+pub fn act_aio(name: &str, payload: &str) -> Option<Result<String, String>> {
+    let mut tokens = payload.split_whitespace();
+    let sub = tokens.next().unwrap_or("");
+    let channel = format!("aio://{}", name);
+    match sub {
+        "status" => Some(Ok(format!(
+            "aio://{} status=active epoch={}",
+            name,
+            lease::epoch(&channel)
+        ))),
+        "epoch" => Some(Ok(format!("epoch={}", lease::epoch(&channel)))),
+        _ => Some(Err("用法: status | epoch".to_string())),
     }
 }
 

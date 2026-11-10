@@ -696,6 +696,164 @@ pub fn buffer_sync() -> u64 {
 }
 
 // =====================================================================================
+// 预读器（Readahead）—— 顺序读取时提前将后续页载入缓存
+// =====================================================================================
+
+/// 预读器：在访问某页时，自动将后续 `readahead_pages` 个页也载入缓存，
+// 以优化顺序读取场景的命中率。
+pub struct Readahead {
+    /// 预读页数。
+    pub readahead_pages: usize,
+    /// 上一次预读的起始页 key。
+    pub last_key: Option<PageKey>,
+    /// 累计预读页数。
+    pub readahead_count: u64,
+}
+
+impl Readahead {
+    /// 创建预读器，预读 `readahead_pages` 个页。
+    pub fn new(readahead_pages: usize) -> Self {
+        Self {
+            readahead_pages,
+            last_key: None,
+            readahead_count: 0,
+        }
+    }
+
+    /// 在访问 `key` 后，尝试预读后续页。`get_next_key` 用于根据当前 key
+    // 计算下一个页的 key（由调用方提供，如文件路径 + 页号）。
+    pub fn readahead_after<F>(&mut self, key: &str, cache: &mut PageCache, get_next_key: F) -> usize
+    where
+        F: Fn(&str, usize) -> String,
+    {
+        let mut prefetched = 0;
+        self.last_key = Some(key.to_string());
+        for i in 1..=self.readahead_pages {
+            let next_key = get_next_key(key, i);
+            // 若缓存中已有该页，则跳过。
+            if cache.map.contains_key(&next_key) {
+                continue;
+            }
+            // 预读：分配新页框但不增加命中/未命中统计（预读不算命中）。
+            let _ = cache.get_page(&next_key);
+            prefetched += 1;
+            self.readahead_count += 1;
+        }
+        prefetched
+    }
+
+    /// 返回预读器摘要。
+    pub fn summary(&self) -> String {
+        format!(
+            "readahead pages={} last_key={:?} prefetched={}",
+            self.readahead_pages,
+            self.last_key,
+            self.readahead_count
+        )
+    }
+}
+
+impl Default for Readahead {
+    fn default() -> Self {
+        Self::new(2)
+    }
+}
+
+// =====================================================================================
+// 时钟算法页面置换（Clock Algorithm）—— 替代 LRU 的近似 LRU 置换
+// =====================================================================================
+
+/// 时钟算法置换器：维护一个循环链表，每个页框有一个使用位（use bit）。
+// 置换时扫描链表，将使用位清 0，若遇到使用位为 1 的页则跳过；
+// 若使用位为 0 则选中该页淘汰。近似 LRU，开销更低。
+pub struct ClockReplacer {
+    /// 页框索引环形列表。
+    frames: Vec<usize>,
+    /// 使用位：frame -> 是否最近被使用。
+    use_bits: HashMap<usize, bool>,
+    /// 当前时钟指针。
+    hand: usize,
+}
+
+impl ClockReplacer {
+    pub fn new() -> Self {
+        Self {
+            frames: Vec::new(),
+            use_bits: HashMap::new(),
+            hand: 0,
+        }
+    }
+
+    /// 将页框加入置换候选。
+    pub fn insert(&mut self, frame: usize) {
+        if !self.frames.contains(&frame) {
+            self.frames.push(frame);
+            self.use_bits.insert(frame, false);
+        }
+    }
+
+    /// 标记页框为最近使用（设置使用位）。
+    pub fn touch(&mut self, frame: usize) {
+        self.use_bits.insert(frame, true);
+    }
+
+    /// 移除页框。
+    pub fn remove(&mut self, frame: usize) {
+        if let Some(pos) = self.frames.iter().position(|&f| f == frame) {
+            self.frames.remove(pos);
+            self.use_bits.remove(&frame);
+            if self.hand >= self.frames.len() {
+                self.hand = 0;
+            }
+        }
+    }
+
+    /// 选取一个页框淘汰（使用位为 0 的首个帧）。
+    pub fn evict(&mut self) -> Option<usize> {
+        if self.frames.is_empty() {
+            return None;
+        }
+        let start = self.hand;
+        loop {
+            let frame = self.frames[self.hand];
+            let used = self.use_bits.get(&frame).copied().unwrap_or(false);
+            if !used {
+                self.hand = (self.hand + 1) % self.frames.len();
+                return Some(frame);
+            }
+            // 使用位清 0，继续扫描。
+            self.use_bits.insert(frame, false);
+            self.hand = (self.hand + 1) % self.frames.len();
+            if self.hand == start {
+                // 一圈都没找到未使用的，选当前帧。
+                self.hand = (self.hand + 1) % self.frames.len();
+                return Some(frame);
+            }
+        }
+    }
+
+    /// 返回当前候选帧数。
+    pub fn len(&self) -> usize {
+        self.frames.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.frames.is_empty()
+    }
+
+    /// 返回摘要。
+    pub fn summary(&self) -> String {
+        format!("clock frames={} hand={}", self.frames.len(), self.hand)
+    }
+}
+
+impl Default for ClockReplacer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// =====================================================================================
 // 单元测试
 // =====================================================================================
 
@@ -829,5 +987,76 @@ mod tests {
         let _ = buffer_sync();
         let _rate = buffer_cache().lock().unwrap().cache_hit_rate();
         let _ = _rate;
+    }
+
+    #[test]
+    fn readahead_prefetches_pages() {
+        let mut cache = PageCache::new(4096, 128);
+        let mut ra = Readahead::new(3);
+        // 先访问 page_0
+        let _ = cache.get_page("file://page_0");
+        // 预读 page_1, page_2, page_3
+        let n = ra.readahead_after("file://page_0", &mut cache, |base, i| {
+            let num: usize = base.trim_start_matches("file://page_").parse().unwrap_or(0);
+            format!("file://page_{}", num + i)
+        });
+        assert_eq!(n, 3);
+        assert!(cache.map.contains_key("file://page_1"));
+        assert!(cache.map.contains_key("file://page_2"));
+        assert!(cache.map.contains_key("file://page_3"));
+        let s = ra.summary();
+        assert!(s.contains("readahead"));
+    }
+
+    #[test]
+    fn readahead_skips_cached() {
+        let mut cache = PageCache::new(4096, 128);
+        let mut ra = Readahead::new(2);
+        // page_1 已缓存，预读应跳过
+        let _ = cache.get_page("file://base");
+        let _ = cache.get_page("file://page_1");
+        let n = ra.readahead_after("file://base", &mut cache, |base, i| {
+            let num: usize = base.trim_start_matches("file://").parse().unwrap_or(0);
+            format!("file://page_{}", num + i)
+        });
+        // base 不是数字格式，解析失败，page_1 已缓存，page_2 新缓存
+        assert_eq!(n, 1);
+        assert!(cache.map.contains_key("file://page_2"));
+    }
+
+    #[test]
+    fn clock_replacer_basic() {
+        let mut cr = ClockReplacer::new();
+        cr.insert(10);
+        cr.insert(20);
+        cr.insert(30);
+        assert_eq!(cr.len(), 3);
+        // 全部标记使用，第一次 evict 应清除使用位并选一个
+        cr.touch(10);
+        cr.touch(20);
+        cr.touch(30);
+        let evicted = cr.evict().unwrap();
+        // 10 的使用位被清，hand 移到 20
+        assert!(cr.evict().is_some());
+        cr.remove(20);
+        assert_eq!(cr.len(), 2);
+    }
+
+    #[test]
+    fn clock_replacer_touch_skips() {
+        let mut cr = ClockReplacer::new();
+        cr.insert(1);
+        cr.insert(2);
+        // 只有 1 被标记使用，evict 应选 2（未使用）
+        cr.touch(1);
+        let evicted = cr.evict();
+        assert_eq!(evicted, Some(2));
+    }
+
+    #[test]
+    fn clock_replacer_empty() {
+        let mut cr = ClockReplacer::new();
+        assert_eq!(cr.evict(), None);
+        assert!(cr.is_empty());
     }
 }

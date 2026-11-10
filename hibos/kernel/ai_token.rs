@@ -296,6 +296,7 @@ impl AIConsciousness {
             ChannelKind::Security => ComputePattern::Custom(format!("security_{}", name)),
             ChannelKind::Deadlock => ComputePattern::Custom(format!("deadlock_{}", name)),
             ChannelKind::Container => ComputePattern::Custom(format!("container_{}", name)),
+            _ => ComputePattern::Custom(format!("{}_{}", kind.name(), name)),
         };
         let policy = match kind {
             ChannelKind::Gpu => SchedulePolicy::HighThroughput,

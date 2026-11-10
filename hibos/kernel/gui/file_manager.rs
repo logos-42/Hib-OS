@@ -578,7 +578,7 @@ impl FileManager {
                 results.push(FileEntry::new(&name, path, file_type, size, modified));
             }
             if path.is_dir() && !path.is_symlink() {
-                self.search_recursive(&path, pat, results);
+                search_recursive(&path, pat, results);
             }
         }
     }

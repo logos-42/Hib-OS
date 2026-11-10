@@ -16,13 +16,20 @@
 pub mod apps;
 pub mod bmp;
 pub mod compositor;
+pub mod compositor_ext;
+pub mod file_manager;
+pub mod gesture;
 pub mod input;
 pub mod png;
 pub mod shell;
 pub mod taskbar;
+pub mod terminal;
+pub mod theme;
 pub mod surface;
 pub mod wallpaper;
+pub mod widget;
 pub mod window;
+pub mod wm;
 
 #[cfg(feature = "gui")]
 pub mod backend;

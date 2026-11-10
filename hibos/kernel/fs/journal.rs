@@ -17,10 +17,12 @@
 //! - UPDATE_DIR：更新目录项
 
 use std::collections::BTreeMap;
-use std::sync::OnceLock;
+use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::fs::block::{BlockDevice, BlockError, BLOCK_SIZE};
 use crate::fs::disk_img::DiskImage;
+use crate::lease::{self, Epoch};
+use crate::caps;
 
 /// 日志魔数。
 const JOURNAL_MAGIC: u32 = 0x4849_424A; // "HIBJ"
@@ -439,6 +441,259 @@ impl Journal {
     }
 }
 
+// ============================================================================
+// 并发控制：基于 lease.rs 的单写者租约 + epoch CAS
+// ============================================================================
+
+/// 基于 lease 的日志包装器：对事务提交（commit）加单写者租约保护，
+/// 避免多写者并发提交导致日志序列号混乱。
+pub struct JournalLeased {
+    inner: Mutex<Journal>,
+    channel: String,
+}
+
+impl JournalLeased {
+    /// 创建并包装为租约保护的日志。
+    pub fn new(device: Box<dyn BlockDevice + Send>, journal_size: u64, channel: &str) -> Self {
+        let journal = Journal::new(device, journal_size);
+        Self {
+            inner: Mutex::new(journal),
+            channel: channel.to_string(),
+        }
+    }
+
+    /// 格式化日志区（无需租约，仅初始化）。
+    pub fn format(&self) -> Result<(), crate::fs::journal::JournalError> {
+        let mut j = self.inner.lock().unwrap();
+        j.format()
+    }
+
+    /// 申请事务写租约，返回当前 epoch。
+    pub fn acquire_txn_lease(&self, owner: u64) -> Result<Epoch, crate::lease::LeaseConflict> {
+        lease::acquire(&self.channel, crate::exec::ExecId(owner), None)
+    }
+
+    /// 释放事务写租约。
+    pub fn release_txn_lease(&self, owner: u64) -> bool {
+        lease::release(&self.channel, crate::exec::ExecId(owner))
+    }
+
+    /// 开启事务（需先持有租约）。
+    pub fn begin_transaction(&self, owner: u64) -> Result<crate::fs::journal::TxnId, String> {
+        let _ = self.acquire_txn_lease(owner)
+            .map_err(|c| format!("租约冲突: holder={:?}", c.holder))?;
+        let mut j = self.inner.lock().unwrap();
+        Ok(j.begin_transaction())
+    }
+
+    /// 记录操作（需先持有租约）。
+    pub fn log_op(
+        &self,
+        owner: u64,
+        txn_id: crate::fs::journal::TxnId,
+        op_type: crate::fs::journal::JournalOp,
+        sector: u64,
+        old_data: &[u8],
+        new_data: &[u8],
+    ) -> Result<(), String> {
+        let _ = self.acquire_txn_lease(owner)
+            .map_err(|c| format!("租约冲突: holder={:?}", c.holder))?;
+        let mut j = self.inner.lock().unwrap();
+        j.log_op(txn_id, op_type, sector, old_data, new_data)
+            .map_err(|e| e.to_string())
+    }
+
+    /// 提交事务：写入日志并 commit 推进 epoch（乐观 CAS）。
+    pub fn commit(
+        &self,
+        owner: u64,
+        expected_epoch: Epoch,
+        txn_id: crate::fs::journal::TxnId,
+    ) -> Result<Epoch, crate::lease::CommitError> {
+        // 先确保持有租约。
+        let _ = self.acquire_txn_lease(owner)?;
+        let mut j = self.inner.lock().unwrap();
+        j.commit(txn_id).map_err(|e| {
+            crate::lease::CommitError::NotLeaseOwner {
+                holder: Some(crate::exec::ExecId(owner)),
+            }
+        })?; // journal 内部不返回 CommitError，这里简化映射
+        // 推进 epoch。
+        lease::commit(
+            &self.channel,
+            crate::exec::ExecId(owner),
+            expected_epoch,
+            &format!("journal commit txn={}", txn_id),
+        )
+    }
+
+    /// 重放日志（恢复，无需租约）。
+    pub fn replay(&self) -> Result<usize, crate::fs::journal::JournalError> {
+        let mut j = self.inner.lock().unwrap();
+        j.replay()
+    }
+
+    /// 检查点：回写已提交事务（无需租约，但需 CAP_SYS_ADMIN 权限由外层校验）。
+    pub fn checkpoint(&self) -> Result<usize, crate::fs::journal::JournalError> {
+        let mut j = self.inner.lock().unwrap();
+        j.checkpoint()
+    }
+
+    /// 同步日志头。
+    pub fn sync(&self) -> Result<(), crate::fs::journal::JournalError> {
+        let mut j = self.inner.lock().unwrap();
+        j.sync()
+    }
+
+    /// 返回已提交事务数。
+    pub fn committed_count(&self) -> usize {
+        let j = self.inner.lock().unwrap();
+        j.committed_count()
+    }
+
+    /// 返回当前 epoch。
+    pub fn epoch(&self) -> Epoch {
+        lease::epoch(&self.channel)
+    }
+
+    /// 强制刷新（force 模式，绕过租约）。
+    pub fn force_sync(&self, owner: u64) -> Epoch {
+        let _ = self.inner.lock().unwrap().sync();
+        lease::force(&self.channel, &format!("journal force_sync owner={}", owner))
+    }
+}
+
+/// 能力位权限包装器：在日志操作上加 `caps` 校验。
+///
+/// `CAP_SYS_RAWIO` 允许读取日志；`CAP_SYS_ADMIN` 允许提交/检查点/格式化等
+/// 修改操作。
+pub struct JournalCaps {
+    inner: Mutex<Journal>,
+    caps: Arc<Mutex<caps::Caps>>,
+}
+
+impl JournalCaps {
+    /// 包装一个已有日志实例，绑定全局能力表。
+    pub fn new(journal: Journal) -> Self {
+        Self {
+            inner: Mutex::new(journal),
+            caps: Arc::new(Mutex::new(caps::caps().lock().unwrap().clone())),
+        }
+    }
+
+    fn check_rawio(&self) -> Result<(), String> {
+        let c = self.caps.lock().unwrap();
+        if c.has("CAP_SYS_RAWIO") {
+            Ok(())
+        } else {
+            Err("缺少 CAP_SYS_RAWIO 能力".to_string())
+        }
+    }
+
+    fn check_admin(&self) -> Result<(), String> {
+        let c = self.caps.lock().unwrap();
+        if c.has("CAP_SYS_ADMIN") {
+            Ok(())
+        } else {
+            Err("缺少 CAP_SYS_ADMIN 能力".to_string())
+        }
+    }
+
+    /// 格式化（需 CAP_SYS_ADMIN）。
+    pub fn format(&self) -> Result<(), String> {
+        self.check_admin()?;
+        let mut j = self.inner.lock().unwrap();
+        j.format().map_err(|e| e.to_string())
+    }
+
+    /// 开启事务（需 CAP_SYS_ADMIN）。
+    pub fn begin_transaction(&self) -> Result<crate::fs::journal::TxnId, String> {
+        self.check_admin()?;
+        let mut j = self.inner.lock().unwrap();
+        Ok(j.begin_transaction())
+    }
+
+    /// 记录操作（需 CAP_SYS_ADMIN）。
+    pub fn log_op(
+        &self,
+        txn_id: crate::fs::journal::TxnId,
+        op_type: crate::fs::journal::JournalOp,
+        sector: u64,
+        old_data: &[u8],
+        new_data: &[u8],
+    ) -> Result<(), String> {
+        self.check_admin()?;
+        let mut j = self.inner.lock().unwrap();
+        j.log_op(txn_id, op_type, sector, old_data, new_data)
+            .map_err(|e| e.to_string())
+    }
+
+    /// 提交事务（需 CAP_SYS_ADMIN）。
+    pub fn commit(&self, txn_id: crate::fs::journal::TxnId) -> Result<(), String> {
+        self.check_admin()?;
+        let mut j = self.inner.lock().unwrap();
+        j.commit(txn_id).map_err(|e| e.to_string())
+    }
+
+    /// 重放日志（需 CAP_SYS_RAWIO）。
+    pub fn replay(&self) -> Result<usize, String> {
+        self.check_rawio()?;
+        let mut j = self.inner.lock().unwrap();
+        j.replay().map_err(|e| e.to_string())
+    }
+
+    /// 检查点（需 CAP_SYS_ADMIN）。
+    pub fn checkpoint(&self) -> Result<usize, String> {
+        self.check_admin()?;
+        let mut j = self.inner.lock().unwrap();
+        j.checkpoint().map_err(|e| e.to_string())
+    }
+
+    /// 返回已提交事务数（无需能力）。
+    pub fn committed_count(&self) -> usize {
+        let j = self.inner.lock().unwrap();
+        j.committed_count()
+    }
+}
+
+// ============================================================================
+// sense/act 通道接口：journal://<设备路径>
+// ============================================================================
+
+/// 感知日志通道：返回日志状态摘要。
+///
+/// 通道名形式：`journal://<设备路径>`
+pub fn probe_journal(name: &str) -> Option<String> {
+    let dev = name.strip_prefix("journal://")?;
+    let channel = format!("journal://{}", dev);
+    let epoch = lease::epoch(&channel);
+    Some(format!(
+        "channel={} type=journal_wal epoch={} ops=begin|log_op|commit|replay|checkpoint|sync",
+        dev, epoch
+    ))
+}
+
+/// 对日志通道执行行动。
+///
+/// 支持子命令：
+/// - `status` —— 返回日志状态摘要（占位）
+/// - `epoch` —— 返回当前 epoch
+pub fn act_journal(name: &str, payload: &str) -> Option<Result<String, String>> {
+    let dev = name.strip_prefix("journal://")?;
+    let mut tokens = payload.split_whitespace();
+    let sub = tokens.next().unwrap_or("");
+    let channel = format!("journal://{}", dev);
+    match sub {
+        "status" => Some(Ok(format!(
+            "journal://{} status=formatted epoch={}",
+            dev,
+            lease::epoch(&channel)
+        ))),
+        "epoch" => Some(Ok(format!("epoch={}", lease::epoch(&channel)))),
+        _ => Some(Err("用法: status | epoch".to_string())),
+    }
+}
+
 /// 从外部导入的 crc32（与 partition.rs 共享算法，此处局部实现避免跨模块依赖）。
 fn crc32(data: &[u8]) -> u32 {
     static TABLE: OnceLock<[u32; 256]> = OnceLock::new();
@@ -570,5 +825,129 @@ mod tests {
         let mut j = Journal::new(Box::new(MemBlockDevice::new("ram0", 1024)), 64);
         j.format().unwrap();
         assert!(j.sync().is_ok());
+    }
+
+    // ----- lease 并发控制测试 -----
+
+    #[test]
+    fn journal_leased_single_writer() {
+        let journal = JournalLeased::new(
+            Box::new(MemBlockDevice::new("ram0", 1024)),
+            64,
+            "journal://test-lease",
+        );
+        assert!(journal.acquire_txn_lease(101).is_ok());
+        let err = journal.acquire_txn_lease(102).unwrap_err();
+        assert_eq!(err.holder, crate::exec::ExecId(101));
+        assert!(journal.release_txn_lease(101));
+        assert!(journal.acquire_txn_lease(102).is_ok());
+        assert!(journal.release_txn_lease(102));
+    }
+
+    #[test]
+    fn journal_leased_begin_commit_epoch() {
+        let journal = JournalLeased::new(
+            Box::new(MemBlockDevice::new("ram0", 1024)),
+            64,
+            "journal://test-lease2",
+        );
+        journal.format().unwrap();
+        let ep0 = journal.epoch();
+        let ep1 = journal.begin_transaction(201).unwrap();
+        assert_eq!(ep1, ep0); // begin_transaction 不推进 epoch
+        let old = [0u8; BLOCK_SIZE];
+        let mut new = [0u8; BLOCK_SIZE];
+        new[0] = 0xAA;
+        journal.log_op(201, 1, JournalOp::WriteBlock, 100, &old, &new).unwrap();
+        let new_ep = journal.commit(201, ep0, 1).unwrap();
+        assert_eq!(new_ep, ep0 + 1);
+        assert_eq!(journal.committed_count(), 1);
+        assert!(journal.release_txn_lease(201));
+    }
+
+    #[test]
+    fn journal_leased_stale_epoch_rejected() {
+        let journal = JournalLeased::new(
+            Box::new(MemBlockDevice::new("ram0", 1024)),
+            64,
+            "journal://test-lease3",
+        );
+        journal.format().unwrap();
+        let ep = journal.begin_transaction(301).unwrap();
+        let old = [0u8; BLOCK_SIZE];
+        let new = [0u8; BLOCK_SIZE];
+        journal.log_op(301, 1, JournalOp::WriteBlock, 200, &old, &new).unwrap();
+        let _ = journal.commit(301, ep, 1).unwrap();
+        // 再用旧 epoch 提交应被拒绝。
+        let ep2 = journal.begin_transaction(301).unwrap();
+        let err = journal.commit(301, ep, 2).unwrap_err();
+        assert!(matches!(err, crate::lease::CommitError::StaleEpoch { .. }));
+        let _ = journal.release_txn_lease(301);
+    }
+
+    #[test]
+    fn journal_leased_force_sync() {
+        let journal = JournalLeased::new(
+            Box::new(MemBlockDevice::new("ram0", 1024)),
+            64,
+            "journal://test-lease4",
+        );
+        journal.format().unwrap();
+        let ep0 = journal.epoch();
+        let ep1 = journal.force_sync(401);
+        assert!(ep1 > ep0);
+    }
+
+    // ----- caps 权限测试 -----
+
+    #[test]
+    fn journal_caps_admin_required() {
+        let j = Journal::new(Box::new(MemBlockDevice::new("ram0", 1024)), 64);
+        let caps_j = JournalCaps::new(j);
+        {
+            let mut c = caps::caps().lock().unwrap();
+            let _ = c.revoke("CAP_SYS_ADMIN");
+        }
+        assert!(caps_j.begin_transaction().is_err());
+        {
+            let mut c = caps::caps().lock().unwrap();
+            let _ = c.grant("CAP_SYS_ADMIN");
+        }
+        assert!(caps_j.begin_transaction().is_ok());
+    }
+
+    #[test]
+    fn journal_caps_rawio_required_for_replay() {
+        let j = Journal::new(Box::new(MemBlockDevice::new("ram0", 1024)), 64);
+        j.format().unwrap();
+        let caps_j = JournalCaps::new(j);
+        {
+            let mut c = caps::caps().lock().unwrap();
+            let _ = c.revoke("CAP_SYS_RAWIO");
+        }
+        assert!(caps_j.replay().is_err());
+        {
+            let mut c = caps::caps().lock().unwrap();
+            let _ = c.grant("CAP_SYS_RAWIO");
+        }
+        assert!(caps_j.replay().is_ok());
+    }
+
+    // ----- sense/act 通道测试 -----
+
+    #[test]
+    fn journal_probe_channel() {
+        let snap = probe_journal("journal://ram0").unwrap();
+        assert!(snap.contains("journal://ram0"));
+        assert!(snap.contains("epoch="));
+        assert!(snap.contains("ops="));
+    }
+
+    #[test]
+    fn journal_act_channel_status_epoch() {
+        let r = act_journal("journal://ram0", "status").unwrap().unwrap();
+        assert!(r.contains("status=formatted"));
+        let r = act_journal("journal://ram0", "epoch").unwrap().unwrap();
+        assert!(r.contains("epoch="));
     }
 }

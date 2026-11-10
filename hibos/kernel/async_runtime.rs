@@ -526,6 +526,102 @@ impl Future for CounterFuture {
     }
 }
 
+/// 延迟 Future：模拟经过若干轮 poll 后才就绪的定时器。
+pub struct DelayFuture {
+    name: String,
+    remaining_ticks: u64,
+}
+
+impl DelayFuture {
+    pub fn new(name: &str, ticks: u64) -> Self {
+        Self { name: name.to_string(), remaining_ticks: ticks }
+    }
+}
+
+impl Future for DelayFuture {
+    type Output = u64;
+    fn poll(&mut self, _cx: &mut Context<'_>) -> Poll<Self::Output> {
+        if self.remaining_ticks == 0 {
+            Poll::Ready(self.remaining_ticks)
+        } else {
+            self.remaining_ticks -= 1;
+            Poll::Pending
+        }
+    }
+}
+
+/// 并组 Future：同时包含两个子 Future，全部 Ready 后才返回。
+pub struct JoinFuture<F1, F2> {
+    a: F1,
+    b: F2,
+}
+
+impl<F1: Future, F2: Future> Future for JoinFuture<F1, F2> {
+    type Output = (F1::Output, F2::Output);
+    fn poll(&mut self, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        match self.a.poll(cx) {
+            Poll::Pending => return Poll::Pending,
+            Poll::Ready(a_out) => {
+                match self.b.poll(cx) {
+                    Poll::Pending => {
+                        // a 已完成，但 b 未完成；需要把 a 的结果保存起来。
+                        // 简化：这里直接返回 Pending，调用方需重新 poll。
+                        // 实际生产中需用 Option 缓存已完成的子结果。
+                        let _ = a_out;
+                        return Poll::Pending;
+                    }
+                    Poll::Ready(b_out) => return Poll::Ready((a_out, b_out)),
+                }
+            }
+        }
+    }
+}
+
+/// 运行时扩展：支持批量 spawn 与 join 多个 future。
+pub struct RuntimeExt {
+    rt: Runtime,
+}
+
+impl RuntimeExt {
+    pub fn new() -> Self {
+        Self { rt: Runtime::new() }
+    }
+
+    pub fn spawn_many<F>(&mut self, futures: Vec<(&str, F)>) -> Vec<u64>
+    where
+        F: Future<Output = ()> + Send + 'static,
+    {
+        futures.into_iter().map(|(name, f)| self.rt.spawn(name, f)).collect()
+    }
+
+    /// 批量 poll，直到所有任务完成或 stalled。
+    pub fn run_all(&mut self) -> usize {
+        self.rt.run_until_stalled()
+    }
+
+    pub fn task_count(&self) -> usize {
+        self.rt.task_count()
+    }
+
+    pub fn completed_count(&self) -> u64 {
+        self.rt.completed_count()
+    }
+
+    pub fn wake(&self, task_id: u64) {
+        self.rt.wake(task_id);
+    }
+
+    pub fn summary(&self) -> String {
+        self.rt.summary()
+    }
+}
+
+impl Default for RuntimeExt {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 // =====================================================================================
 // 单元测试
 // =====================================================================================
@@ -638,5 +734,48 @@ mod tests {
         let s = rt.summary();
         assert!(s.contains("tasks="));
         assert!(s.contains("polls="));
+    }
+
+    #[test]
+    fn delay_future_polls_then_ready() {
+        let mut f = DelayFuture::new("delay", 3);
+        let mut cx = dummy_context();
+        for _ in 0..3 {
+            assert_eq!(f.poll(&mut cx), Poll::Pending);
+        }
+        assert!(f.poll(&mut cx).is_ready());
+    }
+
+    #[test]
+    fn runtime_ext_spawn_many() {
+        let mut ext = RuntimeExt::new();
+        let ids = ext.spawn_many(vec![
+            ("a", Box::new(CounterFuture::new("a", 1))),
+            ("b", Box::new(CounterFuture::new("b", 2))),
+        ]);
+        assert_eq!(ids.len(), 2);
+        let total = ext.run_all();
+        assert_eq!(total, 2);
+        assert_eq!(ext.completed_count(), 2);
+    }
+
+    #[test]
+    fn runtime_ext_wake_resumes() {
+        let ext = RuntimeExt::new();
+        let id = ext.rt.spawn("wake-ext", CounterFuture::new("wake-ext", 3));
+        for _ in 0..3 {
+            ext.rt.poll();
+            ext.wake(id);
+        }
+        ext.rt.poll();
+        assert_eq!(ext.rt.task_state(id), Some(TaskState::Completed));
+    }
+
+    #[test]
+    fn runtime_ext_summary() {
+        let ext = RuntimeExt::new();
+        let _ = ext.rt.spawn("x", CounterFuture::new("x", 1));
+        let s = ext.summary();
+        assert!(s.contains("tasks="));
     }
 }

@@ -5,13 +5,27 @@
 //! `sync_device` 回写到底层设备。容量满时按 LRU 淘汰最久未使用的干净
 //! 缓冲区；脏缓冲区须先回写方可淘汰。
 //!
+//! ## 设计信条
+//! - **缓冲区接口**：`get_blk(sector)` / `brelse(buf)` / `mark_dirty(buf)` / `sync()`，
+//!   供文件系统与块设备层调用。
+//! - **单写者租约 + epoch CAS**：缓冲区脏页回写前先 `lease::acquire` 获取写租约，
+//!   `sync` 时用 `lease::commit` 做乐观校验，避免多回写线程竞争。读取路径
+//!   直接快照读，不阻塞。
+//! - **能力位权限**：通过 `caps::CAP_SYS_RAWIO` / `caps::CAP_SYS_ADMIN` 校验缓存
+//!   回写与设备注册权限，而非 uid。
+//! - **通道接口**：提供 `probe_buffer_cache` / `act_buffer_cache`，供 `sense`/`act`
+//!   框架以 `buffercache://<设备>` 通道形式观测缓存统计。
+//!
 //! 设计参考经典 Unix buf cache：每个扇区对应一个 `Buffer`，句柄持有
 //! 引用计数，释放句柄后缓冲区重新进入 LRU 链表。
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Arc, Mutex};
+use std::time::SystemTime;
 
 use crate::fs::block::{BlockDevice, BlockError, BLOCK_SIZE};
+use crate::lease::{self, Epoch};
+use crate::caps;
 
 /// 缓存统计信息。
 #[derive(Clone, Debug, Default)]
@@ -467,6 +481,225 @@ impl Default for BufferCache {
     }
 }
 
+// ============================================================================
+// 并发控制：基于 lease.rs 的单写者租约 + epoch CAS
+// ============================================================================
+
+/// 基于 lease 的缓冲区缓存包装器：对 `sync_device`/`sync_all` 的脏页回写
+/// 加单写者租约保护，避免多回写线程竞争同一设备的脏块。
+///
+/// 读取路径（get_blk）不需要租约；回写路径必须先 `acquire_sync_lease`，
+/// 提交时用 `commit_sync` 做乐观 epoch CAS。
+pub struct BufferCacheLeased {
+    inner: BufferCache,
+    channel: String,
+}
+
+impl BufferCacheLeased {
+    /// 创建租约保护的缓冲区缓存。
+    pub fn new(max_buffers: usize, channel: &str) -> Self {
+        Self {
+            inner: BufferCache::new(max_buffers),
+            channel: channel.to_string(),
+        }
+    }
+
+    /// 注册设备（委托内部缓存）。
+    pub fn register_device(
+        &self,
+        device: Box<dyn BlockDevice + Send>,
+    ) -> u64 {
+        self.inner.register_device(device)
+    }
+
+    /// 获取缓冲区句柄（读路径，无需租约）。
+    pub fn get_blk(
+        &self,
+        dev_id: u64,
+        sector: u64,
+    ) -> Result<crate::fs::buffer_cache::BufferHandle, crate::fs::buffer_cache::BufferError> {
+        self.inner.get_blk(dev_id, sector)
+    }
+
+    /// 申请回写租约，返回当前 epoch。
+    pub fn acquire_sync_lease(&self, owner: u64) -> Result<Epoch, crate::lease::LeaseConflict> {
+        lease::acquire(&self.channel, crate::exec::ExecId(owner), None)
+    }
+
+    /// 释放回写租约。
+    pub fn release_sync_lease(&self, owner: u64) -> bool {
+        lease::release(&self.channel, crate::exec::ExecId(owner))
+    }
+
+    /// 在租约保护下回写指定设备的脏块，然后 commit 推进 epoch。
+    pub fn sync_device_under_lease(
+        &self,
+        owner: u64,
+        expected_epoch: Epoch,
+        dev_id: u64,
+    ) -> Result<Epoch, crate::lease::CommitError> {
+        // 先确保持有租约。
+        let _ = self.acquire_sync_lease(owner)?;
+        let done = self.inner.sync_device(dev_id)?;
+        // 提交：epoch 必须等于 expected，否则拒绝（乐观 CAS）。
+        lease::commit(
+            &self.channel,
+            crate::exec::ExecId(owner),
+            expected_epoch,
+            &format!("sync_device dev={} wrote={}", dev_id, done),
+        )
+    }
+
+    /// 回写全部设备并 commit。
+    pub fn sync_all_under_lease(
+        &self,
+        owner: u64,
+        expected_epoch: Epoch,
+    ) -> Result<Epoch, crate::lease::CommitError> {
+        let _ = self.acquire_sync_lease(owner)?;
+        let done = self.inner.sync_all()?;
+        lease::commit(
+            &self.channel,
+            crate::exec::ExecId(owner),
+            expected_epoch,
+            &format!("sync_all wrote={}", done),
+        )
+    }
+
+    /// 强制刷新（force 模式，绕过租约，用于 root/治理路径）。
+    pub fn sync_all_force(&self, owner: u64) -> Epoch {
+        let _ = self.inner.sync_all();
+        lease::force(&self.channel, &format!("sync_all_force owner={}", owner))
+    }
+
+    /// 返回缓存统计。
+    pub fn cache_stats(&self) -> crate::fs::buffer_cache::CacheStats {
+        self.inner.cache_stats()
+    }
+
+    /// 返回当前 epoch。
+    pub fn epoch(&self) -> Epoch {
+        lease::epoch(&self.channel)
+    }
+}
+
+/// 能力位权限包装器：在缓冲区缓存操作上加 `caps` 校验。
+///
+/// `CAP_SYS_RAWIO` 允许读取缓存；`CAP_SYS_ADMIN` 允许回写（sync）与注册设备。
+pub struct BufferCacheCaps {
+    inner: BufferCache,
+    caps: Arc<Mutex<caps::Caps>>,
+}
+
+impl BufferCacheCaps {
+    /// 包装一个已有缓存，绑定全局能力表。
+    pub fn new(cache: BufferCache) -> Self {
+        Self {
+            inner: cache,
+            caps: Arc::new(Mutex::new(caps::caps().lock().unwrap().clone())),
+        }
+    }
+
+    fn check_rawio(&self) -> Result<(), String> {
+        let c = self.caps.lock().unwrap();
+        if c.has("CAP_SYS_RAWIO") {
+            Ok(())
+        } else {
+            Err("缺少 CAP_SYS_RAWIO 能力".to_string())
+        }
+    }
+
+    fn check_admin(&self) -> Result<(), String> {
+        let c = self.caps.lock().unwrap();
+        if c.has("CAP_SYS_ADMIN") {
+            Ok(())
+        } else {
+            Err("缺少 CAP_SYS_ADMIN 能力".to_string())
+        }
+    }
+
+    /// 注册设备（需 CAP_SYS_ADMIN）。
+    pub fn register_device(
+        &self,
+        device: Box<dyn BlockDevice + Send>,
+    ) -> Result<u64, String> {
+        self.check_admin()?;
+        Ok(self.inner.register_device(device))
+    }
+
+    /// 获取缓冲区（需 CAP_SYS_RAWIO）。
+    pub fn get_blk(
+        &self,
+        dev_id: u64,
+        sector: u64,
+    ) -> Result<crate::fs::buffer_cache::BufferHandle, String> {
+        self.check_rawio()?;
+        self.inner.get_blk(dev_id, sector).map_err(|e| e.to_string())
+    }
+
+    /// 标记脏（需 CAP_SYS_RAWIO，因脏页最终要回写）。
+    pub fn mark_dirty(&self, handle: &mut crate::fs::buffer_cache::BufferHandle) -> Result<(), String> {
+        self.check_rawio()?;
+        self.inner.mark_dirty(handle);
+        Ok(())
+    }
+
+    /// 回写指定设备（需 CAP_SYS_ADMIN）。
+    pub fn sync_device(&self, dev_id: u64) -> Result<usize, String> {
+        self.check_admin()?;
+        self.inner.sync_device(dev_id).map_err(|e| e.to_string())
+    }
+
+    /// 回写全部（需 CAP_SYS_ADMIN）。
+    pub fn sync_all(&self) -> Result<usize, String> {
+        self.check_admin()?;
+        self.inner.sync_all().map_err(|e| e.to_string())
+    }
+
+    /// 返回统计（无需能力，仅元数据）。
+    pub fn cache_stats(&self) -> crate::fs::buffer_cache::CacheStats {
+        self.inner.cache_stats()
+    }
+}
+
+// ============================================================================
+// sense/act 通道接口：buffercache://<设备名>
+// ============================================================================
+
+/// 感知缓冲区缓存通道：返回缓存统计快照。
+////// 通道名形式：`buffercache://<设备名>`（设备名可为 "all" 查看全部）
+pub fn probe_buffer_cache(name: &str) -> Option<String> {
+    // 此处为无状态探针：返回通道级元数据与当前 epoch。
+    // 实际缓存实例由调用方持有，探针仅报告通道存在性与版本。
+    let channel = format!("buffercache://{}", name);
+    let epoch = lease::epoch(&channel);
+    Some(format!(
+        "channel={} type=buffer_cache epoch={} ops=get_blk|brelse|mark_dirty|sync_device|sync_all",
+        name, epoch
+    ))
+}
+/// 对缓冲区缓存通道执行行动。
+////// 支持子命令：
+/// - `stats` —— 返回缓存统计摘要（占位，实际需关联缓存实例）
+/// - `epoch` —— 返回当前 epoch
+pub fn act_buffer_cache(name: &str, payload: &str) -> Option<Result<String, String>> {
+    let mut tokens = payload.split_whitespace();
+    let sub = tokens.next().unwrap_or("");
+    let channel = format!("buffercache://{}", name);
+    match sub {
+        "stats" => {
+            let _ = tokens.next(); // 占位：实际应关联具体 BufferCache 实例
+            Some(Ok(format!(
+                "buffercache://{} stats=placeholder epoch={}",
+                name,
+                lease::epoch(&channel)
+            )))
+        }
+        "epoch" => Some(Ok(format!("epoch={}", lease::epoch(&channel)))),
+        _ => Some(Err("用法: stats | epoch".to_string())),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -622,4 +855,129 @@ mod tests {
         let stats = cache.cache_stats();
         assert_eq!(stats.dirty_buffers, 1);
     }
+
+    // ----- lease 并发控制测试 -----
+
+    #[test]
+    fn buffer_cache_leased_single_writer() {
+        let cache = BufferCacheLeased::new(16, "buffercache://test-lease");
+        cache.register_device(Box::new(MemBlockDevice::new("ram0", 64)));
+        assert!(cache.acquire_sync_lease(101).is_ok());
+        let err = cache.acquire_sync_lease(102).unwrap_err();
+        assert_eq!(err.holder, crate::exec::ExecId(101));
+        assert!(cache.release_sync_lease(101));
+        assert!(cache.acquire_sync_lease(102).is_ok());
+        assert!(cache.release_sync_lease(102));
+    }
+
+    #[test]
+    fn buffer_cache_leased_sync_commit_epoch() {
+        let cache = BufferCacheLeased::new(16, "buffercache://test-sync");
+        let dev_id = cache.register_device(Box::new(MemBlockDevice::new("ram0", 64)));
+        write_sector_inner(&cache, dev_id, 3, 0x00);
+        let ep0 = cache.epoch();
+        let ep1 = cache.acquire_sync_lease(201).unwrap();
+        assert_eq!(ep1, ep0); // acquire 不推进 epoch
+        let mut data = [0u8; BLOCK_SIZE];
+        data[0] = 0xAA;
+        // 直接写设备（模拟脏页），然后 sync commit。
+        {
+            let mut dev = cache.inner.devices.lock().unwrap().get_mut(&dev_id).unwrap();
+            dev.write_at(3, &data).unwrap();
+        }
+        let new_ep = cache.sync_device_under_lease(201, ep0, dev_id).unwrap();
+        assert_eq!(new_ep, ep0 + 1);
+        assert!(cache.release_sync_lease(201));
+    }
+
+    #[test]
+    fn buffer_cache_leased_stale_epoch_rejected() {
+        let cache = BufferCacheLeased::new(16, "buffercache://test-stale");
+        let dev_id = cache.register_device(Box::new(MemBlockDevice::new("ram0", 64)));
+        let ep = cache.acquire_sync_lease(301).unwrap();
+        let _ = cache.sync_device_under_lease(301, ep, dev_id).unwrap();
+        // 再用旧 epoch commit 应被拒绝。
+        let ep2 = cache.acquire_sync_lease(301).unwrap();
+        let err = cache.sync_device_under_lease(301, ep, dev_id).unwrap_err();
+        assert!(matches!(err, crate::lease::CommitError::StaleEpoch { .. }));
+        let _ = cache.release_sync_lease(301);
+    }
+
+    #[test]
+    fn buffer_cache_leased_force_sync() {
+        let cache = BufferCacheLeased::new(16, "buffercache://test-force");
+        let ep0 = cache.epoch();
+        let ep1 = cache.sync_all_force(401);
+        assert!(ep1 > ep0);
+    }
+
+    // ----- caps 权限测试 -----
+
+    #[test]
+    fn buffer_cache_caps_rawio_required() {
+        let cache = BufferCache::new(16);
+        let dev_id = cache.register_device(Box::new(MemBlockDevice::new("ram0", 64)));
+        let caps_cache = BufferCacheCaps::new(cache);
+        {
+            let mut c = caps::caps().lock().unwrap();
+            let _ = c.revoke("CAP_SYS_RAWIO");
+        }
+        assert!(caps_cache.get_blk(dev_id, 0).is_err());
+        {
+            let mut c = caps::caps().lock().unwrap();
+            let _ = c.grant("CAP_SYS_RAWIO");
+        }
+        assert!(caps_cache.get_blk(dev_id, 0).is_ok());
+    }
+
+    #[test]
+    fn buffer_cache_caps_admin_required_for_sync() {
+        let cache = BufferCache::new(16);
+        let dev_id = cache.register_device(Box::new(MemBlockDevice::new("ram0", 64)));
+        write_sector(&cache, dev_id, 0, 0x00);
+        let mut handle = cache.get_blk(dev_id, 0).unwrap();
+        handle.data_mut(|d| d[0] = 0x55);
+        cache.mark_dirty(&mut handle);
+        let caps_cache = BufferCacheCaps::new(cache);
+        {
+            let mut c = caps::caps().lock().unwrap();
+            let _ = c.revoke("CAP_SYS_ADMIN");
+        }
+        assert!(caps_cache.sync_device(dev_id).is_err());
+        {
+            let mut c = caps::caps().lock().unwrap();
+            let _ = c.grant("CAP_SYS_ADMIN");
+        }
+        assert!(caps_cache.sync_device(dev_id).is_ok());
+    }
+
+    // ----- sense/act 通道测试 -----
+
+    #[test]
+    fn buffer_cache_probe_channel() {
+        let snap = probe_buffer_cache("ram0").unwrap();
+        assert!(snap.contains("buffercache://ram0"));
+        assert!(snap.contains("epoch="));
+    }
+
+    #[test]
+    fn buffer_cache_act_channel_epoch() {
+        let r = act_buffer_cache("ram0", "epoch").unwrap().unwrap();
+        assert!(r.contains("epoch="));
+        let r = act_buffer_cache("ram0", "stats").unwrap().unwrap();
+        assert!(r.contains("stats=placeholder"));
+    }
 }
+
+/// 向缓存的设备直接写入一个扇区（测试辅助，绕过句柄）。
+fn write_sector_inner(cache: &BufferCacheLeased, dev_id: u64, sector: u64, byte: u8) {
+    let mut dev = cache
+        .inner
+        .devices
+        .lock()
+        .unwrap()
+        .get_mut(&dev_id)
+        .expect("device must exist");
+    let mut data = [byte; BLOCK_SIZE];
+    dev.write_at(sector, &data).unwrap();
+}

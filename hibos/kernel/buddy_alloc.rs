@@ -8,6 +8,12 @@
 //! 与 `lease.rs` 的单写者租约不同，伙伴分配器是底层的、无锁友好的结构；
 //! 真实多核并发应由上层持大锁或 per-CPU 空闲链表来守护。本实现提供单线程
 //! 正确版本，对外暴露 `&mut self` 接口，方便上层封装同步原语。
+//!
+//! 能力模型：物理页框分配受 `kernel/caps.rs` 的 `CAP_SYS_ADMIN` 门禁；
+//! 普通意识主体仅可通过 `buddy://stats` 通道观测空闲/已用统计。
+//!
+//! 通道集成：`buddy_alloc` / `buddy_free` / `buddy_summary` 全局函数供
+//! `sense.rs` `buddy://stats` 分支与 `act_buddy` 行动入口调用。
 
 use std::collections::HashSet;
 use std::sync::{Mutex, OnceLock};
@@ -27,8 +33,17 @@ pub enum AllocError {
     /// 释放的块不属于本分配器或已被释放（重复释放 / 越界）。
     BadFree,
 }
-
-/// 伙伴分配器实例。
+impl std::fmt::Display for AllocError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            AllocError::OutOfMemory => "没有足够大的连续空闲块".to_string(),
+            AllocError::InvalidArgument => "参数非法（阶越界 / 零大小）".to_string(),
+            AllocError::BadFree => "释放的块不属于本分配器或已被释放".to_string(),
+        };
+        write!(f, "{}", s)
+    }
+}
+/// 伙伴分配器实例。
 pub struct BuddyAllocator {
     /// 管理的总页框数（会被二进制分解为对齐块）。
     total_frames: usize,
@@ -40,9 +55,12 @@ pub struct BuddyAllocator {
     allocated: HashSet<usize>,
     /// 已分配页框数（统计用）。
     allocated_frames: usize,
+    /// 累计分配次数。
+    alloc_count: u64,
+    /// 累计释放次数。
+    free_count: u64,
 }
-
-impl BuddyAllocator {
+impl BuddyAllocator {
     /// 新建分配器，管理 [0, total_frames) 页框。
     /// `max_order` 为单块最大阶；传 0 时自动取能覆盖 `total_frames` 的合适阶。
     pub fn new(total_frames: usize, max_order: usize) -> Self {
@@ -81,10 +99,11 @@ impl BuddyAllocator {
             free_lists,
             allocated: HashSet::new(),
             allocated_frames: 0,
+            alloc_count: 0,
+            free_count: 0,
         }
     }
-
-    /// 覆盖 `frames` 个页框所需的最小阶（向上取整到 2 的幂）。
+    /// 覆盖 `frames` 个页框所需的最小阶（向上取整到 2 的幂）。
     fn order_for_frames(frames: usize) -> usize {
         if frames == 0 {
             return 0;
@@ -95,8 +114,7 @@ impl BuddyAllocator {
         }
         o
     }
-
-    /// 按"页框数"分配，返回首帧号（Addr 即帧号，物理地址 = 帧号 * PAGE_SIZE）。
+    /// 按"页框数"分配，返回首帧号（Addr 即帧号，物理地址 = 帧号 * PAGE_SIZE）。
     pub fn alloc_frames(&mut self, frames: usize) -> Result<usize, AllocError> {
         if frames == 0 {
             return Err(AllocError::InvalidArgument);
@@ -105,16 +123,18 @@ impl BuddyAllocator {
         if order > self.max_order {
             return Err(AllocError::OutOfMemory);
         }
-        self.alloc_order(order)
+        let result = self.alloc_order(order);
+        if result.is_ok() {
+            self.alloc_count += 1;
+        }
+        result
     }
-
-    /// 按"字节大小"分配，返回首帧号（自动向上取整到整页）。
+    /// 按"字节大小"分配，返回首帧号（自动向上取整到整页）。
     pub fn alloc(&mut self, size: usize) -> Result<usize, AllocError> {
         let frames = (size + PAGE_SIZE - 1) / PAGE_SIZE;
         self.alloc_frames(frames)
     }
-
-    /// 分配指定阶的块：从 order 往上找第一个非空空闲链表，必要时向下分裂。
+    /// 分配指定阶的块：从 order 往上找第一个非空空闲链表，必要时向下分裂。
     fn alloc_order(&mut self, order: usize) -> Result<usize, AllocError> {
         // 找第一个能用的阶。
         let mut found = None;
@@ -125,7 +145,7 @@ impl BuddyAllocator {
             }
         }
         let o = found.ok_or(AllocError::OutOfMemory)?;
-        let mut block = self.free_lists[o].pop().unwrap();
+        let block = self.free_lists[o].pop().unwrap();
         // 把 [order, o) 多出来的容量二分拆出伙伴，塞进低阶空闲链表。
         for k in (order..o).rev() {
             let buddy = block + (1usize << k);
@@ -135,8 +155,7 @@ impl BuddyAllocator {
         self.allocated_frames += 1usize << order;
         Ok(block)
     }
-
-    /// 释放首帧号为 `frame`、阶为 `order` 的块，并与空闲伙伴递归合并升阶。
+    /// 释放首帧号为 `frame`、阶为 `order` 的块，并与空闲伙伴递归合并升阶。
     pub fn free(&mut self, frame: usize, order: usize) -> Result<(), AllocError> {
         if order > self.max_order || frame >= self.total_frames {
             return Err(AllocError::BadFree);
@@ -145,6 +164,7 @@ impl BuddyAllocator {
             return Err(AllocError::BadFree);
         }
         self.allocated_frames -= 1usize << order;
+        self.free_count += 1;
         let mut b = frame;
         let mut o = order;
         loop {
@@ -167,8 +187,7 @@ impl BuddyAllocator {
         self.free_lists[o].push(b);
         Ok(())
     }
-
-    /// 统计信息快照。
+    /// 统计信息快照。
     pub fn stats(&self) -> BuddyStats {
         let free_frames = self.total_frames - self.allocated_frames;
         let mut per_order = vec![0usize; self.max_order + 1];
@@ -182,8 +201,7 @@ impl BuddyAllocator {
             per_order,
         }
     }
-
-    /// 当前最大可用连续块大小（按页框数）。
+    /// 当前最大可用连续块大小（按页框数）。
     pub fn largest_free_block(&self) -> usize {
         for o in (0..=self.max_order).rev() {
             if !self.free_lists[o].is_empty() {
@@ -192,9 +210,24 @@ impl BuddyAllocator {
         }
         0
     }
+    /// 返回累计分配次数。
+    pub fn alloc_count(&self) -> u64 {
+        self.alloc_count
+    }
+    /// 返回累计释放次数。
+    pub fn free_count(&self) -> u64 {
+        self.free_count
+    }
+    /// 返回已分配块数量（HashSet 长度）。
+    pub fn allocated_block_count(&self) -> usize {
+        self.allocated.len()
+    }
+    /// 检查给定帧是否当前被分配。
+    pub fn is_allocated(&self, frame: usize) -> bool {
+        self.allocated.contains(&frame)
+    }
 }
-
-/// 伙伴分配器统计快照。
+/// 伙伴分配器统计快照。
 #[derive(Debug, Clone)]
 pub struct BuddyStats {
     pub total_frames: usize,
@@ -203,47 +236,50 @@ pub struct BuddyStats {
     /// 每个阶的空闲块数量。
     pub per_order: Vec<usize>,
 }
-
-/// 页地址：物理帧号的轻量包装，对外暴露 `.index()` 取首帧号。
+/// 页地址：物理帧号的轻量包装，对外暴露 `.index()` 取首帧号。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PageAddr(pub usize);
-
-impl PageAddr {
+impl PageAddr {
     /// 返回首帧号（即物理地址 / PAGE_SIZE）。
     pub fn index(&self) -> usize {
         self.0
     }
+    /// 返回物理字节地址（帧号 * PAGE_SIZE）。
+    pub fn paddr(&self) -> usize {
+        self.0 * PAGE_SIZE
+    }
 }
-
-/// 全局伙伴分配器单例，管理低 4 GiB 物理页（演示规模共 2^20 页）。
+/// 全局伙伴分配器单例，管理低 4 GiB 物理页（演示规模共 2^20 页）。
 static BUDDY: OnceLock<Mutex<BuddyAllocator>> = OnceLock::new();
-
-/// 取得（按需初始化）全局分配器。
-fn buddy_global() -> &'static Mutex<BuddyAllocator> {
+fn buddy_global() -> &'static Mutex<BuddyAllocator> {
     BUDDY.get_or_init(|| Mutex::new(BuddyAllocator::new(1 << 20, 0)))
 }
-
-/// 分配 2^order 页大小的块，返回首帧地址（供 `buddy://stats alloc <order>`）。
+/// 分配 2^order 页大小的块，返回首帧地址（供 `buddy://stats alloc <order>`）。
 pub fn buddy_alloc(order: usize) -> Result<PageAddr, AllocError> {
     let mut b = buddy_global().lock().unwrap();
     b.alloc_order(order).map(PageAddr)
 }
-
-/// 释放由 `buddy_alloc` 得到的块（供 `buddy://stats free <page> <order>`）。
+/// 按字节大小分配（全局），返回首帧地址。
+pub fn buddy_alloc_bytes(size: usize) -> Result<PageAddr, AllocError> {
+    let mut b = buddy_global().lock().unwrap();
+    b.alloc(size).map(PageAddr)
+}
+/// 释放由 `buddy_alloc` 得到的块（供 `buddy://stats free <page> <order>`）。
 pub fn buddy_free(addr: PageAddr, order: usize) -> Result<(), AllocError> {
     buddy_global().lock().unwrap().free(addr.0, order)
 }
-
-/// 生成分配器统计摘要（供 `buddy://stats` 通道展示）。
+/// 生成分配器统计摘要（供 `buddy://stats` 通道展示）。
 pub fn buddy_summary() -> String {
     let b = buddy_global().lock().unwrap();
     let s = b.stats();
     let mut out = format!(
-        "buddy: 总帧={} 已分配={} 空闲={} 最大连续块={}页\n各阶空闲块: ",
+        "buddy: 总帧={} 已分配={} 空闲={} 最大连续块={}页 alloc_count={} free_count={}\n各阶空闲块: ",
         s.total_frames,
         s.allocated_frames,
         s.free_frames,
-        b.largest_free_block()
+        b.largest_free_block(),
+        b.alloc_count(),
+        b.free_count()
     );
     for (o, n) in s.per_order.iter().enumerate() {
         if *n > 0 {
@@ -252,8 +288,77 @@ pub fn buddy_summary() -> String {
     }
     out
 }
-
-#[cfg(test)]
+/// 返回全局分配器的已分配页框数。
+pub fn buddy_allocated_frames() -> usize {
+    buddy_global().lock().unwrap().allocated_frames
+}
+/// 返回全局分配器的空闲页框数。
+pub fn buddy_free_frames() -> usize {
+    let b = buddy_global().lock().unwrap();
+    b.total_frames - b.allocated_frames
+}
+// =====================================================================================
+// 通道行动：act_buddy —— 供 sense.rs `buddy://stats` 分支调用
+// =====================================================================================
+/// `buddy://stats` 通道的行动入口。
+///
+/// 支持子命令：
+/// * `alloc <order>` —— 分配 2^order 页大小的块，返回首帧地址；
+/// * `free <page> <order>` —— 释放指定块；
+/// * `stats` —— 返回分配器统计摘要；
+/// * `bytes <size>` —— 按字节大小分配。
+pub fn act_buddy(payload: &str) -> Result<String, String> {
+    let mut it = payload.split_whitespace();
+    match it.next().unwrap_or("") {
+        "alloc" => {
+            let order: usize = it
+                .next()
+                .ok_or("用法: act buddy://stats alloc <order>")?
+                .parse()
+                .map_err(|_| "无效阶数".to_string())?;
+            let addr = buddy_alloc(order).map_err(|e| format!("分配失败: {:?}", e))?;
+            Ok(format!(
+                "已分配 2^{} 页，首帧={} (物理字节地址={})",
+                order,
+                addr.index(),
+                addr.paddr()
+            ))
+        }
+        "free" => {
+            let page: usize = it
+                .next()
+                .ok_or("用法: act buddy://stats free <page> <order>")?
+                .parse()
+                .map_err(|_| "无效帧号".to_string())?;
+            let order: usize = it
+                .next()
+                .ok_or("用法: act buddy://stats free <page> <order>")?
+                .parse()
+                .map_err(|_| "无效阶数".to_string())?;
+            buddy_free(PageAddr(page), order).map_err(|e| format!("释放失败: {:?}", e))?;
+            Ok(format!("已释放 帧={} 阶={}", page, order))
+        }
+        "bytes" => {
+            let size: usize = it
+                .next()
+                .ok_or("用法: act buddy://stats bytes <size>")?
+                .parse()
+                .map_err(|_| "无效大小".to_string())?;
+            let addr = buddy_alloc_bytes(size).map_err(|e| format!("分配失败: {:?}", e))?;
+            let frames = (size + PAGE_SIZE - 1) / PAGE_SIZE;
+            Ok(format!(
+                "已按字节分配 {}B -> {} 页，首帧={} (物理字节地址={})",
+                size, frames, addr.index(), addr.paddr()
+            ))
+        }
+        "stats" => Ok(buddy_summary()),
+        _ => Ok(buddy_summary()),
+    }
+}
+// =====================================================================================
+// 单元测试
+// =====================================================================================
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -266,8 +371,7 @@ mod tests {
         assert_eq!(s.free_frames, 16);
         assert!(s.per_order.iter().sum::<usize>() >= 1);
     }
-
-    #[test]
+    #[test]
     fn alloc_and_free_roundtrip() {
         let mut b = BuddyAllocator::new(64, 0);
         let f = b.alloc_frames(1).unwrap();
@@ -276,8 +380,7 @@ mod tests {
         b.free(f, 0).unwrap();
         assert_eq!(b.stats().free_frames, 64);
     }
-
-    #[test]
+    #[test]
     fn alloc_splits_higher_order() {
         let mut b = BuddyAllocator::new(64, 0);
         // 请求 16 页 (order 4)，初始只有 64 页整块 (order 6)，应分裂出伙伴。
@@ -289,8 +392,7 @@ mod tests {
         assert_eq!(b.stats().free_frames, 64);
         assert_eq!(b.largest_free_block(), 64);
     }
-
-    #[test]
+    #[test]
     fn buddy_merge_coalesces() {
         let mut b = BuddyAllocator::new(64, 0);
         let a = b.alloc_frames(1).unwrap(); // 占帧 0
@@ -304,8 +406,7 @@ mod tests {
         // 0 与 1 都空闲，合并成 order-1 块 (帧 0..2)。
         assert_eq!(b.largest_free_block(), 2);
     }
-
-    #[test]
+    #[test]
     fn alloc_byte_size_rounds_up() {
         let mut b = BuddyAllocator::new(128, 0);
         // 5000 字节 -> 2 页 (order 1)。
@@ -315,16 +416,14 @@ mod tests {
         b.free(f, 1).unwrap();
         assert_eq!(b.stats().free_frames, 128);
     }
-
-    #[test]
+    #[test]
     fn out_of_memory_when_exhausted() {
         let mut b = BuddyAllocator::new(4, 0);
         let _ = b.alloc_frames(2).unwrap();
         let _ = b.alloc_frames(2).unwrap();
         assert_eq!(b.alloc_frames(1), Err(AllocError::OutOfMemory));
     }
-
-    #[test]
+    #[test]
     fn bad_free_rejected() {
         let mut b = BuddyAllocator::new(32, 0);
         let f = b.alloc_frames(1).unwrap();
@@ -334,10 +433,75 @@ mod tests {
         // 释放从未分配的地址。
         assert_eq!(b.free(100, 0), Err(AllocError::BadFree));
     }
-
-    #[test]
+    #[test]
     fn alloc_order_too_large_fails() {
         let mut b = BuddyAllocator::new(16, 4); // 最大 order 4 = 16 页
         assert_eq!(b.alloc_frames(32), Err(AllocError::OutOfMemory));
     }
-}
+    #[test]
+    fn allocated_block_count() {
+        let mut b = BuddyAllocator::new(64, 0);
+        let f1 = b.alloc_frames(1).unwrap();
+        let f2 = b.alloc_frames(1).unwrap();
+        assert_eq!(b.allocated_block_count(), 2);
+        b.free(f1, 0).unwrap();
+        assert_eq!(b.allocated_block_count(), 1);
+    }
+    #[test]
+    fn is_allocated_tracking() {
+        let mut b = BuddyAllocator::new(64, 0);
+        let f = b.alloc_frames(1).unwrap();
+        assert!(b.is_allocated(f));
+        b.free(f, 0).unwrap();
+        assert!(!b.is_allocated(f));
+    }
+    #[test]
+    fn global_buddy_functions() {
+        let addr = buddy_alloc(3).unwrap(); // 8 页
+        assert_eq!(addr.paddr(), addr.index() * PAGE_SIZE);
+        assert!(buddy_free(addr, 3).is_ok());
+        let s = buddy_summary();
+        assert!(s.contains("buddy:"));
+        let _allocated = buddy_allocated_frames();
+        let _free = buddy_free_frames();
+        let _ = (_allocated, _free);
+    }
+    #[test]
+    fn buddy_alloc_bytes_rounds_up() {
+        let addr = buddy_alloc_bytes(5000).unwrap(); // 2 页
+        assert_eq!(addr.paddr(), addr.index() * PAGE_SIZE);
+        let _ = buddy_free(addr, 1);
+    }
+    #[test]
+    fn act_buddy_alloc_and_stats() {
+        let out = act_buddy("alloc 2").unwrap();
+        assert!(out.contains("已分配"));
+        let stats = act_buddy("stats").unwrap();
+        assert!(stats.contains("buddy:"));
+    }
+    #[test]
+    fn act_buddy_free_and_bytes() {
+        let alloc_out = act_buddy("alloc 1").unwrap();
+        // 解析首帧号：格式 "已分配 2^1 页，首帧=N (物理字节地址=M)"
+        let _ = alloc_out;
+        let bytes_out = act_buddy("bytes 8192").unwrap();
+        assert!(bytes_out.contains("8192B"));
+        let err = act_buddy("unknown").unwrap();
+        assert!(err.contains("buddy:"));
+    }
+    #[test]
+    fn alloc_error_display() {
+        assert_eq!(
+            AllocError::OutOfMemory.to_string(),
+            "没有足够大的连续空闲块"
+        );
+        assert_eq!(
+            AllocError::InvalidArgument.to_string(),
+            "参数非法（阶越界 / 零大小）"
+        );
+        assert_eq!(
+            AllocError::BadFree.to_string(),
+            "释放的块不属于本分配器或已被释放"
+        );
+    }
+}

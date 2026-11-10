@@ -25,6 +25,11 @@ pub mod tool;
 pub mod deadlock;
 pub mod security;
 pub mod container;
+pub mod native;
+pub mod mind;
+pub mod attention;
+pub mod semantic;
+pub mod memory_ws;
 
 /// AI 原生子系统初始化：在 `kernel::boot_subsystems` 或 shell 启动时调用一次。
 pub fn init() {
@@ -37,6 +42,11 @@ pub fn init() {
     deadlock::init();
     security::init();
     container::init();
+    native::init();
+    mind::init();
+    attention::init();
+    semantic::init();
+    memory_ws::init();
 }
 
 /// 聚合状态摘要，供 `sense aios://status` 使用。
@@ -51,6 +61,11 @@ pub fn status() -> String {
     lines.push(format!("deadlock={}", deadlock::status()));
     lines.push(format!("security={}", security::status()));
     lines.push(format!("container={}", container::status()));
+    lines.push(format!("native={}", native::status()));
+    lines.push(format!("mind={}", mind::status()));
+    lines.push(format!("attention={}", attention::status()));
+    lines.push(format!("semantic={}", semantic::status()));
+    lines.push(format!("memory={}", memory_ws::status()));
     lines.join(" | ")
 }
 
@@ -71,5 +86,10 @@ mod tests {
         assert!(s.contains("deadlock="));
         assert!(s.contains("security="));
         assert!(s.contains("container="));
+        assert!(s.contains("native="));
+        assert!(s.contains("mind="));
+        assert!(s.contains("attention="));
+        assert!(s.contains("semantic="));
+        assert!(s.contains("memory="));
     }
 }

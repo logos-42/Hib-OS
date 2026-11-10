@@ -642,6 +642,130 @@ pub fn channel_meta_len() -> usize {
 }
 
 // =====================================================================================
+// 通道组（ChannelGroup）—— 多通道批量订阅与统计
+// =====================================================================================
+
+/// 通道组：将多个通道归为一组，支持批量订阅、批量 sense/act 统计汇总。
+#[derive(Clone, Debug)]
+pub struct ChannelGroup {
+    /// 组名。
+    pub name: String,
+    /// 组内通道名列表。
+    pub channels: Vec<String>,
+    /// 组内通道的累计 sense 次数。
+    pub total_senses: u64,
+    /// 组内通道的累计 act 次数。
+    pub total_acts: u64,
+    /// 组内通道的累计错误次数。
+    pub total_errors: u64,
+}
+
+impl ChannelGroup {
+    /// 创建一个新的通道组。
+    pub fn new(name: &str) -> Self {
+        Self {
+            name: name.to_string(),
+            channels: Vec::new(),
+            total_senses: 0,
+            total_acts: 0,
+            total_errors: 0,
+        }
+    }
+
+    /// 将通道加入组。
+    pub fn add_channel(&mut self, channel: &str) {
+        if !self.channels.iter().any(|c| c == channel) {
+            self.channels.push(channel.to_string());
+        }
+    }
+
+    /// 将通道从组移除。
+    pub fn remove_channel(&mut self, channel: &str) {
+        self.channels.retain(|c| c != channel);
+    }
+
+    /// 返回组内通道数。
+    pub fn len(&self) -> usize {
+        self.channels.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.channels.is_empty()
+    }
+
+    /// 累加统计（供 sense/act 后调用）。
+    pub fn record_access(&mut self, senses: u64, acts: u64, errors: u64) {
+        self.total_senses = self.total_senses.saturating_add(senses);
+        self.total_acts = self.total_acts.saturating_add(acts);
+        self.total_errors = self.total_errors.saturating_add(errors);
+    }
+
+    /// 返回组摘要。
+    pub fn summary(&self) -> String {
+        format!(
+            "channel_group name={} channels={} senses={} acts={} errors={}",
+            self.name,
+            self.channels.len(),
+            self.total_senses,
+            self.total_acts,
+            self.total_errors
+        )
+    }
+
+    /// 列出组内所有通道名。
+    pub fn list_channels(&self) -> Vec<String> {
+        self.channels.clone()
+    }
+}
+
+impl Default for ChannelGroup {
+    fn default() -> Self {
+        Self::new("default")
+    }
+}
+
+// =====================================================================================
+// 通道组全局注册表
+// =====================================================================================
+
+static CHANNEL_GROUPS: OnceLock<Mutex<HashMap<String, ChannelGroup>>> = OnceLock::new();
+
+fn channel_groups() -> &'static Mutex<HashMap<String, ChannelGroup>> {
+    CHANNEL_GROUPS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// 创建或获取通道组（全局）。
+pub fn get_or_create_group(name: &str) -> ChannelGroup {
+    let mut groups = channel_groups().lock().unwrap();
+    if let Some(g) = groups.get(name) {
+        g.clone()
+    } else {
+        let g = ChannelGroup::new(name);
+        groups.insert(name.to_string(), g.clone());
+        g
+    }
+}
+
+/// 向全局通道组添加通道。
+pub fn group_add_channel(group: &str, channel: &str) {
+    let mut groups = channel_groups().lock().unwrap();
+    let g = groups.entry(group.to_string()).or_insert_with(|| ChannelGroup::new(group));
+    g.add_channel(channel);
+}
+
+/// 返回全局通道组摘要。
+pub fn group_summary(group: &str) -> Option<String> {
+    let groups = channel_groups().lock().unwrap();
+    groups.get(group).map(|g| g.summary())
+}
+
+/// 返回所有通道组名。
+pub fn group_list() -> Vec<String> {
+    let groups = channel_groups().lock().unwrap();
+    groups.keys().cloned().collect()
+}
+
+// =====================================================================================
 // 单元测试
 // =====================================================================================
 
@@ -830,5 +954,53 @@ mod tests {
         notifier.notify_subscribers("ch://a", &ChannelEvent::Created);
         assert_eq!(notifier.subscriber_count("ch://b"), 0);
         let _ = (id1, id2);
+    }
+
+    #[test]
+    fn channel_group_add_remove() {
+        let mut g = ChannelGroup::new("mem_group");
+        assert_eq!(g.len(), 0);
+        g.add_channel("swap://area");
+        g.add_channel("pagetable://walk");
+        g.add_channel("swap://area"); // 重复添加应忽略
+        assert_eq!(g.len(), 2);
+        assert!(g.list_channels().contains(&"swap://area".to_string()));
+        g.remove_channel("pagetable://walk");
+        assert_eq!(g.len(), 1);
+        assert!(!g.list_channels().contains(&"pagetable://walk".to_string()));
+    }
+
+    #[test]
+    fn channel_group_record_access() {
+        let mut g = ChannelGroup::new("io_group");
+        g.record_access(5, 3, 1);
+        assert_eq!(g.total_senses, 5);
+        assert_eq!(g.total_acts, 3);
+        assert_eq!(g.total_errors, 1);
+        g.record_access(0, 2, 0);
+        assert_eq!(g.total_acts, 5);
+        let s = g.summary();
+        assert!(s.contains("io_group"));
+        assert!(s.contains("senses=5"));
+    }
+
+    #[test]
+    fn channel_group_default() {
+        let g = ChannelGroup::default();
+        assert_eq!(g.name, "default");
+        assert_eq!(g.len(), 0);
+    }
+
+    #[test]
+    fn global_channel_groups() {
+        group_add_channel("net_group", "net://eth0");
+        group_add_channel("net_group", "net://dns");
+        let s = group_summary("net_group").unwrap();
+        assert!(s.contains("net_group"));
+        assert!(s.contains("channels=2"));
+        let groups = group_list();
+        assert!(groups.contains(&"net_group".to_string()));
+        let _ = get_or_create_group("new_group");
+        assert!(group_list().contains(&"new_group".to_string()));
     }
 }

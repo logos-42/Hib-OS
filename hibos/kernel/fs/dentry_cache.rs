@@ -10,6 +10,9 @@ use std::hash::{Hash, Hasher};
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
+use crate::lease::{self, Epoch};
+use crate::caps;
+
 /// inode 号。
 pub type Ino = u64;
 /// inode 句柄（持有引用计数）。
@@ -273,6 +276,191 @@ impl DentryCache {
     /// 是否为空。
     pub fn is_empty(&self) -> bool {
         self.entries.lock().unwrap().is_empty()
+    }
+}
+
+// ============================================================================
+// 并发控制：基于 lease.rs 的单写者租约 + epoch CAS
+// ============================================================================
+
+/// 基于 lease 的目录项缓存包装器：对 dentry 插入/失效/清理加单写者租约，
+/// 避免多线程并发修改同一目录的 dentry 时发生竞争。
+pub struct DentryCacheLeased {
+    inner: DentryCache,
+    channel: String,
+}
+
+impl DentryCacheLeased {
+    /// 创建租约保护的 dcache。
+    pub fn new(capacity: usize, channel: &str) -> Self {
+        Self {
+            inner: DentryCache::new(capacity),
+            channel: channel.to_string(),
+        }
+    }
+
+    /// 申请 dcache 修改租约，返回当前 epoch。
+    pub fn acquire_dcache_lease(&self, owner: u64) -> Result<Epoch, crate::lease::LeaseConflict> {
+        lease::acquire(&self.channel, crate::exec::ExecId(owner), None)
+    }
+
+    /// 释放 dcache 修改租约。
+    pub fn release_dcache_lease(&self, owner: u64) -> bool {
+        lease::release(&self.channel, crate::exec::ExecId(owner))
+    }
+
+    /// 查找 dentry（只读，无需租约）。
+    pub fn lookup(&self, parent_ino: Ino, name: &str) -> Option<Ino> {
+        self.inner.lookup(parent_ino, name)
+    }
+
+    /// 在租约保护下插入 dentry，然后 commit 推进 epoch。
+    pub fn insert_under_lease(
+        &self,
+        owner: u64,
+        expected_epoch: Epoch,
+        dentry: Dentry,
+    ) -> Result<Epoch, crate::lease::CommitError> {
+        let _ = self.acquire_dcache_lease(owner)?;
+        self.inner.insert(dentry);
+        let new_ep = lease::commit(
+            &self.channel,
+            crate::exec::ExecId(owner),
+            expected_epoch,
+            &format!("dcache insert {} parent={}", dentry.name, dentry.parent_ino),
+        )?;
+        Ok(new_ep)
+    }
+
+    /// 在租约保护下使 dentry 失效，然后 commit 推进 epoch。
+    pub fn invalidate_under_lease(
+        &self,
+        owner: u64,
+        expected_epoch: Epoch,
+        parent_ino: Ino,
+        name: &str,
+    ) -> Result<Epoch, crate::lease::CommitError> {
+        let _ = self.acquire_dcache_lease(owner)?;
+        let _ = self.inner.invalidate(parent_ino, name);
+        let new_ep = lease::commit(
+            &self.channel,
+            crate::exec::ExecId(owner),
+            expected_epoch,
+            &format!("dcache invalidate {} parent={}", name, parent_ino),
+        )?;
+        Ok(new_ep)
+    }
+
+    /// 清理失效 dentry（无需租约，只读统计）。
+    pub fn prune(&self) -> usize {
+        self.inner.prune()
+    }
+
+    /// 返回缓存统计。
+    pub fn stats(&self) -> DcacheStats {
+        self.inner.stats()
+    }
+
+    /// 强制刷新（force 模式，绕过租约）。
+    pub fn force_clear(&self, owner: u64) -> Epoch {
+        lease::force(&self.channel, &format!("dcache force_clear owner={}", owner))
+    }
+
+    /// 返回当前 epoch。
+    pub fn epoch(&self) -> Epoch {
+        lease::epoch(&self.channel)
+    }
+}
+
+/// 能力位权限包装器：在 dcache 操作上加 `caps` 校验。
+///
+/// `CAP_SYS_ADMIN` 允许插入/失效/清理等修改操作；查询无需能力。
+pub struct DentryCacheCaps {
+    inner: DentryCache,
+    caps: Arc<Mutex<caps::Caps>>,
+}
+
+impl DentryCacheCaps {
+    /// 包装一个已有 dcache，绑定全局能力表。
+    pub fn new(cache: DentryCache) -> Self {
+        Self {
+            inner: cache,
+            caps: Arc::new(Mutex::new(caps::caps().lock().unwrap().clone())),
+        }
+    }
+
+    fn check_admin(&self) -> Result<(), String> {
+        let c = self.caps.lock().unwrap();
+        if c.has("CAP_SYS_ADMIN") {
+            Ok(())
+        } else {
+            Err("缺少 CAP_SYS_ADMIN 能力".to_string())
+        }
+    }
+
+    /// 查找 dentry（只读，无需能力）。
+    pub fn lookup(&self, parent_ino: Ino, name: &str) -> Option<Ino> {
+        self.inner.lookup(parent_ino, name)
+    }
+
+    /// 插入 dentry（需 CAP_SYS_ADMIN）。
+    pub fn insert(&self, dentry: Dentry) -> Result<(), String> {
+        self.check_admin()?;
+        self.inner.insert(dentry);
+        Ok(())
+    }
+
+    /// 使 dentry 失效（需 CAP_SYS_ADMIN）。
+    pub fn invalidate(&self, parent_ino: Ino, name: &str) -> Result<bool, String> {
+        self.check_admin()?;
+        Ok(self.inner.invalidate(parent_ino, name))
+    }
+
+    /// 清理失效 dentry（需 CAP_SYS_ADMIN）。
+    pub fn prune(&self) -> Result<usize, String> {
+        self.check_admin()?;
+        Ok(self.inner.prune())
+    }
+
+    /// 返回统计（无需能力）。
+    pub fn stats(&self) -> DcacheStats {
+        self.inner.stats()
+    }
+}
+
+// ============================================================================
+// sense/act 通道接口：dcache://<设备名>
+// ============================================================================
+
+/// 感知目录项缓存通道：返回 dcache 状态摘要。
+///
+/// 通道名形式：`dcache://<设备名>`
+pub fn probe_dentry(name: &str) -> Option<String> {
+    let channel = format!("dcache://{}", name);
+    let epoch = lease::epoch(&channel);
+    Some(format!(
+        "channel={} type=dcache epoch={} ops=lookup|insert|invalidate|prune|stats",
+        name, epoch
+    ))
+}
+
+/// 对目录项缓存通道执行行动。
+///
+/// 支持子命令：
+/// - `stats` —— 返回缓存统计摘要（占位）
+/// - `epoch` —— 返回当前 epoch
+pub fn act_dentry(name: &str, payload: &str) -> Option<Result<String, String>> {
+    let mut tokens = payload.split_whitespace();
+    let sub = tokens.next().unwrap_or("");
+    let channel = format!("dcache://{}", name);
+    match sub {
+        "stats" => Some(Ok(format!(
+            "dcache://{} stats=placeholder epoch={}",
+            name,
+            lease::epoch(&channel)
+        ))),
+        "epoch" => Some(Ok(format!("epoch={}", lease::epoch(&channel)))),
+        _ => Some(Err("用法: stats | epoch".to_string())),
     }
 }
 
@@ -589,6 +777,108 @@ mod tests {
         let stats = cache.stats();
         assert_eq!(stats.entries, 0);
         assert_eq!(stats.gets, 0);
+    }
+
+    // ----- lease 并发控制测试 -----
+
+    #[test]
+    fn dentry_leased_single_writer() {
+        let cache = DentryCacheLeased::new(16, "dcache://test-lease");
+        assert!(cache.acquire_dcache_lease(101).is_ok());
+        let err = cache.acquire_dcache_lease(102).unwrap_err();
+        assert_eq!(err.holder, crate::exec::ExecId(101));
+        assert!(cache.release_dcache_lease(101));
+        assert!(cache.acquire_dcache_lease(102).is_ok());
+        assert!(cache.release_dcache_lease(102));
+    }
+
+    #[test]
+    fn dentry_leased_insert_invalidate_commit_epoch() {
+        let cache = DentryCacheLeased::new(16, "dcache://test-lease2");
+        let ep0 = cache.epoch();
+        let ep1 = cache.acquire_dcache_lease(201).unwrap();
+        assert_eq!(ep1, ep0);
+        let new_ep = cache.insert_under_lease(
+            201, ep0,
+            Dentry::new("foo", 1, 10),
+        ).unwrap();
+        assert_eq!(new_ep, ep0 + 1);
+        assert_eq!(cache.lookup(1, "foo"), Some(10));
+        let new_ep2 = cache.invalidate_under_lease(
+            201, new_ep, 1, "foo",
+        ).unwrap();
+        assert_eq!(new_ep2, new_ep + 1);
+        assert_eq!(cache.lookup(1, "foo"), None);
+        assert!(cache.release_dcache_lease(201));
+    }
+
+    #[test]
+    fn dentry_leased_stale_epoch_rejected() {
+        let cache = DentryCacheLeased::new(16, "dcache://test-lease3");
+        let ep = cache.acquire_dcache_lease(301).unwrap();
+        let _ = cache.insert_under_lease(
+            301, ep, Dentry::new("bar", 1, 11),
+        ).unwrap();
+        // 再用旧 epoch 插入应被拒绝。
+        let ep2 = cache.acquire_dcache_lease(301).unwrap();
+        let err = cache.insert_under_lease(
+            301, ep, Dentry::new("baz", 1, 12),
+        ).unwrap_err();
+        assert!(matches!(err, crate::lease::CommitError::StaleEpoch { .. }));
+        let _ = cache.release_dcache_lease(301);
+    }
+
+    #[test]
+    fn dentry_leased_force_clear() {
+        let cache = DentryCacheLeased::new(16, "dcache://test-lease4");
+        let ep0 = cache.epoch();
+        let ep1 = cache.force_clear(401);
+        assert!(ep1 > ep0);
+    }
+
+    // ----- caps 权限测试 -----
+
+    #[test]
+    fn dentry_caps_admin_required() {
+        let cache = DentryCache::new(16);
+        let caps_cache = DentryCacheCaps::new(cache);
+        {
+            let mut c = caps::caps().lock().unwrap();
+            let _ = c.revoke("CAP_SYS_ADMIN");
+        }
+        assert!(caps_cache.insert(Dentry::new("foo", 1, 10)).is_err());
+        {
+            let mut c = caps::caps().lock().unwrap();
+            let _ = c.grant("CAP_SYS_ADMIN");
+        }
+        assert!(caps_cache.insert(Dentry::new("foo", 1, 10)).is_ok());
+    }
+
+    #[test]
+    fn dentry_caps_lookup_no_cap() {
+        let cache = DentryCache::new(16);
+        cache.insert(Dentry::new("foo", 1, 10));
+        let caps_cache = DentryCacheCaps::new(cache);
+        // 查找不需要能力。
+        assert_eq!(caps_cache.lookup(1, "foo"), Some(10));
+    }
+
+    // ----- sense/act 通道测试 -----
+
+    #[test]
+    fn dentry_probe_channel() {
+        let snap = probe_dentry("dcache://ram0").unwrap();
+        assert!(snap.contains("dcache://ram0"));
+        assert!(snap.contains("epoch="));
+        assert!(snap.contains("ops="));
+    }
+
+    #[test]
+    fn dentry_act_channel_stats_epoch() {
+        let r = act_dentry("dcache://ram0", "stats").unwrap().unwrap();
+        assert!(r.contains("stats=placeholder"));
+        let r = act_dentry("dcache://ram0", "epoch").unwrap().unwrap();
+        assert!(r.contains("epoch="));
     }
 }
 

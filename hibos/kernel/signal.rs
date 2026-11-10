@@ -570,6 +570,131 @@ pub fn signal_summary() -> String {
 }
 
 // =====================================================================================
+// 信号集操作（POSIX 兼容：sigaddset/sigdelset/sigismember/sigemptyset/sigfillset）
+// =====================================================================================
+
+/// 信号集：位掩码表示，用于屏蔽/未决/等待信号集合。
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SigSet {
+    bits: u128, // 足够容纳所有信号编号（最大 17）
+}
+
+impl SigSet {
+    /// 空信号集。
+    pub fn empty() -> Self {
+        Self { bits: 0 }
+    }
+
+    /// 全集（所有信号）。
+    pub fn full() -> Self {
+        Self { bits: !0u128 }
+    }
+
+    /// 将信号加入集合。
+    pub fn add(&mut self, sig: Signal) {
+        self.bits |= 1u128 << sig.number();
+    }
+
+    /// 将信号从集合移除。
+    pub fn del(&mut self, sig: Signal) {
+        self.bits &= !(1u128 << sig.number());
+    }
+
+    /// 判断信号是否在集合中。
+    pub fn is_member(&self, sig: Signal) -> bool {
+        (self.bits & (1u128 << sig.number())) != 0
+    }
+
+    /// 返回集合中信号数量。
+    pub fn count(&self) -> u32 {
+        self.bits.count_ones()
+    }
+
+    /// 返回集合中的所有信号。
+    pub fn signals(&self) -> Vec<Signal> {
+        let mut out = Vec::new();
+        for sig in [
+            Signal::SIGHUP, Signal::SIGINT, Signal::SIGQUIT, Signal::SIGILL,
+            Signal::SIGTRAP, Signal::SIGABRT, Signal::SIGFPE, Signal::SIGSEGV,
+            Signal::SIGTERM, Signal::SIGCHLD, Signal::SIGCONT, Signal::SIGSTOP,
+            Signal::SIGKILL, Signal::SIGUSR1, Signal::SIGUSR2, Signal::SIGPIPE,
+            Signal::SIGALRM,
+        ] {
+            if self.is_member(sig) {
+                out.push(sig);
+            }
+        }
+        out
+    }
+}
+
+/// 将信号集中的所有信号加入进程屏蔽掩码。
+pub fn signal_mask_add_set(pid: Pid, set: &SigSet) {
+    let mut h = signal_handler().lock().unwrap();
+    for sig in set.signals() {
+        h.signal_mask_add(pid, sig);
+    }
+}
+
+/// 将信号集中的所有信号从进程屏蔽掩码移除。
+pub fn signal_mask_del_set(pid: Pid, set: &SigSet) {
+    let mut h = signal_handler().lock().unwrap();
+    for sig in set.signals() {
+        h.signal_mask_remove(pid, sig);
+    }
+}
+
+/// 向进程发送一组信号。
+pub fn signal_send_set(pid: Pid, set: &SigSet) {
+    let mut h = signal_handler().lock().unwrap();
+    for sig in set.signals() {
+        h.send_signal(pid, sig);
+    }
+}
+
+/// 返回进程当前屏蔽掩码的 SigSet 视图。
+pub fn signal_mask_set(pid: Pid) -> SigSet {
+    let h = signal_handler().lock().unwrap();
+    let state = h.process_state(pid);
+    match state {
+        Some(s) => {
+            let mut set = SigSet::empty();
+            for sig in [
+                Signal::SIGHUP, Signal::SIGINT, Signal::SIGQUIT, Signal::SIGILL,
+                Signal::SIGTRAP, Signal::SIGABRT, Signal::SIGFPE, Signal::SIGSEGV,
+                Signal::SIGTERM, Signal::SIGCHLD, Signal::SIGCONT, Signal::SIGSTOP,
+                Signal::SIGKILL, Signal::SIGUSR1, Signal::SIGUSR2, Signal::SIGPIPE,
+                Signal::SIGALRM,
+            ] {
+                if s.is_masked(sig) {
+                    set.add(sig);
+                }
+            }
+            set
+        }
+        None => SigSet::empty(),
+    }
+}
+
+/// 等待信号：若进程有未决信号则立即返回其中一个；否则返回 None（简化版 sigsuspend）。
+pub fn signal_suspend(pid: Pid) -> Option<Signal> {
+    let mut h = signal_handler().lock().unwrap();
+    let pending = h.pending_signals(pid);
+    if let Some(sig) = pending.into_iter().next() {
+        let _ = h.deliver_signals(pid);
+        Some(sig)
+    } else {
+        None
+    }
+}
+
+/// 返回信号集文本摘要。
+pub fn signal_set_summary(set: &SigSet) -> String {
+    let sigs: Vec<String> = set.signals().iter().map(|s| s.name().to_string()).collect();
+    format!("sigset count={} signals=[{}]", set.count(), sigs.join(","))
+}
+
+// =====================================================================================
 // 单元测试
 // =====================================================================================
 
@@ -689,6 +814,92 @@ mod tests {
     #[test]
     fn global_signal_summary() {
         let _ = signal_summary();
+    }
+
+    #[test]
+    fn sigset_empty_full_member() {
+        let mut set = SigSet::empty();
+        assert_eq!(set.count(), 0);
+        assert!(!set.is_member(Signal::SIGINT));
+        set.add(Signal::SIGINT);
+        set.add(Signal::SIGTERM);
+        assert_eq!(set.count(), 2);
+        assert!(set.is_member(Signal::SIGINT));
+        assert!(set.is_member(Signal::SIGTERM));
+        set.del(Signal::SIGINT);
+        assert!(!set.is_member(Signal::SIGINT));
+        assert!(set.is_member(Signal::SIGTERM));
+    }
+
+    #[test]
+    fn sigset_signals_list() {
+        let mut set = SigSet::empty();
+        set.add(Signal::SIGKILL);
+        set.add(Signal::SIGSTOP);
+        let sigs = set.signals();
+        assert_eq!(sigs.len(), 2);
+        assert!(sigs.contains(&Signal::SIGKILL));
+        assert!(sigs.contains(&Signal::SIGSTOP));
+    }
+
+    #[test]
+    fn sigset_full_count() {
+        let set = SigSet::full();
+        assert!(set.count() >= 17);
+    }
+
+    #[test]
+    fn signal_mask_set_and_operations() {
+        let mut h = SignalHandler::new();
+        signal_mask_add(1, Signal::SIGINT);
+        signal_mask_add(1, Signal::SIGTERM);
+        let set = signal_mask_set(1);
+        assert!(set.is_member(Signal::SIGINT));
+        assert!(set.is_member(Signal::SIGTERM));
+        assert!(!set.is_member(Signal::SIGKILL));
+
+        signal_mask_del_set(1, &set);
+        let set2 = signal_mask_set(1);
+        assert!(!set2.is_member(Signal::SIGINT));
+    }
+
+    #[test]
+    fn signal_send_set_delivers() {
+        let mut h = SignalHandler::new();
+        let mut set = SigSet::empty();
+        set.add(Signal::SIGUSR1);
+        set.add(Signal::SIGUSR2);
+        signal_send_set(1, &set);
+        let pending = signal_pending(1);
+        assert!(pending.contains(&Signal::SIGUSR1));
+        assert!(pending.contains(&Signal::SIGUSR2));
+        let delivered = signal_deliver(1);
+        assert!(delivered.contains(&Signal::SIGUSR1));
+        assert!(delivered.contains(&Signal::SIGUSR2));
+    }
+
+    #[test]
+    fn signal_suspend_returns_pending() {
+        let mut h = SignalHandler::new();
+        signal_send(1, Signal::SIGALRM);
+        let sig = signal_suspend(1);
+        assert_eq!(sig, Some(Signal::SIGALRM));
+        assert!(!signal_pending(1).contains(&Signal::SIGALRM));
+    }
+
+    #[test]
+    fn signal_suspend_none_when_no_pending() {
+        let sig = signal_suspend(1);
+        assert_eq!(sig, None);
+    }
+
+    #[test]
+    fn signal_set_summary_text() {
+        let mut set = SigSet::empty();
+        set.add(Signal::SIGINT);
+        let s = signal_set_summary(&set);
+        assert!(s.contains("SIGINT"));
+        assert!(s.contains("count=1"));
     }
 }
 

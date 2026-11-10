@@ -1,77 +1,82 @@
-//! 设备树 —— `dev://tree` 通道后端（复用 kernel/dev.rs 的 DevTree）。
-//!
-//! 维护设备层级树，类似 Linux devicetree。
+//! 设备树 —— P1-2 子模块。
 
-use crate::dev::{devtree, DevNode};
+use std::collections::BTreeMap;
+use std::sync::{Mutex, OnceLock};
 
-/// 挂接设备到设备树。
-pub fn attach_devtree(name: &str) -> Result<String, String> {
-    devtree().lock().unwrap().attach(name)
-}
-
-/// 从设备树卸下设备。
-pub fn detach_devtree(name: &str) -> Result<String, String> {
-    devtree().lock().unwrap().detach(name)
-}
-
-/// 列出设备树所有节点（供 `sense dev://tree` 使用）。
-pub fn devtree_list() -> String {
-    devtree().lock().unwrap().list()
-}
-
-/// 设备树节点快照。
+/// 设备树节点。
 #[derive(Clone, Debug)]
-pub struct TreeNode {
+pub struct DeviceNode {
     pub name: String,
-    pub major: u32,
-    pub minor: u32,
-    pub kind: String,
-    pub driver: String,
-    pub state: String,
+    pub path: String,
+    pub properties: BTreeMap<String, String>,
+    pub children: Vec<String>, // 子节点路径
 }
 
-impl TreeNode {
-    pub fn from(dev: &DevNode) -> Self {
-        TreeNode { name: dev.name.clone(), major: dev.major, minor: dev.minor, kind: dev.kind.clone(), driver: dev.driver.clone(), state: dev.state.clone() }
+/// 设备树。
+pub struct DeviceTree {
+    nodes: BTreeMap<String, DeviceNode>,
+}
+
+static DEV_TREE: OnceLock<Mutex<DeviceTree>> = OnceLock::new();
+
+fn dev_tree() -> &'static Mutex<DeviceTree> {
+    DEV_TREE.get_or_init(|| Mutex::new(DeviceTree {
+        nodes: BTreeMap::new(),
+    }))
+}
+
+/// 插入设备节点。
+pub fn devtree_insert(name: &str, path: &str, properties: BTreeMap<String, String>) -> Result<(), String> {
+    let mut g = dev_tree().lock().unwrap();
+    if g.nodes.contains_key(path) {
+        return Err(format!("节点已存在: {}", path));
     }
+    let node = DeviceNode {
+        name: name.to_string(),
+        path: path.to_string(),
+        properties,
+        children: Vec::new(),
+    };
+    // 更新父节点的 children
+    if let Some(parent_path) = path.rsplit_once('/').map(|(p, _)| p.to_string()) {
+        if let Some(parent) = g.nodes.get_mut(&parent_path) {
+            parent.children.push(path.to_string());
+        }
+    }
+    g.nodes.insert(path.to_string(), node);
+    Ok(())
 }
 
-/// 列出所有树节点。
-pub fn tree_nodes() -> Vec<TreeNode> {
-    devtree().lock().unwrap().nodes.iter().map(TreeNode::from).collect()
+/// 查找设备节点。
+pub fn devtree_lookup(path: &str) -> Option<DeviceNode> {
+    let g = dev_tree().lock().unwrap();
+    g.nodes.get(path).cloned()
+}
+
+/// 列出所有节点路径。
+pub fn devtree_paths() -> Vec<String> {
+    let g = dev_tree().lock().unwrap();
+    g.nodes.keys().cloned().collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeMap;
 
     #[test]
-    fn devtree_list_nonempty() {
-        let list = devtree_list();
-        assert!(!list.is_empty());
-        assert!(list.contains("gpu0"));
-        assert!(list.contains("timer"));
+    fn insert_and_lookup() {
+        let mut props = BTreeMap::new();
+        props.insert("compatible".to_string(), "nvme".to_string());
+        assert!(devtree_insert("nvme0", "/pci/nvme0", props).is_ok());
+        let node = devtree_lookup("/pci/nvme0").unwrap();
+        assert_eq!(node.name, "nvme0");
     }
 
     #[test]
-    fn test_attach_devtree() {
-        // 先 detach 再 attach，验证状态迁移
-        let _ = detach_devtree("tty");
-        let r = attach_devtree("tty");
-        assert!(r.is_ok());
-        let list = devtree_list();
-        assert!(list.contains("tty"));
-    }
-
-    #[test]
-    fn test_detach_devtree() {
-        let r = detach_devtree("console");
-        assert!(r.is_ok());
-        let list = devtree_list();
-        // detached 设备仍在列表中，只是 state 变为 detached
-        assert!(list.contains("console"));
-        let nodes = tree_nodes();
-        let c = nodes.iter().find(|n| n.name == "console").unwrap();
-        assert_eq!(c.state, "detached");
+    fn insert_duplicate() {
+        let props = BTreeMap::new();
+        assert!(devtree_insert("x", "/a", props).is_ok());
+        assert!(devtree_insert("y", "/a", props).is_err());
     }
 }

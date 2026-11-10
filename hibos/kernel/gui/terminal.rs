@@ -427,7 +427,6 @@ enum AnsiState {
 pub struct AnsiParser {
     state: AnsiState,
     params: Vec<CsiParam>,
-    /// 缓冲区引用（由 Terminal 持有，这里通过方法传入）。
 }
 
 impl AnsiParser {

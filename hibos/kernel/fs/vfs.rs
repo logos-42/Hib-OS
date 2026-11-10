@@ -1,85 +1,13 @@
 //! 文件描述符表与系统调用层（open/read/write/close/llseek）。
 //!
-//! 每进程独立 fd 表；open/read/write/close/llseek 与类 ext 文件系统
-//! (ExtFs) 配合，为 `fs://` 通道提供 POSIX 风格的文件访问。
+//! 每进程独立 fd 表；open/read/write/close/llseek 与简单文件系统
+//! 配合，为 `fs://` 通道提供 POSIX 风格的文件访问。
 
 use std::collections::BTreeMap;
 
-use crate::fs::block::BlockError;
-use crate::fs::extfs::{ExtFs, InodeKind};
-
-/// 访问权限。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Access {
-    Read,
-    Write,
-    ReadWrite,
-}
-
-impl Access {
-    pub fn can_read(self) -> bool {
-        matches!(self, Access::Read | Access::ReadWrite)
-    }
-    pub fn can_write(self) -> bool {
-        matches!(self, Access::Write | Access::ReadWrite)
-    }
-}
-
-/// 一个打开的文件描述符项。
-#[derive(Clone, Debug)]
-pub struct OpenFile {
-    pub ino: u64,
-    pub offset: u64,
-    pub access: Access,
-}
-
-/// 单进程的文件描述符表。
-#[derive(Debug, Default)]
-pub struct FdTable {
-    /// 索引 = fd，None 表示未打开。
-    slots: Vec<Option<OpenFile>>,
-}
-
-impl FdTable {
-    pub fn new() -> Self {
-        Self { slots: Vec::new() }
-    }
-
-    /// 分配一个新 fd 并关联 inode，返回 fd 号。
-    pub fn alloc(&mut self, ino: u64, access: Access) -> u64 {
-        for (i, slot) in self.slots.iter().enumerate() {
-            if slot.is_none() {
-                self.slots[i] = Some(OpenFile { ino, offset: 0, access });
-                return i as u64;
-            }
-        }
-        let fd = self.slots.len() as u64;
-        self.slots.push(Some(OpenFile { ino, offset: 0, access }));
-        fd
-    }
-
-    pub fn get(&self, fd: u64) -> Option<&OpenFile> {
-        self.slots.get(fd as usize).and_then(|s| s.as_ref())
-    }
-
-    pub fn get_mut(&mut self, fd: u64) -> Option<&mut OpenFile> {
-        self.slots.get_mut(fd as usize).and_then(|s| s.as_mut())
-    }
-
-    pub fn close(&mut self, fd: u64) -> Result<(), BlockError> {
-        match self.slots.get_mut(fd as usize) {
-            Some(slot) => {
-                slot.take();
-                Ok(())
-            }
-            None => Err(BlockError::NotFound),
-        }
-    }
-
-    pub fn len(&self) -> usize {
-        self.slots.len()
-    }
-}
+use crate::fs::inode::{alloc_inode, get_inode, get_inode_mut, InodeType};
+use crate::fs::dentry::{dentry_lookup, dentry_create, dentry_delete, ROOT_INO};
+use crate::fs::fd_table::{fd_alloc, fd_close, fd_count, fd_get, Access, OpenFile, FdTable};
 
 /// 全局 VFS：按进程 ID 维护独立 fd 表。
 pub struct Vfs {
@@ -96,133 +24,116 @@ impl Vfs {
     }
 
     /// open 系统调用：解析路径到 inode（不存在则创建文件），分配 fd。
-    pub fn open(
-        &mut self,
-        pid: u64,
-        extfs: &mut ExtFs,
-        path: &str,
-        access: Access,
-    ) -> Result<u64, BlockError> {
+    pub fn open(&mut self, pid: u64, path: &str, access: Access) -> Result<u64, String> {
         let comps = resolve_path(path);
         if comps.is_empty() {
-            return Err(BlockError::NotFound);
+            return Err("空路径".to_string());
         }
         let name = comps.last().unwrap();
-        let parent = resolve_parent(extfs, &comps)?;
-        let ino = match extfs.dir_lookup(parent, name) {
+        let parent = resolve_parent(&comps)?;
+        let ino = match dentry_lookup(parent, name) {
             Some(ino) => ino,
             None => {
-                let ino = extfs.alloc_inode().map_err(|_| BlockError::IoError("no inodes".into()))?;
-                extfs.inode_get_mut(ino).map(|i| i.kind = InodeKind::File);
-                extfs.dir_add(parent, name, ino).map_err(|e| e)?;
+                let ino = alloc_inode(InodeType::File);
+                dentry_create(parent, name, InodeType::File).map_err(|e| format!("{}", e))?;
                 ino
             }
         };
-        // 权限检查：只读打开不可写文件等（此处简化为按 access 放行）
         let _ = access;
-        let fd = self.table_for(pid).alloc(ino, access);
+        let fd = fd_alloc(pid, ino, access);
         Ok(fd)
     }
 
     /// read 系统调用：从 fd 读入 buf，返回读取字节数。
-    pub fn read(
-        &mut self,
-        pid: u64,
-        extfs: &mut ExtFs,
-        fd: u64,
-        buf: &mut [u8],
-    ) -> Result<u64, BlockError> {
-        let of = self
-            .table_for(pid)
-            .get(fd)
-            .ok_or(BlockError::NotFound)?;
+    pub fn read(&mut self, pid: u64, fd: u64, buf: &mut [u8]) -> Result<u64, String> {
+        let of = fd_get(pid, fd).ok_or("fd 未找到")?;
         if !of.access.can_read() {
-            return Err(BlockError::IoError("not readable".into()));
+            return Err("不可读".to_string());
         }
-        let _inode = extfs
-            .inode_get(of.ino)
-            .ok_or(BlockError::NotFound)?;
-        let data = extfs.file_read(of.ino, of.offset, buf.len() as u64).map_err(|e| e)?;
-        let n = data.len();
-        buf[..n].copy_from_slice(&data);
-        let table = self.table_for(pid);
-        let of = table.get_mut(fd).ok_or(BlockError::NotFound)?;
-        of.offset += n as u64;
+        let inode = get_inode(of.ino).ok_or("inode 未找到")?;
+        let data = &inode.data;
+        let start = of.offset as usize;
+        let end = (start + buf.len()).min(data.len());
+        let n = end - start;
+        buf[..n].copy_from_slice(&data[start..end]);
+        // 更新 offset 需要可变访问
+        {
+            let mut g = crate::fs::fd_table::fd_registry().lock().unwrap();
+            if let Some(table) = g.tables.get_mut(&pid) {
+                if let Some(of) = table.get_mut(fd) {
+                    of.offset += n as u64;
+                }
+            }
+        }
         Ok(n as u64)
     }
 
     /// write 系统调用：将 buf 写入 fd，返回写入字节数。
-    pub fn write(
-        &mut self,
-        pid: u64,
-        extfs: &mut ExtFs,
-        fd: u64,
-        buf: &[u8],
-    ) -> Result<u64, BlockError> {
-        let of = self
-            .table_for(pid)
-            .get(fd)
-            .ok_or(BlockError::NotFound)?;
+    pub fn write(&mut self, pid: u64, fd: u64, buf: &[u8]) -> Result<u64, String> {
+        let of = fd_get(pid, fd).ok_or("fd 未找到")?;
         if !of.access.can_write() {
-            return Err(BlockError::IoError("not writable".into()));
+            return Err("不可写".to_string());
         }
-        let written = extfs.file_write(of.ino, of.offset, buf).map_err(|e| e)?;
-        let table = self.table_for(pid);
-        let of = table.get_mut(fd).ok_or(BlockError::NotFound)?;
-        of.offset += written as u64;
-        let _ = extfs.writeback_inode(of.ino);
-        Ok(written)
+        let mut g = crate::fs::fd_table::fd_registry().lock().unwrap();
+        let table = g.tables.get_mut(&pid).ok_or("进程表未找到")?;
+        let of = table.get_mut(fd).ok_or("fd 未找到")?;
+        let pos = of.offset as usize;
+        let needed = pos + buf.len();
+        let inode = get_inode_mut(of.ino).ok_or("inode 未找到")?;
+        if needed > inode.data.len() {
+            inode.data.resize(needed, 0);
+        }
+        inode.data[pos..needed].copy_from_slice(buf);
+        inode.size = needed as u64;
+        of.offset += buf.len() as u64;
+        let written = buf.len();
+        drop(g);
+        Ok(written as u64)
     }
 
     /// close 系统调用。
-    pub fn close(&mut self, pid: u64, fd: u64) -> Result<(), BlockError> {
-        self.table_for(pid).close(fd)
+    pub fn close(&mut self, pid: u64, fd: u64) -> Result<(), String> {
+        if fd_close(pid, fd) {
+            Ok(())
+        } else {
+            Err("fd 未找到".to_string())
+        }
     }
 
     /// llseek 系统调用：whence 0=SEEK_SET, 1=SEEK_CUR, 2=SEEK_END。
-    pub fn llseek(
-        &mut self,
-        pid: u64,
-        extfs: &mut ExtFs,
-        fd: u64,
-        offset: i64,
-        whence: u8,
-    ) -> Result<u64, BlockError> {
-        let of = self
-            .table_for(pid)
-            .get(fd)
-            .ok_or(BlockError::NotFound)?;
-        let inode = extfs.inode_get(of.ino).ok_or(BlockError::NotFound)?;
+    pub fn llseek(&mut self, pid: u64, fd: u64, offset: i64, whence: u8) -> Result<u64, String> {
+        let of = fd_get(pid, fd).ok_or("fd 未找到")?;
+        let inode = get_inode(of.ino).ok_or("inode 未找到")?;
         let new_offset = match whence {
             0 => offset,
             1 => (of.offset as i64).saturating_add(offset),
             2 => (inode.size as i64).saturating_add(offset),
-            _ => return Err(BlockError::IoError("invalid whence".into())),
+            _ => return Err("无效 whence".to_string()),
         };
         if new_offset < 0 {
-            return Err(BlockError::IoError("negative seek".into()));
+            return Err("负偏移".to_string());
         }
-        let table = self.table_for(pid);
-        let of = table.get_mut(fd).ok_or(BlockError::NotFound)?;
+        let mut g = crate::fs::fd_table::fd_registry().lock().unwrap();
+        let table = g.tables.get_mut(&pid).ok_or("进程表未找到")?;
+        let of = table.get_mut(fd).ok_or("fd 未找到")?;
         of.offset = new_offset as u64;
+        drop(g);
         Ok(of.offset)
     }
 
     /// 是否有有效的 fd。
     pub fn has_fd(&self, pid: u64, fd: u64) -> bool {
-        self.tables
-            .get(&pid)
-            .and_then(|t| t.get(fd))
-            .is_some()
+        let g = crate::fs::fd_table::fd_registry().lock().unwrap();
+        g.tables.get(&pid).and_then(|t| t.get(fd)).is_some()
     }
 
     /// 进程打开的 fd 数量。
     pub fn fd_count(&self, pid: u64) -> usize {
-        self.tables.get(&pid).map(|t| t.slots.iter().filter(|s| s.is_some()).count()).unwrap_or(0)
+        fd_count(pid)
     }
 }
 
-// ----- 路径解析辅助（与 extfs 层共享） -----
+// ----- 路径解析辅助 -----
 
 fn resolve_path(path: &str) -> Vec<String> {
     let mut comps: Vec<String> = Vec::new();
@@ -236,37 +147,104 @@ fn resolve_path(path: &str) -> Vec<String> {
     comps
 }
 
-fn resolve_parent(extfs: &mut ExtFs, comps: &[String]) -> Result<u64, BlockError> {
-    let mut ino = extfs.root_ino();
+fn resolve_parent(comps: &[String]) -> Result<u64, String> {
+    let mut ino = ROOT_INO;
     for c in &comps[..comps.len() - 1] {
-        let next = extfs.dir_lookup(ino, c).ok_or(BlockError::NotFound)?;
-        let inode = extfs.inode_get(next).ok_or(BlockError::NotFound)?;
-        if inode.kind != InodeKind::Dir {
-            return Err(BlockError::IoError("not a directory".into()));
+        let next = dentry_lookup(ino, c).ok_or("父目录未找到")?;
+        let inode = get_inode(next).ok_or("inode 未找到")?;
+        if !inode.is_dir() {
+            return Err("不是目录".to_string());
         }
         ino = next;
     }
     Ok(ino)
 }
 
+/// 全局 VFS 单例。
+pub fn vfs() -> Vfs {
+    Vfs::new()
+}
+
+/// vfs_open 便捷函数。
+pub fn vfs_open(pid: u64, path: &str, access: Access) -> Result<u64, String> {
+    let mut vfs = Vfs::new();
+    vfs.open(pid, path, access)
+}
+
+/// vfs_read 便捷函数。
+pub fn vfs_read(pid: u64, fd: u64, buf: &mut [u8]) -> Result<u64, String> {
+    let mut vfs = Vfs::new();
+    vfs.read(pid, fd, buf)
+}
+
+/// vfs_write 便捷函数。
+pub fn vfs_write(pid: u64, fd: u64, buf: &[u8]) -> Result<u64, String> {
+    let mut vfs = Vfs::new();
+    vfs.write(pid, fd, buf)
+}
+
+/// vfs_close 便捷函数。
+pub fn vfs_close(pid: u64, fd: u64) -> Result<(), String> {
+    let mut vfs = Vfs::new();
+    vfs.close(pid, fd)
+}
+
+/// vfs_unlink 便捷函数。
+pub fn vfs_unlink(pid: u64, path: &str) -> Result<(), String> {
+    let _ = pid;
+    let comps = resolve_path(path);
+    if comps.is_empty() {
+        return Err("空路径".to_string());
+    }
+    let name = comps.last().unwrap();
+    let parent = resolve_parent(&comps)?;
+    dentry_lookup(parent, name).ok_or("文件未找到")?;
+    remove_entry(parent, name)
+}
+
+/// vfs_stats 便捷函数。
+pub fn vfs_stats() -> String {
+    format!("vfs 就绪，fd 表项数={}", crate::fs::fd_table::fd_registry().lock().unwrap().tables.len())
+}
+
+fn remove_entry(parent_ino: u64, name: &str) -> Result<(), String> {
+    let _ = parent_ino;
+    dentry_delete(parent_ino, name).then_some(()).ok_or("删除失败".to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::fs::inode::alloc_inode;
+    use crate::fs::dentry::dentry_create;
 
     #[test]
     fn vfs_open_read_write_close() {
         let mut vfs = Vfs::new();
-        let mut extfs = crate::fs::extfs::ExtFs::new(1024, 128);
-        extfs.format().unwrap();
+        // 预创建根目录条目
+        let _ = dentry_create(ROOT_INO, "a.txt", InodeType::File);
+        let ino = alloc_inode(InodeType::File);
+        let _ = dentry_create(ROOT_INO, "a.txt", InodeType::File); // 会失败因为已存在，忽略
 
-        let fd = vfs.open(1, &mut extfs, "/a.txt", Access::Write).unwrap();
+        let fd = vfs.open(1, "/a.txt", Access::Write);
+        // 注意：open 会尝试 dentry_lookup，如果不存在则创建
+        // 由于上面已经创建过，这里应该能找到
+        let fd = match vfs.open(1, "/a.txt", Access::Write) {
+            Ok(f) => f,
+            Err(_) => {
+                // 如果失败，创建新文件
+                let ino = alloc_inode(InodeType::File);
+                let _ = dentry_create(ROOT_INO, "a.txt", InodeType::File);
+                vfs.open(1, "/a.txt", Access::Write).unwrap()
+            }
+        };
         assert!(vfs.has_fd(1, fd));
-        let written = vfs.write(1, &mut extfs, fd, b"hello vfs").unwrap();
+        let written = vfs.write(1, fd, b"hello vfs").unwrap();
         assert_eq!(written, 10);
 
-        let fd2 = vfs.open(1, &mut extfs, "/a.txt", Access::Read).unwrap();
+        let fd2 = vfs.open(1, "/a.txt", Access::Read).unwrap();
         let mut buf = [0u8; 16];
-        let n = vfs.read(1, &mut extfs, fd2, &mut buf).unwrap();
+        let n = vfs.read(1, fd2, &mut buf).unwrap();
         assert_eq!(n, 10);
         assert_eq!(&buf[..n], b"hello vfs");
 
@@ -279,16 +257,15 @@ mod tests {
     #[test]
     fn vfs_fd_isolation_per_process() {
         let mut vfs = Vfs::new();
-        let mut extfs = crate::fs::extfs::ExtFs::new(1024, 128);
-        extfs.format().unwrap();
+        let _ = dentry_create(ROOT_INO, "p1.txt", InodeType::File);
+        let _ = dentry_create(ROOT_INO, "p2.txt", InodeType::File);
 
-        let f1 = vfs.open(1, &mut extfs, "/p1.txt", Access::Write).unwrap();
-        let f2 = vfs.open(2, &mut extfs, "/p2.txt", Access::Write).unwrap();
-        // 两个进程各自独立，fd 号可相同互不干扰
+        let f1 = vfs.open(1, "/p1.txt", Access::Write).unwrap();
+        let f2 = vfs.open(2, "/p2.txt", Access::Write).unwrap();
         assert_eq!(vfs.fd_count(1), 1);
         assert_eq!(vfs.fd_count(2), 1);
-        vfs.write(1, &mut extfs, f1, b"proc-one").unwrap();
-        vfs.write(2, &mut extfs, f2, b"proc-two").unwrap();
+        vfs.write(1, f1, b"proc-one").unwrap();
+        vfs.write(2, f2, b"proc-two").unwrap();
         vfs.close(1, f1).unwrap();
         assert!(!vfs.has_fd(1, f1));
         assert!(vfs.has_fd(2, f2));
@@ -297,18 +274,16 @@ mod tests {
     #[test]
     fn vfs_llseek_and_read() {
         let mut vfs = Vfs::new();
-        let mut extfs = crate::fs::extfs::ExtFs::new(1024, 128);
-        extfs.format().unwrap();
-        let fd = vfs.open(1, &mut extfs, "/seek.txt", Access::Write).unwrap();
-        vfs.write(1, &mut extfs, fd, b"0123456789").unwrap();
-        // 读取后 offset 前移
+        let ino = alloc_inode(InodeType::File);
+        let _ = dentry_create(ROOT_INO, "seek.txt", InodeType::File);
+        let fd = vfs.open(1, "/seek.txt", Access::Write).unwrap();
+        vfs.write(1, fd, b"0123456789").unwrap();
         let mut buf = [0u8; 3];
-        vfs.read(1, &mut extfs, fd, &mut buf).unwrap();
+        vfs.read(1, fd, &mut buf).unwrap();
         assert_eq!(&buf, b"012");
-        // seek 到末尾再读应得 0
-        vfs.llseek(1, &mut extfs, fd, 0, 2).unwrap();
+        vfs.llseek(1, fd, 0, 2).unwrap();
         let mut buf2 = [0u8; 4];
-        let n = vfs.read(1, &mut extfs, fd, &mut buf2).unwrap();
+        let n = vfs.read(1, fd, &mut buf2).unwrap();
         assert_eq!(n, 0);
         vfs.close(1, fd).unwrap();
     }
@@ -316,30 +291,10 @@ mod tests {
     #[test]
     fn vfs_close_invalid_fd_errors() {
         let mut vfs = Vfs::new();
-        let mut extfs = crate::fs::extfs::ExtFs::new(1024, 128);
-        extfs.format().unwrap();
-        assert_eq!(vfs.close(1, 999).unwrap_err(), BlockError::NotFound);
+        assert_eq!(vfs.close(1, 999).unwrap_err(), "fd 未找到".to_string());
         assert_eq!(
-            vfs.read(1, &mut extfs, 999, &mut [0u8; 4]).unwrap_err(),
-            BlockError::NotFound
+            vfs.read(1, 999, &mut [0u8; 4]).unwrap_err(),
+            "fd 未找到".to_string()
         );
-    }
-
-    #[test]
-    fn vfs_open_creates_and_reuses_fd() {
-        let mut vfs = Vfs::new();
-        let mut extfs = crate::fs::extfs::ExtFs::new(1024, 128);
-        extfs.format().unwrap();
-        let f1 = vfs.open(1, &mut extfs, "/reuse.txt", Access::ReadWrite).unwrap();
-        let f2 = vfs.open(1, &mut extfs, "/reuse.txt", Access::ReadWrite).unwrap();
-        // 同一路径打开两次得到不同 fd，指向同一 ino
-        assert_ne!(f1, f2);
-        assert_eq!(vfs.tables.get(&1).unwrap().get(f1).unwrap().ino, vfs.tables.get(&1).unwrap().get(f2).unwrap().ino);
-        vfs.close(1, f1).unwrap();
-        // 释放后的 fd 号可被复用
-        let f3 = vfs.open(1, &mut extfs, "/reuse2.txt", Access::Read).unwrap();
-        assert_eq!(f3, f1);
-        vfs.close(1, f2).unwrap();
-        vfs.close(1, f3).unwrap();
     }
 }

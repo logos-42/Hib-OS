@@ -325,6 +325,79 @@ pub fn probe(name: &str) -> Option<String> {
         "deadlock://graph" => Some(deadlock::status()),
         "deadlock://wait" => Some(deadlock::status()),
         "container://status" => Some(container::status()),
+        // —— AI 原生意识层通道：意识原子 / 心智 / 注意力 / 语义空间 / 工作记忆 ——
+        "native://qualia" => Some(crate::ai_os::native::factory_status()),
+        "native://stream" => {
+            let eng = crate::ai_os::native::consciousness_engine().lock().unwrap();
+            Some(format!("意识流 状态数={} 总推入={}", eng.stream.state_count(), eng.stream.total_states))
+        }
+        "native://status" => Some(crate::ai_os::native::native_status()),
+        "mind://state" => Some(crate::ai_os::mind::mind_status()),
+        "mind://goal" => {
+            let eng = crate::ai_os::mind::mind_engine().lock().unwrap();
+            match eng.goal_stack.active_goal() {
+                Some(g) => Some(format!("活跃目标[id={}]: {} 进度={:.0}%", g.id, g.description, g.progress * 100.0)),
+                None => Some("无活跃目标".to_string()),
+            }
+        }
+        "mind://wm" => {
+            let eng = crate::ai_os::mind::mind_engine().lock().unwrap();
+            Some(format!("工作记忆 条目={} 使用率={:.2}", eng.working_memory.len(), eng.working_memory.usage_ratio()))
+        }
+        "mind://decide" => Some("决策引擎就绪，使用 act mind://decide <选项...>".to_string()),
+        "attention://lens" => {
+            let eng = crate::ai_os::attention::attention_engine().lock().unwrap();
+            Some(format!("透镜模式={:?} 阈值={:.2} 通过率={:.2}", eng.lens.mode, eng.lens.threshold, eng.lens.pass_rate()))
+        }
+        "attention://saliency" => {
+            let eng = crate::ai_os::attention::attention_engine().lock().unwrap();
+            let top = eng.saliency.top_k(5);
+            let mut out = String::from("显著性图 Top5:\n");
+            for (ch, s) in top {
+                out.push_str(&format!("  {} = {:.3}\n", ch, s));
+            }
+            Some(out)
+        }
+        "attention://focus" => {
+            let eng = crate::ai_os::attention::attention_engine().lock().unwrap();
+            match eng.focus.current_name() {
+                Some(n) => Some(format!("当前焦点: {}", n)),
+                None => Some("无当前焦点".to_string()),
+            }
+        }
+        "attention://cycle" => {
+            let eng = crate::ai_os::attention::attention_engine().lock().unwrap();
+            Some(format!("注意力周期值: {:.3}", eng.cycle_value()))
+        }
+        "semantic://index" => Some("语义索引就绪，使用 act semantic://index <文本>".to_string()),
+        "semantic://search" => Some("语义检索就绪，使用 act semantic://search <查询>".to_string()),
+        "semantic://concept" => Some("概念图就绪，使用 act semantic://concept <名称>".to_string()),
+        "semantic://namespace" => Some("语义命名空间就绪，使用 act semantic://bind <路径> <文本>".to_string()),
+        "memory://sensory" => Some("感觉缓冲就绪，使用 act memory://sensory-write <模态> <数据>".to_string()),
+        "memory://wm" => {
+            let eng = crate::ai_os::memory_ws::memory_engine().lock().unwrap();
+            Some(format!("工作记忆 条目={} 利用率={:.2}", eng.working.len(), eng.working.utilization()))
+        }
+        "memory://stm" => {
+            let eng = crate::ai_os::memory_ws::memory_engine().lock().unwrap();
+            Some(format!("短时记忆 条目={} 平均重要性={:.2}", eng.short_term.len(), eng.short_term.avg_importance()))
+        }
+        "memory://ltm" => {
+            let eng = crate::ai_os::memory_ws::memory_engine().lock().unwrap();
+            Some(format!("长时记忆 条目={} 平均强度={:.2}", eng.long_term.len(), eng.long_term.avg_strength()))
+        }
+        "memory://episode" => {
+            let eng = crate::ai_os::memory_ws::memory_engine().lock().unwrap();
+            Some(format!("情景记忆 条目={}", eng.episodic.len()))
+        }
+        "memory://semantic" => {
+            let eng = crate::ai_os::memory_ws::memory_engine().lock().unwrap();
+            Some(format!("语义记忆 事实={}", eng.semantic.len()))
+        }
+        "memory://skill" => {
+            let eng = crate::ai_os::memory_ws::memory_engine().lock().unwrap();
+            Some(format!("程序记忆 技能={} 平均熟练度={:.2}", eng.procedural.len(), eng.procedural.avg_proficiency()))
+        }
         _ => None,
     }
 }
@@ -811,6 +884,22 @@ fn act_raw(name: &str, payload: &str) -> Option<Result<String, String>> {
         }
         "container://status" => {
             Some(Ok(container::status()))
+        }
+        // —— AI 原生意识层通道：意识原子 / 心智 / 注意力 / 语义空间 / 工作记忆 ——
+        "native://qualia" | "native://stream" | "native://status" => {
+            Some(Ok(crate::ai_os::native::native_status()))
+        }
+        "mind://state" | "mind://goal" | "mind://wm" | "mind://decide" => {
+            Some(crate::ai_os::mind::mind_act_dispatch(payload))
+        }
+        "attention://lens" | "attention://saliency" | "attention://focus" | "attention://cycle" => {
+            Some(crate::ai_os::attention::attention_act_dispatch(payload))
+        }
+        "semantic://index" | "semantic://search" | "semantic://concept" | "semantic://namespace" => {
+            Some(crate::ai_os::semantic::semantic_act_dispatch(payload))
+        }
+        "memory://sensory" | "memory://wm" | "memory://stm" | "memory://ltm" | "memory://episode" | "memory://semantic" | "memory://skill" => {
+            Some(crate::ai_os::memory_ws::memory_act_dispatch(payload))
         }
         _ => None,
     }
