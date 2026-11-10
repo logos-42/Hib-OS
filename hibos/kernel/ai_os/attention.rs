@@ -1114,3 +1114,389 @@ mod tests {
         assert_eq!(CycleType::Micro as u32, 2);
     }
 }
+
+// =====================================================================================
+// 多头注意力 (MultiHeadAttention)
+// =====================================================================================
+
+/// 多头注意力：将注意力分成多个头并行计算。
+pub struct MultiHeadAttention {
+    pub num_heads: usize,
+    pub head_dim: usize,
+    pub q_weights: Vec<Vec<f32>>,
+    pub k_weights: Vec<Vec<f32>>,
+    pub v_weights: Vec<Vec<f32>>,
+    pub o_weights: Vec<Vec<f32>>,
+    pub attention_count: u64,
+}
+
+impl MultiHeadAttention {
+    pub fn new(num_heads: usize, head_dim: usize) -> Self {
+        let q_weights: Vec<Vec<f32>> = (0..num_heads).map(|_| vec![0.1; head_dim]).collect();
+        let k_weights: Vec<Vec<f32>> = (0..num_heads).map(|_| vec![0.1; head_dim]).collect();
+        let v_weights: Vec<Vec<f32>> = (0..num_heads).map(|_| vec![0.1; head_dim]).collect();
+        let o_weights: Vec<Vec<f32>> = (0..num_heads).map(|_| vec![0.1; head_dim]).collect();
+        Self {
+            num_heads,
+            head_dim,
+            q_weights,
+            k_weights,
+            v_weights,
+            o_weights,
+            attention_count: 0,
+        }
+    }
+
+    pub fn attend(&mut self, query: &[f32], keys: &[Vec<f32>], values: &[Vec<f32>]) -> Vec<f32> {
+        self.attention_count += 1;
+        let mut outputs: Vec<f32> = vec![0.0; self.head_dim];
+        for h in 0..self.num_heads {
+            let mut scores: Vec<f32> = keys.iter().map(|k| {
+                query.iter().zip(k.iter()).map(|(q, k)| q * k).sum::<f32>() / (self.head_dim as f32).sqrt()
+            }).collect();
+            // softmax
+            let max_score = scores.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+            let exp_sum: f32 = scores.iter().map(|s| (s - max_score).exp()).sum();
+            for s in &mut scores {
+                *s = (s - max_score).exp() / exp_sum;
+            }
+            // 加权求和
+            for (i, s) in scores.iter().enumerate() {
+                if i < values.len() {
+                    for d in 0..self.head_dim {
+                        outputs[d] += s * values[i][d];
+                    }
+                }
+            }
+        }
+        // 归一化
+        let num_heads_f = self.num_heads as f32;
+        for d in 0..self.head_dim {
+            outputs[d] /= num_heads_f;
+        }
+        outputs
+    }
+
+    pub fn count(&self) -> u64 {
+        self.attention_count
+    }
+}
+
+// =====================================================================================
+// 稀疏注意力 (SparseAttention)
+// =====================================================================================
+
+/// 稀疏注意力模式。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SparsePattern {
+    Local,     // 局部注意力：只关注附近的token
+    Strided,   // 步进注意力：固定间隔采样
+    Fixed,     // 固定注意力：固定位置
+    Global,    // 全局注意力：所有token
+}
+
+/// 稀疏注意力：降低计算复杂度的注意力机制。
+pub struct SparseAttention {
+    pub pattern: SparsePattern,
+    pub window_size: usize,
+    pub stride: usize,
+    pub global_indices: Vec<usize>,
+    pub compute_count: u64,
+}
+
+impl SparseAttention {
+    pub fn new(pattern: SparsePattern, window_size: usize, stride: usize) -> Self {
+        Self {
+            pattern,
+            window_size,
+            stride,
+            global_indices: Vec::new(),
+            compute_count: 0,
+        }
+    }
+
+    pub fn add_global_index(&mut self, idx: usize) {
+        self.global_indices.push(idx);
+    }
+
+    pub fn get_attention_mask(&self, seq_len: usize, current_pos: usize) -> Vec<bool> {
+        let mut mask = vec![false; seq_len];
+        match self.pattern {
+            SparsePattern::Local => {
+                let start = current_pos.saturating_sub(self.window_size / 2);
+                let end = (current_pos + self.window_size / 2).min(seq_len);
+                for i in start..end {
+                    mask[i] = true;
+                }
+            }
+            SparsePattern::Strided => {
+                for i in (0..seq_len).step_by(self.stride) {
+                    mask[i] = true;
+                }
+            }
+            SparsePattern::Fixed => {
+                for &idx in &self.global_indices {
+                    if idx < seq_len {
+                        mask[idx] = true;
+                    }
+                }
+            }
+            SparsePattern::Global => {
+                for i in 0..seq_len {
+                    mask[i] = true;
+                }
+            }
+        }
+        mask[current_pos] = true; // 自身总可见
+        mask
+    }
+
+    pub fn count(&self) -> u64 {
+        self.compute_count
+    }
+}
+
+// =====================================================================================
+// 长短期记忆注意力 (LSTMAttention)
+// =====================================================================================
+
+/// LSTM 门控状态。
+#[derive(Clone, Debug)]
+pub struct LSTMState {
+    pub hidden: Vec<f32>,
+    pub cell: Vec<f32>,
+}
+
+/// 长短期记忆注意力：结合 LSTM 的时序注意力。
+pub struct LSTMAttention {
+    pub state: LSTMState,
+    pub input_dim: usize,
+    pub hidden_dim: usize,
+    pub forget_weights: Vec<Vec<f32>>,
+    pub input_weights: Vec<Vec<f32>>,
+    pub output_weights: Vec<Vec<f32>>,
+    pub cell_weights: Vec<Vec<f32>>,
+    pub step_count: u64,
+}
+
+impl LSTMAttention {
+    pub fn new(input_dim: usize, hidden_dim: usize) -> Self {
+        let init_vec = |d: usize| vec![0.1; d];
+        let init_matrix = |rows: usize, cols: usize| (0..rows).map(|_| init_vec(cols)).collect();
+        Self {
+            state: LSTMState {
+                hidden: vec![0.0; hidden_dim],
+                cell: vec![0.0; hidden_dim],
+            },
+            input_dim,
+            hidden_dim,
+            forget_weights: init_matrix(hidden_dim, input_dim + hidden_dim),
+            input_weights: init_matrix(hidden_dim, input_dim + hidden_dim),
+            output_weights: init_matrix(hidden_dim, input_dim + hidden_dim),
+            cell_weights: init_matrix(hidden_dim, input_dim + hidden_dim),
+            step_count: 0,
+        }
+    }
+
+    pub fn step(&mut self, input: &[f32]) -> Vec<f32> {
+        self.step_count += 1;
+        let combined: Vec<f32> = input.iter().chain(self.state.hidden.iter()).copied().collect();
+        let sigmoid = |x: f32| 1.0 / (1.0 + (-x).exp());
+        let tanh = |x: f32| x.tanh();
+
+        // 遗忘门
+        let forget: Vec<f32> = self.forget_weights.iter().map(|w| {
+            combined.iter().zip(w.iter()).map(|(c, w)| c * w).sum::<f32>()
+        }).map(sigmoid).collect();
+
+        // 输入门
+        let input_gate: Vec<f32> = self.input_weights.iter().map(|w| {
+            combined.iter().zip(w.iter()).map(|(c, w)| c * w).sum::<f32>()
+        }).map(sigmoid).collect();
+
+        // 输出门
+        let output_gate: Vec<f32> = self.output_weights.iter().map(|w| {
+            combined.iter().zip(w.iter()).map(|(c, w)| c * w).sum::<f32>()
+        }).map(sigmoid).collect();
+
+        // 细胞候选
+        let cell_candidate: Vec<f32> = self.cell_weights.iter().map(|w| {
+            combined.iter().zip(w.iter()).map(|(c, w)| c * w).sum::<f32>()
+        }).map(tanh).collect();
+
+        // 更新细胞状态
+        for i in 0..self.hidden_dim {
+            self.state.cell[i] = forget[i] * self.state.cell[i] + input_gate[i] * cell_candidate[i];
+        }
+
+        // 更新隐藏状态
+        for i in 0..self.hidden_dim {
+            self.state.hidden[i] = output_gate[i] * tanh(self.state.cell[i]);
+        }
+
+        self.state.hidden.clone()
+    }
+
+    pub fn count(&self) -> u64 {
+        self.step_count
+    }
+}
+
+// =====================================================================================
+// 注意力可视化 (AttentionVisualization)
+// =====================================================================================
+
+/// 注意力热图单元。
+#[derive(Clone, Debug)]
+pub struct AttentionHeatmapCell {
+    pub query_pos: usize,
+    pub key_pos: usize,
+    pub weight: f32,
+}
+
+/// 注意力热图。
+#[derive(Clone, Debug)]
+pub struct AttentionHeatmap {
+    pub cells: Vec<AttentionHeatmapCell>,
+    pub query_len: usize,
+    pub key_len: usize,
+}
+
+impl AttentionHeatmap {
+    pub fn new(query_len: usize, key_len: usize) -> Self {
+        Self {
+            cells: Vec::new(),
+            query_len,
+            key_len,
+        }
+    }
+
+    pub fn add_cell(&mut self, q: usize, k: usize, weight: f32) {
+        self.cells.push(AttentionHeatmapCell {
+            query_pos: q,
+            key_pos: k,
+            weight: weight.clamp(0.0, 1.0),
+        });
+    }
+
+    pub fn get_weight(&self, q: usize, k: usize) -> Option<f32> {
+        self.cells.iter().find(|c| c.query_pos == q && c.key_pos == k).map(|c| c.weight)
+    }
+
+    pub fn cell_count(&self) -> usize {
+        self.cells.len()
+    }
+}
+
+// =====================================================================================
+// 注意力扩展测试
+// =====================================================================================
+
+#[cfg(test)]
+mod advanced_tests {
+    use super::*;
+
+    #[test]
+    fn multihead_attention() {
+        let mut mha = MultiHeadAttention::new(4, 16);
+        let query = vec![0.5; 16];
+        let keys: Vec<Vec<f32>> = (0..4).map(|_| vec![0.3; 16]).collect();
+        let values: Vec<Vec<f32>> = (0..4).map(|_| vec![0.7; 16]).collect();
+        let output = mha.attend(&query, &keys, &values);
+        assert_eq!(output.len(), 16);
+        assert_eq!(mha.count(), 1);
+    }
+
+    #[test]
+    fn multihead_different_heads() {
+        let mut mha = MultiHeadAttention::new(1, 8);
+        let query = vec![1.0; 8];
+        let keys = vec![vec![1.0; 8]];
+        let values = vec![vec![2.0; 8]];
+        let output = mha.attend(&query, &keys, &values);
+        assert_eq!(output.len(), 8);
+    }
+
+    #[test]
+    fn sparse_attention_local() {
+        let mut sa = SparseAttention::new(SparsePattern::Local, 4, 1);
+        let mask = sa.get_attention_mask(10, 5);
+        // 位置 5 的窗口是 [3, 4, 5, 6, 7]
+        assert!(mask[3]);
+        assert!(mask[4]);
+        assert!(mask[5]);
+        assert!(mask[6]);
+        assert!(mask[7]);
+        assert!(!mask[0]);
+        assert!(!mask[9]);
+    }
+
+    #[test]
+    fn sparse_attention_global() {
+        let mut sa = SparseAttention::new(SparsePattern::Global, 4, 1);
+        let mask = sa.get_attention_mask(5, 2);
+        for m in &mask {
+            assert!(*m);
+        }
+    }
+
+    #[test]
+    fn sparse_attention_strided() {
+        let mut sa = SparseAttention::new(SparsePattern::Strided, 4, 2);
+        let mask = sa.get_attention_mask(10, 0);
+        assert!(mask[0]);
+        assert!(mask[2]);
+        assert!(mask[4]);
+        assert!(!mask[1]);
+    }
+
+    #[test]
+    fn sparse_attention_fixed() {
+        let mut sa = SparseAttention::new(SparsePattern::Fixed, 4, 1);
+        sa.add_global_index(0);
+        sa.add_global_index(5);
+        let mask = sa.get_attention_mask(10, 3);
+        assert!(mask[0]);
+        assert!(mask[5]);
+        assert!(!mask[3]); // 3 不在全局索引中，且当前位置不是 3... 等等，current_pos 是 3
+        // 当前位置总是可见
+        assert!(mask[3]);
+    }
+
+    #[test]
+    fn lstm_attention() {
+        let mut lstm = LSTMAttention::new(8, 16);
+        let input = vec![0.5; 8];
+        let output = lstm.step(&input);
+        assert_eq!(output.len(), 16);
+        assert_eq!(lstm.count(), 1);
+    }
+
+    #[test]
+    fn lstm_attention_multiple_steps() {
+        let mut lstm = LSTMAttention::new(4, 8);
+        for i in 0..5 {
+            lstm.step(&[i as f32; 4]);
+        }
+        assert_eq!(lstm.count(), 5);
+    }
+
+    #[test]
+    fn attention_heatmap() {
+        let mut hm = AttentionHeatmap::new(4, 4);
+        hm.add_cell(0, 0, 0.9);
+        hm.add_cell(0, 1, 0.1);
+        hm.add_cell(1, 2, 0.8);
+        assert_eq!(hm.cell_count(), 3);
+        assert_eq!(hm.get_weight(0, 0), Some(0.9));
+        assert_eq!(hm.get_weight(0, 1), Some(0.1));
+        assert_eq!(hm.get_weight(1, 2), Some(0.8));
+        assert_eq!(hm.get_weight(2, 3), None);
+    }
+
+    #[test]
+    fn sparse_pattern_names() {
+        assert_eq!(SparsePattern::Local as u32, 0);
+        assert_eq!(SparsePattern::Global as u32, 3);
+    }
+}

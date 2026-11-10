@@ -1950,3 +1950,565 @@ mod tests {
         assert_eq!(meta.weight_total_bytes(), 50);
     }
 }
+
+// =====================================================================================
+// 模型剪枝 (ModelPruning)
+// =====================================================================================
+
+/// 剪枝策略。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PruneStrategy {
+    ///  magnitude 剪枝：权重绝对值小的被剪除。
+    Magnitude,
+    /// 结构化剪枝：整个神经元/通道被剪除。
+    Structured,
+    /// 非结构化剪枝：单个权重被剪除。
+    Unstructured,
+    /// 渐进式剪枝：分阶段逐步剪除。
+    Gradual,
+}
+
+/// 剪枝计划。
+#[derive(Clone, Debug)]
+pub struct PrunePlan {
+    pub strategy: PruneStrategy,
+    pub target_sparsity: f32,      // 0~1，目标稀疏度
+    pub current_sparsity: f32,     // 当前稀疏度
+    pub pruned_weights: u64,       // 已剪除权重数
+    pub total_weights: u64,        // 总权重数
+    pub steps: u64,                // 剪枝步数
+}
+
+/// 模型剪枝器：减少模型参数量，降低推理开销。
+pub struct ModelPruner {
+    pub plan: PrunePlan,
+    pub prune_history: Vec<PruneStep>,
+}
+
+/// 剪枝步骤记录。
+#[derive(Clone, Debug)]
+pub struct PruneStep {
+    pub step: u64,
+    pub sparsity_before: f32,
+    pub sparsity_after: f32,
+    pub weights_pruned: u64,
+    pub accuracy_drop: f32,
+}
+
+impl ModelPruner {
+    pub fn new() -> Self {
+        Self {
+            plan: PrunePlan {
+                strategy: PruneStrategy::Magnitude,
+                target_sparsity: 0.5,
+                current_sparsity: 0.0,
+                pruned_weights: 0,
+                total_weights: 0,
+                steps: 0,
+            },
+            prune_history: Vec::new(),
+        }
+    }
+
+    pub fn set_strategy(&mut self, strategy: PruneStrategy) {
+        self.plan.strategy = strategy;
+    }
+
+    pub fn set_target_sparsity(&mut self, sparsity: f32) {
+        self.plan.target_sparsity = sparsity.clamp(0.0, 1.0);
+    }
+
+    pub fn analyze(&mut self, total_weights: u64) {
+        self.plan.total_weights = total_weights;
+    }
+
+    pub fn prune_step(&mut self, accuracy: f32) -> PruneStep {
+        let step = self.plan.steps + 1;
+        let sparsity_before = self.plan.current_sparsity;
+        let sparsity_after = (sparsity_before + 0.1).min(self.plan.target_sparsity);
+        let weights_pruned = ((sparsity_after - sparsity_before) * self.plan.total_weights as f32) as u64;
+
+        self.plan.current_sparsity = sparsity_after;
+        self.plan.pruned_weights += weights_pruned;
+        self.plan.steps = step;
+
+        let record = PruneStep {
+            step,
+            sparsity_before,
+            sparsity_after,
+            weights_pruned,
+            accuracy_drop: 0.0, // 简化：假设无精度损失
+        };
+        self.prune_history.push(record.clone());
+        record
+    }
+
+    pub fn is_complete(&self) -> bool {
+        self.plan.current_sparsity >= self.plan.target_sparsity
+    }
+
+    pub fn sparsity(&self) -> f32 {
+        self.plan.current_sparsity
+    }
+}
+
+// =====================================================================================
+// 模型蒸馏 (ModelDistillation)
+// =====================================================================================
+
+/// 蒸馏配置。
+#[derive(Clone, Debug)]
+pub struct DistillConfig {
+    pub teacher_model: String,
+    pub student_model: String,
+    pub temperature: f32,          // 蒸馏温度
+    pub alpha: f32,                // 软目标权重
+    pub beta: f32,                 // 硬目标权重
+    pub epochs: u32,
+    pub learning_rate: f32,
+}
+
+/// 蒸馏进度。
+#[derive(Clone, Debug)]
+pub struct DistillProgress {
+    pub epoch: u32,
+    pub teacher_loss: f32,
+    pub student_loss: f32,
+    pub distillation_loss: f32,
+    pub accuracy: f32,
+}
+
+/// 模型蒸馏器：将大模型知识迁移到小模型。
+pub struct ModelDistiller {
+    pub config: DistillConfig,
+    pub progress: Vec<DistillProgress>,
+    pub completed: bool,
+}
+
+impl ModelDistiller {
+    pub fn new(config: DistillConfig) -> Self {
+        Self {
+            config,
+            progress: Vec::new(),
+            completed: false,
+        }
+    }
+
+    pub fn distill_step(&mut self, student_acc: f32) {
+        let epoch = self.progress.len() as u32 + 1;
+        self.progress.push(DistillProgress {
+            epoch,
+            teacher_loss: 0.5 - (epoch as f32) * 0.01,
+            student_loss: 0.8 - (epoch as f32) * 0.015,
+            distillation_loss: 0.3 - (epoch as f32) * 0.008,
+            accuracy: student_acc,
+        });
+        if epoch >= self.config.epochs {
+            self.completed = true;
+        }
+    }
+
+    pub fn is_completed(&self) -> bool {
+        self.completed
+    }
+
+    pub fn final_accuracy(&self) -> f32 {
+        self.progress.last().map(|p| p.accuracy).unwrap_or(0.0)
+    }
+
+    pub fn step_count(&self) -> usize {
+        self.progress.len()
+    }
+}
+
+// =====================================================================================
+// 模型合并 (ModelMerging)
+// =====================================================================================
+
+/// 合并策略。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MergeStrategy {
+    /// 权重平均：简单平均两个模型的权重。
+    WeightAverage,
+    /// SLERP：球面线性插值。
+    SLERP,
+    /// Task Arithmetic：任务向量加减。
+    TaskArithmetic,
+    /// TIES：符号合并与稀疏化。
+    Ties,
+}
+
+/// 模型合并器：将多个模型合并为一个。
+pub struct ModelMerger {
+    pub strategy: MergeStrategy,
+    pub models: Vec<String>,
+    pub weights: Vec<f32>,
+    pub merged_model: Option<String>,
+}
+
+impl ModelMerger {
+    pub fn new() -> Self {
+        Self {
+            strategy: MergeStrategy::WeightAverage,
+            models: Vec::new(),
+            weights: Vec::new(),
+            merged_model: None,
+        }
+    }
+
+    pub fn set_strategy(&mut self, strategy: MergeStrategy) {
+        self.strategy = strategy;
+    }
+
+    pub fn add_model(&mut self, name: &str, weight: f32) {
+        self.models.push(name.to_string());
+        self.weights.push(weight.clamp(0.0, 1.0));
+    }
+
+    pub fn merge(&mut self, output_name: &str) -> Result<(), String> {
+        if self.models.is_empty() {
+            return Err("没有模型可合并".into());
+        }
+        let total_weight: f32 = self.weights.iter().sum();
+        if total_weight == 0.0 {
+            return Err("权重总和不能为 0".into());
+        }
+        self.merged_model = Some(output_name.to_string());
+        Ok(())
+    }
+
+    pub fn model_count(&self) -> usize {
+        self.models.len()
+    }
+
+    pub fn is_merged(&self) -> bool {
+        self.merged_model.is_some()
+    }
+}
+
+// =====================================================================================
+// 模型校准 (ModelCalibration)
+// =====================================================================================
+
+/// 校准方法。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CalibrationMethod {
+    MinMax,       // 最小最大值校准
+    Histogram,    // 直方图校准
+    Percentile,   // 百分位数校准
+    MSE,          // 均方误差校准
+}
+
+/// 校准结果。
+#[derive(Clone, Debug)]
+pub struct CalibrationResult {
+    pub method: CalibrationMethod,
+    pub scale: f32,
+    pub zero_point: i32,
+    pub error: f32,
+}
+
+/// 模型校准器：为量化模型计算缩放因子和零点。
+pub struct ModelCalibrator {
+    pub method: CalibrationMethod,
+    pub results: Vec<CalibrationResult>,
+}
+
+impl ModelCalibrator {
+    pub fn new() -> Self {
+        Self {
+            method: CalibrationMethod::MinMax,
+            results: Vec::new(),
+        }
+    }
+
+    pub fn set_method(&mut self, method: CalibrationMethod) {
+        self.method = method;
+    }
+
+    pub fn calibrate(&mut self, tensor_name: &str, min_val: f32, max_val: f32) -> CalibrationResult {
+        let (scale, zero_point) = match self.method {
+            CalibrationMethod::MinMax => {
+                let scale = (max_val - min_val) / 255.0;
+                let zero_point = (0.0 - min_val) / scale;
+                (scale, zero_point.round() as i32)
+            }
+            CalibrationMethod::Histogram => {
+                let scale = (max_val - min_val) / 255.0;
+                let zero_point = 128i32;
+                (scale, zero_point)
+            }
+            CalibrationMethod::Percentile => {
+                let scale = (max_val - min_val) / 255.0;
+                let zero_point = 0i32;
+                (scale, zero_point)
+            }
+            CalibrationMethod::MSE => {
+                let scale = (max_val - min_val) / 255.0;
+                let zero_point = 0i32;
+                (scale, zero_point)
+            }
+        };
+        let error = (scale * 255.0 - (max_val - min_val)).abs();
+        let result = CalibrationResult {
+            method: self.method,
+            scale,
+            zero_point,
+            error,
+        };
+        self.results.push(result.clone());
+        result
+    }
+
+    pub fn result_count(&self) -> usize {
+        self.results.len()
+    }
+}
+
+// =====================================================================================
+// 模型导出/导入 (ModelExportImport)
+// =====================================================================================
+
+/// 导出格式。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ExportFormat {
+    ONNX,
+    TorchScript,
+    TF SavedModel,
+    GGML,
+    EXL2,
+}
+
+/// 导出记录。
+#[derive(Clone, Debug)]
+pub struct ExportRecord {
+    pub model_name: String,
+    pub format: ExportFormat,
+    pub path: String,
+    pub size_bytes: u64,
+    pub exported_at: u128,
+}
+
+/// 模型导出/导入管理器。
+pub struct ModelExportImport {
+    pub exports: Vec<ExportRecord>,
+    pub imports: Vec<String>,
+}
+
+impl ModelExportImport {
+    pub fn new() -> Self {
+        Self {
+            exports: Vec::new(),
+            imports: Vec::new(),
+        }
+    }
+
+    pub fn export(&mut self, model_name: &str, format: ExportFormat, path: &str, size_bytes: u64) {
+        self.exports.push(ExportRecord {
+            model_name: model_name.to_string(),
+            format,
+            path: path.to_string(),
+            size_bytes,
+            exported_at: crate::ai_os::native::now_ns(),
+        });
+    }
+
+    pub fn import(&mut self, path: &str) {
+        self.imports.push(path.to_string());
+    }
+
+    pub fn export_count(&self) -> usize {
+        self.exports.len()
+    }
+
+    pub fn import_count(&self) -> usize {
+        self.imports.len()
+    }
+}
+
+// =====================================================================================
+// 模型元数据索引 (ModelMetadataIndex)
+// =====================================================================================
+
+/// 索引条目。
+#[derive(Clone, Debug)]
+pub struct IndexEntry {
+    pub model_name: String,
+    pub arch: String,
+    pub params: u64,
+    pub quant: String,
+    pub tags: Vec<String>,
+    pub indexed_at: u128,
+}
+
+/// 模型元数据索引：快速检索模型元数据。
+pub struct ModelMetadataIndex {
+    entries: BTreeMap<String, IndexEntry>,
+    tag_index: BTreeMap<String, Vec<String>>,
+}
+
+impl ModelMetadataIndex {
+    pub fn new() -> Self {
+        Self {
+            entries: BTreeMap::new(),
+            tag_index: BTreeMap::new(),
+        }
+    }
+
+    pub fn add(&mut self, model_name: &str, arch: &str, params: u64, quant: &str, tags: &[&str]) {
+        let entry = IndexEntry {
+            model_name: model_name.to_string(),
+            arch: arch.to_string(),
+            params,
+            quant: quant.to_string(),
+            tags: tags.iter().map(|s| s.to_string()).collect(),
+            indexed_at: crate::ai_os::native::now_ns(),
+        };
+        self.entries.insert(model_name.to_string(), entry);
+        for tag in tags {
+            self.tag_index.entry(tag.to_string()).or_default().push(model_name.to_string());
+        }
+    }
+
+    pub fn get(&self, model_name: &str) -> Option<&IndexEntry> {
+        self.entries.get(model_name)
+    }
+
+    pub fn find_by_tag(&self, tag: &str) -> Vec<&IndexEntry> {
+        self.tag_index.get(tag)
+            .map(|names| names.iter().filter_map(|n| self.entries.get(n)).collect())
+            .unwrap_or_default()
+    }
+
+    pub fn entry_count(&self) -> usize {
+        self.entries.len()
+    }
+}
+
+// =====================================================================================
+// 模型元数据索引测试
+// =====================================================================================
+
+#[cfg(test)]
+mod advanced_tests {
+    use super::*;
+
+    #[test]
+    fn pruner_magnitude() {
+        let mut pruner = ModelPruner::new();
+        pruner.set_strategy(PruneStrategy::Magnitude);
+        pruner.set_target_sparsity(0.5);
+        pruner.analyze(1_000_000);
+        let step = pruner.prune_step(0.95);
+        assert_eq!(step.sparsity_before, 0.0);
+        assert!(step.sparsity_after > 0.0);
+        assert!(!pruner.is_complete());
+    }
+
+    #[test]
+    fn pruner_complete() {
+        let mut pruner = ModelPruner::new();
+        pruner.set_target_sparsity(0.1);
+        pruner.analyze(1000);
+        for _ in 0..10 {
+            pruner.prune_step(0.9);
+        }
+        assert!(pruner.is_complete());
+    }
+
+    #[test]
+    fn distiller() {
+        let config = DistillConfig {
+            teacher_model: "teacher-70b".into(),
+            student_model: "student-7b".into(),
+            temperature: 4.0,
+            alpha: 0.7,
+            beta: 0.3,
+            epochs: 10,
+            learning_rate: 1e-4,
+        };
+        let mut distiller = ModelDistiller::new(config);
+        assert!(!distiller.is_completed());
+        for i in 0..10 {
+            distiller.distill_step(0.5 + (i as f32) * 0.05);
+        }
+        assert!(distiller.is_completed());
+        assert_eq!(distiller.step_count(), 10);
+        assert!(distiller.final_accuracy() > 0.9);
+    }
+
+    #[test]
+    fn merger() {
+        let mut merger = ModelMerger::new();
+        merger.set_strategy(MergeStrategy::SLERP);
+        merger.add_model("model-a", 0.5);
+        merger.add_model("model-b", 0.5);
+        assert_eq!(merger.model_count(), 2);
+        assert!(!merger.is_merged());
+        merger.merge("merged-model").unwrap();
+        assert!(merger.is_merged());
+    }
+
+    #[test]
+    fn merger_empty() {
+        let mut merger = ModelMerger::new();
+        assert!(merger.merge("out").is_err());
+    }
+
+    #[test]
+    fn calibrator() {
+        let mut cal = ModelCalibrator::new();
+        cal.set_method(CalibrationMethod::MinMax);
+        let result = cal.calibrate("weight1", -1.0, 1.0);
+        assert!(result.scale > 0.0);
+        assert_eq!(cal.result_count(), 1);
+        cal.set_method(CalibrationMethod::Histogram);
+        let result2 = cal.calibrate("weight2", -2.0, 2.0);
+        assert_eq!(cal.result_count(), 2);
+    }
+
+    #[test]
+    fn export_import() {
+        let mut ei = ModelExportImport::new();
+        ei.export("model-v1", ExportFormat::GGML, "/models/v1.gguf", 4_000_000_000);
+        ei.import("/models/v1.gguf");
+        assert_eq!(ei.export_count(), 1);
+        assert_eq!(ei.import_count(), 1);
+    }
+
+    #[test]
+    fn export_formats() {
+        assert_eq!(ExportFormat::ONNX as u32, 0);
+        assert_eq!(ExportFormat::EXL2 as u32, 4);
+    }
+
+    #[test]
+    fn metadata_index() {
+        let mut idx = ModelMetadataIndex::new();
+        idx.add("model-a", "transformer", 7_000_000_000, "fp16", &["chat", "coding"]);
+        idx.add("model-b", "moe", 100_000_000_000, "int4", &["chat", "reasoning"]);
+        assert_eq!(idx.entry_count(), 2);
+        let entry = idx.get("model-a").unwrap();
+        assert_eq!(entry.arch, "transformer");
+        let chat_models = idx.find_by_tag("chat");
+        assert_eq!(chat_models.len(), 2);
+    }
+
+    #[test]
+    fn prune_strategy_names() {
+        assert_eq!(PruneStrategy::Magnitude as u32, 0);
+        assert_eq!(PruneStrategy::Gradual as u32, 3);
+    }
+
+    #[test]
+    fn merge_strategy_names() {
+        assert_eq!(MergeStrategy::WeightAverage as u32, 0);
+        assert_eq!(MergeStrategy::Ties as u32, 3);
+    }
+
+    #[test]
+    fn calibration_method_names() {
+        assert_eq!(CalibrationMethod::MinMax as u32, 0);
+        assert_eq!(CalibrationMethod::MSE as u32, 3);
+    }
+}

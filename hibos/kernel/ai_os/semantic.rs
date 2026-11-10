@@ -1088,3 +1088,417 @@ mod tests {
         assert!(res.contains("semantic:"));
     }
 }
+
+// =====================================================================================
+// 词嵌入 (WordEmbedding)
+// =====================================================================================
+
+/// 词嵌入表：词到向量的映射。
+pub struct WordEmbedding {
+    pub vectors: BTreeMap<String, Vec<f32>>,
+    pub dim: usize,
+    pub next_id: u64,
+}
+
+impl WordEmbedding {
+    pub fn new(dim: usize) -> Self {
+        Self {
+            vectors: BTreeMap::new(),
+            dim,
+            next_id: 1,
+        }
+    }
+
+    pub fn add(&mut self, word: &str, vector: Vec<f32>) -> u64 {
+        let id = self.next_id;
+        self.next_id += 1;
+        self.vectors.insert(word.to_string(), vector);
+        id
+    }
+
+    pub fn get(&self, word: &str) -> Option<&Vec<f32>> {
+        self.vectors.get(word)
+    }
+
+    pub fn similarity(&self, w1: &str, w2: &str) -> f32 {
+        match (self.get(w1), self.get(w2)) {
+            (Some(v1), Some(v2)) => {
+                if v1.len() != v2.len() {
+                    return 0.0;
+                }
+                let dot: f32 = v1.iter().zip(v2.iter()).map(|(a, b)| a * b).sum();
+                let n1: f32 = v1.iter().map(|x| x * x).sum::<f32>().sqrt();
+                let n2: f32 = v2.iter().map(|x| x * x).sum::<f32>().sqrt();
+                if n1 == 0.0 || n2 == 0.0 {
+                    0.0
+                } else {
+                    dot / (n1 * n2)
+                }
+            }
+            _ => 0.0,
+        }
+    }
+
+    pub fn closest(&self, word: &str, top_k: usize) -> Vec<(String, f32)> {
+        let v = match self.get(word) {
+            Some(v) => v,
+            None => return Vec::new(),
+        };
+        let mut results: Vec<(String, f32)> = self.vectors.iter()
+            .filter(|(w, _)| *w != word)
+            .map(|(w, v)| {
+                let dot: f32 = v.iter().zip(v.iter()).map(|(a, b)| a * b).sum();
+                let n1: f32 = v.iter().map(|x| x * x).sum::<f32>().sqrt();
+                let n2: f32 = v.iter().map(|x| x * x).sum::<f32>().sqrt();
+                let sim = if n1 == 0.0 || n2 == 0.0 { 0.0 } else { dot / (n1 * n2) };
+                (w.clone(), sim)
+            })
+            .collect();
+        results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        results.truncate(top_k);
+        results
+    }
+
+    pub fn word_count(&self) -> usize {
+        self.vectors.len()
+    }
+}
+
+// =====================================================================================
+// 语义相似度矩阵 (SemanticSimilarityMatrix)
+// =====================================================================================
+
+/// 语义相似度矩阵：多个概念之间的两两相似度。
+pub struct SemanticSimilarityMatrix {
+    pub items: Vec<String>,
+    pub matrix: Vec<Vec<f32>>,
+}
+
+impl SemanticSimilarityMatrix {
+    pub fn new(items: Vec<String>) -> Self {
+        let n = items.len();
+        let matrix = vec![vec![0.0; n]; n];
+        Self { items, matrix }
+    }
+
+    pub fn set(&mut self, i: usize, j: usize, value: f32) -> Result<(), String> {
+        if i >= self.items.len() || j >= self.items.len() {
+            return Err("索引越界".into());
+        }
+        self.matrix[i][j] = value.clamp(0.0, 1.0);
+        self.matrix[j][i] = value.clamp(0.0, 1.0);
+        Ok(())
+    }
+
+    pub fn get(&self, i: usize, j: usize) -> Option<f32> {
+        self.matrix.get(i).and_then(|row| row.get(j)).copied()
+    }
+
+    pub fn most_similar(&self, item_idx: usize) -> Option<(usize, f32)> {
+        let mut best = None;
+        for (j, row) in self.matrix.iter().enumerate() {
+            if j == item_idx {
+                continue;
+            }
+            let val = row[item_idx];
+            if best.map_or(true, |(_, b)| val > b) {
+                best = Some((j, val));
+            }
+        }
+        best
+    }
+
+    pub fn size(&self) -> usize {
+        self.items.len()
+    }
+}
+
+// =====================================================================================
+// 倒排索引 (InvertedIndex)
+// =====================================================================================
+
+/// 倒排索引：关键词到文档 ID 的映射。
+pub struct InvertedIndex {
+    pub index: BTreeMap<String, Vec<u64>>,
+    pub doc_count: u64,
+}
+
+impl InvertedIndex {
+    pub fn new() -> Self {
+        Self {
+            index: BTreeMap::new(),
+            doc_count: 0,
+        }
+    }
+
+    pub fn add_document(&mut self, doc_id: u64, keywords: &[&str]) {
+        self.doc_count = self.doc_count.max(doc_id + 1);
+        for kw in keywords {
+            self.index.entry(kw.to_string()).or_default().push(doc_id);
+        }
+    }
+
+    pub fn search(&self, keyword: &str) -> Vec<u64> {
+        self.index.get(keyword).cloned().unwrap_or_default()
+    }
+
+    pub fn search_multi(&self, keywords: &[&str]) -> Vec<u64> {
+        let mut results: Vec<u64> = Vec::new();
+        for kw in keywords {
+            if let Some(docs) = self.index.get(kw) {
+                results.extend(docs.iter().copied());
+            }
+        }
+        results.sort();
+        results.dedup();
+        results
+    }
+
+    pub fn keyword_count(&self) -> usize {
+        self.index.len()
+    }
+}
+
+// =====================================================================================
+// HNSW 近似近邻 (HNSWIndex)
+// =====================================================================================
+
+/// HNSW 节点。
+#[derive(Clone, Debug)]
+pub struct HNSWNode {
+    pub id: u64,
+    pub vector: Vec<f32>,
+    pub layers: Vec<Vec<u64>>,   // 每层的邻居
+}
+
+/// HNSW 图：近似最近邻搜索。
+pub struct HNSWIndex {
+    pub nodes: BTreeMap<u64, HNSWNode>,
+    pub max_layer: usize,
+    pub entry_point: Option<u64>,
+    pub next_id: u64,
+    pub dim: usize,
+}
+
+impl HNSWIndex {
+    pub fn new(dim: usize) -> Self {
+        Self {
+            nodes: BTreeMap::new(),
+            max_layer: 16,
+            entry_point: None,
+            next_id: 1,
+            dim,
+        }
+    }
+
+    pub fn insert(&mut self, vector: Vec<f32>) -> u64 {
+        let id = self.next_id;
+        self.next_id += 1;
+        let node = HNSWNode {
+            id,
+            vector,
+            layers: vec![Vec::new(); self.max_layer],
+        };
+        self.nodes.insert(id, node);
+        if self.entry_point.is_none() {
+            self.entry_point = Some(id);
+        }
+        id
+    }
+
+    pub fn search(&self, query: &[f32], k: usize) -> Vec<(u64, f32)> {
+        let mut results: Vec<(u64, f32)> = self.nodes.iter()
+            .map(|(id, node)| {
+                let dot: f32 = query.iter().zip(node.vector.iter()).map(|(a, b)| a * b).sum();
+                let nq: f32 = query.iter().map(|x| x * x).sum::<f32>().sqrt();
+                let nn: f32 = node.vector.iter().map(|x| x * x).sum::<f32>().sqrt();
+                let sim = if nq == 0.0 || nn == 0.0 { 0.0 } else { dot / (nq * nn) };
+                (*id, sim)
+            })
+            .collect();
+        results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        results.truncate(k);
+        results
+    }
+
+    pub fn node_count(&self) -> usize {
+        self.nodes.len()
+    }
+}
+
+// =====================================================================================
+// 层次聚类 (HierarchicalClustering)
+// =====================================================================================
+
+/// 聚类节点。
+#[derive(Clone, Debug)]
+pub struct ClusterNode {
+    pub id: u64,
+    pub item_ids: Vec<u64>,
+    pub centroid: Vec<f32>,
+    pub left: Option<u64>,
+    pub right: Option<u64>,
+    pub distance: f32,
+}
+
+/// 层次聚类：自底向上合并相似项。
+pub struct HierarchicalClustering {
+    pub clusters: BTreeMap<u64, ClusterNode>,
+    pub next_id: u64,
+    pub root_id: Option<u64>,
+}
+
+impl HierarchicalClustering {
+    pub fn new() -> Self {
+        Self {
+            clusters: BTreeMap::new(),
+            next_id: 1,
+            root_id: None,
+        }
+    }
+
+    pub fn add_item(&mut self, item_id: u64, vector: Vec<f32>) {
+        let id = self.next_id;
+        self.next_id += 1;
+        self.clusters.insert(id, ClusterNode {
+            id,
+            item_ids: vec![item_id],
+            centroid: vector.clone(),
+            left: None,
+            right: None,
+            distance: 0.0,
+        });
+    }
+
+    pub fn merge_closest(&mut self) -> Option<(u64, u64)> {
+        let mut best_pair = None;
+        let mut best_dist = f32::INFINITY;
+        let ids: Vec<u64> = self.clusters.keys().copied().collect();
+        for i in 0..ids.len() {
+            for j in (i + 1)..ids.len() {
+                let c1 = &self.clusters[&ids[i]];
+                let c2 = &self.clusters[&ids[j]];
+                let dist = centroid_distance(&c1.centroid, &c2.centroid);
+                if dist < best_dist {
+                    best_dist = dist;
+                    best_pair = Some((ids[i], ids[j]));
+                }
+            }
+        }
+        if let Some((a, b)) = best_pair {
+            let ca = self.clusters.get(&a).unwrap().centroid.clone();
+            let cb = self.clusters.get(&b).unwrap().centroid.clone();
+            let merged_centroid: Vec<f32> = ca.iter().zip(cb.iter()).map(|(x, y)| (x + y) / 2.0).collect();
+            let merged_item_ids: Vec<u64> = self.clusters[&a].item_ids.iter()
+                .chain(self.clusters[&b].item_ids.iter())
+                .copied().collect();
+            let new_id = self.next_id;
+            self.next_id += 1;
+            self.clusters.insert(new_id, ClusterNode {
+                id: new_id,
+                item_ids: merged_item_ids,
+                centroid: merged_centroid,
+                left: Some(a),
+                right: Some(b),
+                distance: best_dist,
+            });
+            self.clusters.remove(&a);
+            self.clusters.remove(&b);
+            self.root_id = Some(new_id);
+            Some((a, b))
+        } else {
+            None
+        }
+    }
+
+    pub fn cluster_count(&self) -> usize {
+        self.clusters.len()
+    }
+}
+
+fn centroid_distance(a: &[f32], b: &[f32]) -> f32 {
+    a.iter().zip(b.iter()).map(|(x, y)| (x - y) * (x - y)).sum::<f32>().sqrt()
+}
+
+// =====================================================================================
+// 语义扩展测试
+// =====================================================================================
+
+#[cfg(test)]
+mod advanced_tests {
+    use super::*;
+
+    #[test]
+    fn word_embedding() {
+        let mut we = WordEmbedding::new(4);
+        we.add("king", vec![1.0, 0.0, 0.0, 0.0]);
+        we.add("queen", vec![0.9, 0.1, 0.0, 0.0]);
+        we.add("apple", vec![0.0, 0.0, 1.0, 0.0]);
+        assert_eq!(we.word_count(), 3);
+        let sim = we.similarity("king", "queen");
+        assert!(sim > 0.9);
+        let sim2 = we.similarity("king", "apple");
+        assert!(sim2 < 0.5);
+        let closest = we.closest("king", 2);
+        assert_eq!(closest.len(), 2);
+        assert_eq!(closest[0].0, "queen");
+    }
+
+    #[test]
+    fn similarity_matrix() {
+        let mut sm = SemanticSimilarityMatrix::new(vec!["a".into(), "b".into(), "c".into()]);
+        sm.set(0, 1, 0.8).unwrap();
+        sm.set(0, 2, 0.3).unwrap();
+        sm.set(1, 2, 0.5).unwrap();
+        assert_eq!(sm.get(0, 1), Some(0.8));
+        assert_eq!(sm.get(1, 0), Some(0.8));
+        let (idx, sim) = sm.most_similar(0).unwrap();
+        assert_eq!(idx, 1);
+        assert!((sim - 0.8).abs() < 1e-6);
+    }
+
+    #[test]
+    fn inverted_index() {
+        let mut ii = InvertedIndex::new();
+        ii.add_document(1, &["rust", "os", "kernel"]);
+        ii.add_document(2, &["rust", "ai", "os"]);
+        ii.add_document(3, &["python", "ai"]);
+        assert_eq!(ii.keyword_count(), 5);
+        let results = ii.search("rust");
+        assert_eq!(results, vec![1, 2]);
+        let results = ii.search_multi(&["rust", "ai"]);
+        assert_eq!(results, vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn hnsw_index() {
+        let mut hnsw = HNSWIndex::new(4);
+        hnsw.insert(vec![1.0, 0.0, 0.0, 0.0]);
+        hnsw.insert(vec![0.9, 0.1, 0.0, 0.0]);
+        hnsw.insert(vec![0.0, 0.0, 1.0, 0.0]);
+        assert_eq!(hnsw.node_count(), 3);
+        let results = hnsw.search(&[1.0, 0.0, 0.0, 0.0], 2);
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].0, 1);
+    }
+
+    #[test]
+    fn hierarchical_clustering() {
+        let mut hc = HierarchicalClustering::new();
+        hc.add_item(1, vec![1.0, 0.0]);
+        hc.add_item(2, vec![1.1, 0.1]);
+        hc.add_item(3, vec![0.0, 1.0]);
+        hc.add_item(4, vec![0.1, 1.1]);
+        assert_eq!(hc.cluster_count(), 4);
+        let merged = hc.merge_closest();
+        assert!(merged.is_some());
+        assert!(hc.cluster_count() < 4);
+    }
+
+    #[test]
+    fn word_embedding_similarity_edge() {
+        let we = WordEmbedding::new(4);
+        assert_eq!(we.similarity("nonexistent", "also_missing"), 0.0);
+        assert_eq!(we.closest("nonexistent", 5).len(), 0);
+    }
+}

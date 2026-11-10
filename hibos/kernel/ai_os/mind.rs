@@ -1361,3 +1361,423 @@ mod tests {
         assert_eq!(opt.expected_utility, 1.0);
     }
 }
+
+// =====================================================================================
+// 认知偏见 (CognitiveBias)
+// =====================================================================================
+
+/// 偏见类型。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BiasType {
+    Confirmation,   // 确认偏见：倾向于确认既有信念
+    Anchoring,      // 锚定偏见：过度依赖第一个信息
+    Availability,   // 可得性偏见：倾向于基于容易想到的信息
+    Overconfidence, // 过度自信：高估自己的能力
+    LossAversion,   // 损失厌恶：对损失比对收益更敏感
+    Framing,        // 框架效应：信息呈现方式影响决策
+}
+
+/// 认知偏见记录。
+#[derive(Clone, Debug)]
+pub struct BiasRecord {
+    pub bias_type: BiasType,
+    pub trigger: String,
+    pub strength: f32,       // 0~1
+    pub applied_at: u128,
+}
+
+/// 认知偏见系统：模拟人类认知偏差，影响决策。
+pub struct CognitiveBiasSystem {
+    pub biases: BTreeMap<BiasType, f32>,   // 偏见类型 -> 强度
+    pub records: Vec<BiasRecord>,
+}
+
+impl CognitiveBiasSystem {
+    pub fn new() -> Self {
+        let mut biases = BTreeMap::new();
+        biases.insert(BiasType::Confirmation, 0.3);
+        biases.insert(BiasType::Anchoring, 0.2);
+        biases.insert(BiasType::Availability, 0.25);
+        biases.insert(BiasType::Overconfidence, 0.15);
+        biases.insert(BiasType::LossAversion, 0.4);
+        biases.insert(BiasType::Framing, 0.2);
+        Self {
+            biases,
+            records: Vec::new(),
+        }
+    }
+
+    pub fn set_bias_strength(&mut self, bias_type: BiasType, strength: f32) {
+        self.biases.insert(bias_type, strength.clamp(0.0, 1.0));
+    }
+
+    pub fn apply_bias(&mut self, bias_type: BiasType, trigger: &str, decision_score: f32) -> f32 {
+        let strength = self.biases.get(&bias_type).copied().unwrap_or(0.0);
+        let adjusted = match bias_type {
+            BiasType::Confirmation => decision_score * (1.0 + strength * 0.2),
+            BiasType::Anchoring => decision_score * (1.0 - strength * 0.1),
+            BiasType::Availability => decision_score * (1.0 + strength * 0.15),
+            BiasType::Overconfidence => decision_score * (1.0 + strength * 0.3),
+            BiasType::LossAversion => decision_score * (1.0 - strength * 0.25),
+            BiasType::Framing => decision_score * (1.0 + strength * 0.1),
+        };
+        self.records.push(BiasRecord {
+            bias_type,
+            trigger: trigger.to_string(),
+            strength,
+            applied_at: crate::ai_os::native::now_ns(),
+        });
+        adjusted.clamp(0.0, 1.0)
+    }
+
+    pub fn record_count(&self) -> usize {
+        self.records.len()
+    }
+
+    pub fn bias_strength(&self, bias_type: BiasType) -> f32 {
+        self.biases.get(&bias_type).copied().unwrap_or(0.0)
+    }
+}
+
+// =====================================================================================
+// 决策树 (DecisionTree)
+// =====================================================================================
+
+/// 决策树节点。
+#[derive(Clone, Debug)]
+pub struct DecisionTreeNode {
+    pub id: u64,
+    pub condition: Option<String>,   // 分叉条件
+    pub action: Option<String>,      // 叶子节点动作
+    pub left: Option<u64>,           // 左子节点
+    pub right: Option<u64>,          // 右子节点
+    pub weight: f32,                 // 节点权重
+}
+
+/// 决策树：基于条件的分支决策结构。
+pub struct DecisionTree {
+    pub nodes: BTreeMap<u64, DecisionTreeNode>,
+    pub root_id: Option<u64>,
+    pub next_id: u64,
+}
+
+impl DecisionTree {
+    pub fn new() -> Self {
+        Self {
+            nodes: BTreeMap::new(),
+            root_id: None,
+            next_id: 1,
+        }
+    }
+
+    pub fn add_node(&mut self, condition: Option<String>, action: Option<String>) -> u64 {
+        let id = self.next_id;
+        self.next_id += 1;
+        self.nodes.insert(id, DecisionTreeNode {
+            id,
+            condition,
+            action,
+            left: None,
+            right: None,
+            weight: 1.0,
+        });
+        if self.root_id.is_none() {
+            self.root_id = Some(id);
+        }
+        id
+    }
+
+    pub fn link_left(&mut self, parent: u64, child: u64) -> Result<(), String> {
+        let node = self.nodes.get_mut(&parent).ok_or("节点不存在")?;
+        node.left = Some(child);
+        Ok(())
+    }
+
+    pub fn link_right(&mut self, parent: u64, child: u64) -> Result<(), String> {
+        let node = self.nodes.get_mut(&parent).ok_or("节点不存在")?;
+        node.right = Some(child);
+        Ok(())
+    }
+
+    pub fn evaluate(&self, context: &str) -> Option<String> {
+        let mut current = self.root_id?;
+        loop {
+            let node = self.nodes.get(&current)?;
+            if let Some(action) = &node.action {
+                return Some(action.clone());
+            }
+            let condition = node.condition.as_ref()?;
+            if context.contains(condition) {
+                current = node.left?;
+            } else {
+                current = node.right?;
+            }
+        }
+    }
+
+    pub fn node_count(&self) -> usize {
+        self.nodes.len()
+    }
+}
+
+// =====================================================================================
+// 行为树 (BehaviorTree)
+// =====================================================================================
+
+/// 节点状态。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BTNodeStatus {
+    Success,
+    Failure,
+    Running,
+}
+
+/// 行为树节点类型。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BTNodeType {
+    Selector,    // 任意子节点成功即成功
+    Sequence,    // 全部子节点成功才成功
+    Action,      // 叶子动作
+    Condition,   // 条件检查
+}
+
+/// 行为树节点。
+#[derive(Clone, Debug)]
+pub struct BTNode {
+    pub id: u64,
+    pub node_type: BTNodeType,
+    pub name: String,
+    pub children: Vec<u64>,
+    pub status: BTNodeStatus,
+}
+
+/// 行为树：用于AI智能体行为决策的层级结构。
+pub struct BehaviorTree {
+    pub nodes: BTreeMap<u64, BTNode>,
+    pub root_id: Option<u64>,
+    pub next_id: u64,
+}
+
+impl BehaviorTree {
+    pub fn new() -> Self {
+        Self {
+            nodes: BTreeMap::new(),
+            root_id: None,
+            next_id: 1,
+        }
+    }
+
+    pub fn add_node(&mut self, node_type: BTNodeType, name: &str) -> u64 {
+        let id = self.next_id;
+        self.next_id += 1;
+        self.nodes.insert(id, BTNode {
+            id,
+            node_type,
+            name: name.to_string(),
+            children: Vec::new(),
+            status: BTNodeStatus::Running,
+        });
+        if self.root_id.is_none() {
+            self.root_id = Some(id);
+        }
+        id
+    }
+
+    pub fn add_child(&mut self, parent: u64, child: u64) -> Result<(), String> {
+        let node = self.nodes.get_mut(&parent).ok_or("节点不存在")?;
+        node.children.push(child);
+        Ok(())
+    }
+
+    pub fn tick(&mut self, id: u64) -> BTNodeStatus {
+        let node = match self.nodes.get(&id) {
+            Some(n) => n.clone(),
+            None => return BTNodeStatus::Failure,
+        };
+        match node.node_type {
+            BTNodeType::Action => {
+                BTNodeStatus::Success
+            }
+            BTNodeType::Condition => {
+                BTNodeStatus::Success
+            }
+            BTNodeType::Selector => {
+                for child_id in &node.children {
+                    let status = self.tick(*child_id);
+                    if status == BTNodeStatus::Success {
+                        return BTNodeStatus::Success;
+                    }
+                }
+                BTNodeStatus::Failure
+            }
+            BTNodeType::Sequence => {
+                for child_id in &node.children {
+                    let status = self.tick(*child_id);
+                    if status != BTNodeStatus::Success {
+                        return status;
+                    }
+                }
+                BTNodeStatus::Success
+            }
+        }
+    }
+
+    pub fn node_count(&self) -> usize {
+        self.nodes.len()
+    }
+}
+
+// =====================================================================================
+// 元学习 (MetaLearning)
+// =====================================================================================
+
+/// 元学习策略。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MetaLearningStrategy {
+    MAML,       // Model-Agnostic Meta-Learning
+    Reptile,    // 简单的元学习算法
+    Prototypical, // 原型网络
+}
+
+/// 元学习状态。
+#[derive(Clone, Debug)]
+pub struct MetaLearningState {
+    pub strategy: MetaLearningStrategy,
+    pub tasks_seen: u64,
+    pub adaptation_steps: u64,
+    pub meta_gradient_steps: u64,
+    pub performance_history: Vec<f32>,
+}
+
+/// 元学习器：快速适应新任务的能力。
+pub struct MetaLearner {
+    pub state: MetaLearningState,
+    pub task_embeddings: BTreeMap<String, Vec<f32>>,
+}
+
+impl MetaLearner {
+    pub fn new() -> Self {
+        Self {
+            state: MetaLearningState {
+                strategy: MetaLearningStrategy::MAML,
+                tasks_seen: 0,
+                adaptation_steps: 0,
+                meta_gradient_steps: 0,
+                performance_history: Vec::new(),
+            },
+            task_embeddings: BTreeMap::new(),
+        }
+    }
+
+    pub fn set_strategy(&mut self, strategy: MetaLearningStrategy) {
+        self.state.strategy = strategy;
+    }
+
+    pub fn observe_task(&mut self, task_name: &str, embedding: Vec<f32>, performance: f32) {
+        self.state.tasks_seen += 1;
+        self.task_embeddings.insert(task_name.to_string(), embedding);
+        self.state.performance_history.push(performance);
+    }
+
+    pub fn adapt(&mut self, steps: u64) {
+        self.state.adaptation_steps += steps;
+        self.state.meta_gradient_steps += steps / 2;
+    }
+
+    pub fn predict_performance(&self, task_name: &str) -> f32 {
+        self.task_embeddings.get(task_name)
+            .map(|_| 0.8) // 简化：返回固定预测值
+            .unwrap_or(0.5)
+    }
+
+    pub fn tasks_seen(&self) -> u64 {
+        self.state.tasks_seen
+    }
+}
+
+// =====================================================================================
+// 心智扩展测试
+// =====================================================================================
+
+#[cfg(test)]
+mod advanced_tests {
+    use super::*;
+
+    #[test]
+    fn bias_system() {
+        let mut bias = CognitiveBiasSystem::new();
+        assert!((bias.bias_strength(BiasType::LossAversion) - 0.4).abs() < 1e-6);
+        bias.set_bias_strength(BiasType::LossAversion, 0.8);
+        assert!((bias.bias_strength(BiasType::LossAversion) - 0.8).abs() < 1e-6);
+        let adjusted = bias.apply_bias(BiasType::LossAversion, "loss_scenario", 0.8);
+        assert!(adjusted < 0.8); // 损失厌恶降低分数
+        assert_eq!(bias.record_count(), 1);
+    }
+
+    #[test]
+    fn decision_tree() {
+        let mut tree = DecisionTree::new();
+        let root = tree.add_node(Some("is_human".into()), None).unwrap();
+        let left = tree.add_node(None, Some("treat_as_human".into())).unwrap();
+        let right = tree.add_node(None, Some("treat_as_object".into())).unwrap();
+        tree.link_left(root, left).unwrap();
+        tree.link_right(root, right).unwrap();
+        assert_eq!(tree.node_count(), 3);
+        let result = tree.evaluate("is_human=true").unwrap();
+        assert_eq!(result, "treat_as_human");
+        let result2 = tree.evaluate("is_robot=true").unwrap();
+        assert_eq!(result2, "treat_as_object");
+    }
+
+    #[test]
+    fn behavior_tree() {
+        let mut bt = BehaviorTree::new();
+        let root = bt.add_node(BTNodeType::Selector, "root").unwrap();
+        let child1 = bt.add_node(BTNodeType::Action, "action1").unwrap();
+        let child2 = bt.add_node(BTNodeType::Action, "action2").unwrap();
+        bt.add_child(root, child1).unwrap();
+        bt.add_child(root, child2).unwrap();
+        assert_eq!(bt.node_count(), 3);
+        let status = bt.tick(root);
+        assert_eq!(status, BTNodeStatus::Success);
+    }
+
+    #[test]
+    fn metalearner() {
+        let mut ml = MetaLearner::new();
+        ml.observe_task("task_a", vec![0.1, 0.2, 0.3], 0.85);
+        ml.observe_task("task_b", vec![0.4, 0.5, 0.6], 0.75);
+        assert_eq!(ml.tasks_seen(), 2);
+        let pred = ml.predict_performance("task_a");
+        assert!((pred - 0.8).abs() < 1e-6);
+        let pred_unknown = ml.predict_performance("task_c");
+        assert!((pred_unknown - 0.5).abs() < 1e-6);
+        ml.adapt(10);
+        assert_eq!(ml.state.adaptation_steps, 10);
+        assert_eq!(ml.state.meta_gradient_steps, 5);
+    }
+
+    #[test]
+    fn bias_types() {
+        assert_eq!(BiasType::Confirmation as u32, 0);
+        assert_eq!(BiasType::Framing as u32, 5);
+    }
+
+    #[test]
+    fn bt_node_types() {
+        assert_eq!(BTNodeType::Selector as u32, 0);
+        assert_eq!(BTNodeType::Condition as u32, 3);
+    }
+
+    #[test]
+    fn bt_statuses() {
+        assert_eq!(BTNodeStatus::Success as u32, 0);
+        assert_eq!(BTNodeStatus::Running as u32, 2);
+    }
+
+    #[test]
+    fn metalearning_strategies() {
+        assert_eq!(MetaLearningStrategy::MAML as u32, 0);
+        assert_eq!(MetaLearningStrategy::Prototypical as u32, 2);
+    }
+}
