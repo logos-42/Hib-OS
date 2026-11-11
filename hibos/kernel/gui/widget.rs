@@ -1,4 +1,4 @@
-//! GUI 控件库 —— 声明式控件 + 像素级渲染 + 焦点/事件分发。
+﻿//! GUI 控件库 —— 声明式控件 + 像素级渲染 + 焦点/事件分发。
 //!
 //! 提供 Button / Label / TextEntry / Checkbox / RadioButton / ComboBox /
 //! Slider / ProgressBar / ScrollBar / Panel / Tab 十一种控件，以及
@@ -1198,7 +1198,7 @@ pub fn widget_act(payload: &str) -> Result<String, String> {
             }
         }
         "set_enabled" => {
-            let id: u64 = it.next().ok_or("缺少 id")?.parse().map_err(|e| e.to_string())?;
+            let id: u64 = it.next().ok_or("缺少 id")?.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
             let enabled = it.next().unwrap_or("1") == "1";
             if m.set_enabled(id, enabled) {
                 Ok(format!("控件 #{} enabled={}", id, enabled))
@@ -1207,7 +1207,7 @@ pub fn widget_act(payload: &str) -> Result<String, String> {
             }
         }
         "set_visible" => {
-            let id: u64 = it.next().ok_or("缺少 id")?.parse().map_err(|e| e.to_string())?;
+            let id: u64 = it.next().ok_or("缺少 id")?.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
             let visible = it.next().unwrap_or("1") == "1";
             if m.set_visible(id, visible) {
                 Ok(format!("控件 #{} visible={}", id, visible))
@@ -1216,7 +1216,7 @@ pub fn widget_act(payload: &str) -> Result<String, String> {
             }
         }
         "focus" => {
-            let id: u64 = it.next().ok_or("缺少 id")?.parse().map_err(|e| e.to_string())?;
+            let id: u64 = it.next().ok_or("缺少 id")?.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
             if m.focus(id) {
                 Ok(format!("控件 #{} 已获焦点", id))
             } else {
@@ -1224,7 +1224,7 @@ pub fn widget_act(payload: &str) -> Result<String, String> {
             }
         }
         "blur" => {
-            let id: u64 = it.next().ok_or("缺少 id")?.parse().map_err(|e| e.to_string())?;
+            let id: u64 = it.next().ok_or("缺少 id")?.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
             if m.blur(id) {
                 Ok(format!("控件 #{} 已失焦点", id))
             } else {

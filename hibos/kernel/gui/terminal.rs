@@ -1,4 +1,4 @@
-//! 终端仿真器 —— ANSI 转义码解析、字符单元格缓冲、滚动历史、选中与剪贴板。
+﻿//! 终端仿真器 —— ANSI 转义码解析、字符单元格缓冲、滚动历史、选中与剪贴板。
 //!
 //! `Terminal` 提供：
 //! * `write(data)` —— 写入原始字节，交给 `AnsiParser` 解析
@@ -1036,20 +1036,20 @@ pub fn terminal_act(payload: &str) -> Result<String, String> {
                 .ok_or("缺少 rows")?
                 .parse::<usize>()
                 .map_err(|e| e.to_string())?;
-            let cols: usize = it.next().ok_or("缺少 cols")?.parse().map_err(|e| e.to_string())?;
+            let cols: usize = it.next().ok_or("缺少 cols")?.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
             t.resize(rows, cols);
             Ok(format!("终端已调整为 {}x{}", rows, cols))
         }
         "scroll" => {
-            let n: usize = it.next().ok_or("缺少 n")?.parse().map_err(|e| e.to_string())?;
+            let n: usize = it.next().ok_or("缺少 n")?.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
             t.scroll(n);
             Ok(format!("已滚动 {} 行", n))
         }
         "select" => {
-            let r1: usize = it.next().ok_or("缺少 r1")?.parse().map_err(|e| e.to_string())?;
-            let c1: usize = it.next().ok_or("缺少 c1")?.parse().map_err(|e| e.to_string())?;
-            let r2: usize = it.next().ok_or("缺少 r2")?.parse().map_err(|e| e.to_string())?;
-            let c2: usize = it.next().ok_or("缺少 c2")?.parse().map_err(|e| e.to_string())?;
+            let r1: usize = it.next().ok_or("缺少 r1")?.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
+            let c1: usize = it.next().ok_or("缺少 c1")?.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
+            let r2: usize = it.next().ok_or("缺少 r2")?.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
+            let c2: usize = it.next().ok_or("缺少 c2")?.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
             t.copy((r1, c1), (r2, c2));
             Ok(format!("已选中并复制 ({},{})->({},{})", r1, c1, r2, c2))
         }

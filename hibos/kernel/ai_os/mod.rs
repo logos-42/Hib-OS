@@ -42,6 +42,7 @@ pub mod net_ai;
 pub mod driver_ai;
 pub mod shell_ai;
 pub mod gui_ai;
+pub mod monitoring;
 
 /// AI 原生子系统初始化：在 `kernel::boot_subsystems` 或 shell 启动时调用一次。
 pub fn init() {
@@ -71,6 +72,7 @@ pub fn init() {
     driver_ai::init();
     shell_ai::init();
     gui_ai::init();
+    monitoring::init();
 }
 
 /// 聚合状态摘要，供 `sense aios://status` 使用。
@@ -102,6 +104,7 @@ pub fn status() -> String {
     lines.push(format!("driver_ai={}", driver_ai::status()));
     lines.push(format!("shell_ai={}", shell_ai::status()));
     lines.push(format!("gui_ai={}", gui_ai::status()));
+    lines.push(format!("monitoring={}", monitoring::status()));
     lines.join(" | ")
 }
 
@@ -139,5 +142,6 @@ mod tests {
         assert!(s.contains("driver_ai="));
         assert!(s.contains("shell_ai="));
         assert!(s.contains("gui_ai="));
+        assert!(s.contains("monitoring="));
     }
 }

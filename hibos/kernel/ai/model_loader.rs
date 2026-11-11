@@ -1,4 +1,4 @@
-//! 模型加载器 —— GGUF/ONNX/RawTensor 模型加载、张量视图、量化与元数据。
+﻿//! 模型加载器 —— GGUF/ONNX/RawTensor 模型加载、张量视图、量化与元数据。
 //!
 //! `ModelLoader` 提供 `load` / `unload` / `get_tensor` / `get_metadata` /
 //! `quantize` / `dequantize`。`TensorView` 描述形状、数据类型、数据指针与步长；
@@ -515,7 +515,7 @@ pub fn model_loader_act(payload: &str) -> Result<String, String> {
             Ok(format!("已加载模型 #{} ({})", id, path))
         }
         "unload" => {
-            let id: u64 = it.next().ok_or("缺少 id")?.parse().map_err(|e| e.to_string())?;
+            let id: u64 = it.next().ok_or("缺少 id")?.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
             if l.unload(id) {
                 Ok(format!("已卸载模型 #{}", id))
             } else {
@@ -523,7 +523,7 @@ pub fn model_loader_act(payload: &str) -> Result<String, String> {
             }
         }
         "get_tensor" => {
-            let id: u64 = it.next().ok_or("缺少 id")?.parse().map_err(|e| e.to_string())?;
+            let id: u64 = it.next().ok_or("缺少 id")?.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
             let name = it.next().ok_or("缺少张量名")?;
             match l.get_tensor(id, name) {
                 Some(t) => Ok(format!(
@@ -537,7 +537,7 @@ pub fn model_loader_act(payload: &str) -> Result<String, String> {
             }
         }
         "metadata" => {
-            let id: u64 = it.next().ok_or("缺少 id")?.parse().map_err(|e| e.to_string())?;
+            let id: u64 = it.next().ok_or("缺少 id")?.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
             match l.get_metadata(id) {
                 Some(meta) => Ok(format!(
                     "模型 {} v{} 参数={} 显存={} 输入={:?} 输出={:?}",
@@ -547,13 +547,13 @@ pub fn model_loader_act(payload: &str) -> Result<String, String> {
             }
         }
         "quantize" => {
-            let id: u64 = it.next().ok_or("缺少 id")?.parse().map_err(|e| e.to_string())?;
+            let id: u64 = it.next().ok_or("缺少 id")?.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
             let bits: u32 = it.next().and_then(|v| v.parse().ok()).unwrap_or(8);
             let new_id = l.quantize(id, bits)?;
             Ok(format!("已量化模型 #{} -> #{} ({}位)", id, new_id, bits))
         }
         "dequantize" => {
-            let id: u64 = it.next().ok_or("缺少 id")?.parse().map_err(|e| e.to_string())?;
+            let id: u64 = it.next().ok_or("缺少 id")?.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
             let new_id = l.dequantize(id)?;
             Ok(format!("已反量化模型 #{} -> #{}", id, new_id))
         }

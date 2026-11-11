@@ -208,7 +208,7 @@ pub struct PCIDevice {
 }
 
 /// PCI 地址。
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct PCIBusAddr {
     pub bus: u8,
     pub device: u8,
@@ -1299,7 +1299,7 @@ impl DriverSignatureVerifier {
 // =====================================================================================
 
 /// 健康状态。
-#[derive=Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HealthStatus {
     Healthy,      // 健康
     Warning,      // 警告
@@ -1308,7 +1308,7 @@ pub enum HealthStatus {
 }
 
 /// 设备健康记录。
-#[derive=Clone, Debug)]
+#[derive(Clone, Debug)]
 pub struct DeviceHealthRecord {
     pub device_id: u64,
     pub status: HealthStatus,
@@ -1362,7 +1362,7 @@ impl DeviceHealthMonitor {
 // =====================================================================================
 
 /// 更新状态。
-#[derive=Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum UpdateStatus {
     Pending,      // 待处理
     Downloading,  // 下载中
@@ -1372,7 +1372,7 @@ pub enum UpdateStatus {
 }
 
 /// 固件更新记录。
-#[derive=Clone, Debug)]
+#[derive(Clone, Debug)]
 pub struct FirmwareUpdate {
     pub id: u64,
     pub device_id: u64,
@@ -1527,7 +1527,7 @@ mod advanced_tests {
 // =====================================================================================
 
 /// USB 设备类。
-#[derive=Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum USBDeviceClass {
     Audio,           // 音频
     CDC,             // 通信设备
@@ -1632,7 +1632,7 @@ impl USBController {
 // =====================================================================================
 
 /// 音频设备类型。
-#[derive=Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AudioDeviceType {
     Output,   // 输出
     Input,    // 输入
@@ -1640,7 +1640,7 @@ pub enum AudioDeviceType {
 }
 
 /// 音频设备。
-#[derive=Clone, Debug)]
+#[derive(Clone, Debug)]
 pub struct AudioDevice {
     pub id: u64,
     pub device_type: AudioDeviceType,
@@ -1725,7 +1725,7 @@ impl AudioDeviceManager {
 // =====================================================================================
 
 /// 显示接口类型。
-#[derive=Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DisplayInterface {
     HDMI,
     DisplayPort,
@@ -1735,7 +1735,7 @@ pub enum DisplayInterface {
 }
 
 /// 显示设备。
-#[derive=Clone, Debug)]
+#[derive(Clone, Debug)]
 pub struct DisplayDevice {
     pub id: u64,
     pub interface: DisplayInterface,
@@ -1818,7 +1818,7 @@ impl DisplayDeviceManager {
 // =====================================================================================
 
 /// 存储设备类型。
-#[derive=Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StorageDeviceType {
     HDD,       // 机械硬盘
     SSD,       // 固态硬盘
@@ -1828,7 +1828,7 @@ pub enum StorageDeviceType {
 }
 
 /// 存储设备。
-#[derive=Clone, Debug)]
+#[derive(Clone, Debug)]
 pub struct StorageDevice {
     pub id: u64,
     pub device_type: StorageDeviceType,

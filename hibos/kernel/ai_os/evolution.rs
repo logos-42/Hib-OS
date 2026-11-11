@@ -17,6 +17,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::sync::{Mutex, OnceLock};
+use crate::ai_os::model::fastrand_f32;
 
 // =====================================================================================
 // 进化基因组 (EvolutionGenome)
@@ -186,13 +187,7 @@ impl Mutator {
     }
 }
 
-// 简单的伪随机数生成器（避免外部依赖）
-fn fastrand_f32() -> f32 {
-    use std::sync::atomic::{AtomicU32, Ordering};
-    static COUNTER: AtomicU32 = AtomicU32::new(1);
-    let val = COUNTER.fetch_add(1, Ordering::Relaxed);
-    (val % 1000) as f32 / 1000.0
-}
+// 简单的伪随机数生成器（避免外部依赖）—— 已在文件顶部定义 fastrand_f32，此处复用。
 
 impl Default for Mutator {
     fn default() -> Self {
@@ -321,10 +316,11 @@ impl NaturalSelection {
                 dead.push(*id);
             }
         }
+        let dead_count = dead.len();
         for id in dead {
             self.population.remove(&id);
         }
-        self.extinction_events += dead.len() as u64;
+        self.extinction_events += dead_count as u64;
         survivors
     }
 
@@ -347,7 +343,7 @@ impl NaturalSelection {
     }
 
     pub fn best_fitness(&self) -> f32 {
-        self.population.values().map(|i| i.fitness).fold(0.0f32, f32::max)
+        self.population.values().map(|i| i.fitness).fold(0.0f32, |a, b| a.max(b))
     }
 }
 
@@ -1081,10 +1077,10 @@ impl GeneticAlgorithm {
     }
 
     pub fn rank_population(&mut self) {
-        let mut sorted: Vec<(u64, &IndividualFitness)> = self.population.iter()
-            .map(|(id, f)| (*id, f))
+        let mut sorted: Vec<(u64, f32)> = self.population.iter()
+            .map(|(id, f)| (*id, f.fitness))
             .collect();
-        sorted.sort_by(|a, b| b.1.fitness.partial_cmp(&a.1.fitness).unwrap_or(std::cmp::Ordering::Equal));
+        sorted.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         for (rank, (id, _)) in sorted.iter().enumerate() {
             if let Some(ind) = self.population.get_mut(id) {
                 ind.rank = rank as u64;
@@ -1143,7 +1139,7 @@ impl GeneticAlgorithm {
     }
 
     pub fn best_fitness(&self) -> f32 {
-        self.population.values().map(|f| f.fitness).fold(0.0f32, f32::max)
+        self.population.values().map(|f| f.fitness).fold(0.0f32, |a, b| a.max(b))
     }
 
     pub fn avg_fitness(&self) -> f32 {
@@ -1305,8 +1301,8 @@ impl PopulationDynamics {
         } else {
             fitnesses.iter().sum::<f32>() / fitnesses.len() as f32
         };
-        let max = fitnesses.iter().fold(0.0f32, f32::max);
-        let min = fitnesses.iter().fold(f32::INFINITY, f32::min);
+        let max = fitnesses.iter().fold(0.0f32, |a, b| a.max(*b));
+        let min = fitnesses.iter().fold(f32::INFINITY, |a, b| a.min(*b));
         let diversity = if fitnesses.len() > 1 {
             let mean = avg;
             let variance: f32 = fitnesses.iter().map(|f| (f - mean) * (f - mean)).sum::<f32>() / fitnesses.len() as f32;

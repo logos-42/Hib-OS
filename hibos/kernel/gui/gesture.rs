@@ -1,4 +1,4 @@
-//! 触摸与手势 —— 多指触点跟踪与手势识别。
+﻿//! 触摸与手势 —— 多指触点跟踪与手势识别。
 //!
 //! `GestureRecognizer` 接收 `touch_down` / `touch_move` / `touch_up`，在
 //! `recognize()` 时识别 Tap / DoubleTap / LongPress / Drag / Pinch / Zoom /
@@ -521,24 +521,24 @@ pub fn gesture_act(payload: &str) -> Result<String, String> {
                 .ok_or("缺少 id")?
                 .parse::<u64>()
                 .map_err(|e| e.to_string())?;
-            let x: i32 = it.next().ok_or("缺少 x")?.parse().map_err(|e| e.to_string())?;
-            let y: i32 = it.next().ok_or("缺少 y")?.parse().map_err(|e| e.to_string())?;
+            let x: i32 = it.next().ok_or("缺少 x")?.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
+            let y: i32 = it.next().ok_or("缺少 y")?.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
             let time: u64 = it.next().and_then(|v| v.parse().ok()).unwrap_or(0);
             gr.touch_down(id, x, y, time);
             Ok(format!("触点 #{} 按下 ({},{}) @{}", id, x, y, time))
         }
         "touch_move" => {
-            let id: u64 = it.next().ok_or("缺少 id")?.parse().map_err(|e| e.to_string())?;
-            let x: i32 = it.next().ok_or("缺少 x")?.parse().map_err(|e| e.to_string())?;
-            let y: i32 = it.next().ok_or("缺少 y")?.parse().map_err(|e| e.to_string())?;
+            let id: u64 = it.next().ok_or("缺少 id")?.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
+            let x: i32 = it.next().ok_or("缺少 x")?.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
+            let y: i32 = it.next().ok_or("缺少 y")?.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
             let time: u64 = it.next().and_then(|v| v.parse().ok()).unwrap_or(0);
             gr.touch_move(id, x, y, time);
             Ok(format!("触点 #{} 移动到 ({},{}) @{}", id, x, y, time))
         }
         "touch_up" => {
-            let id: u64 = it.next().ok_or("缺少 id")?.parse().map_err(|e| e.to_string())?;
-            let x: i32 = it.next().ok_or("缺少 x")?.parse().map_err(|e| e.to_string())?;
-            let y: i32 = it.next().ok_or("缺少 y")?.parse().map_err(|e| e.to_string())?;
+            let id: u64 = it.next().ok_or("缺少 id")?.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
+            let x: i32 = it.next().ok_or("缺少 x")?.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
+            let y: i32 = it.next().ok_or("缺少 y")?.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
             let time: u64 = it.next().and_then(|v| v.parse().ok()).unwrap_or(0);
             // 需要知道 down_time，这里简化：用 time - 100 作为 down_time。
             let down_time = time.saturating_sub(100);
@@ -561,7 +561,7 @@ pub fn gesture_act(payload: &str) -> Result<String, String> {
         }
         "config" => {
             let key = it.next().ok_or("缺少键")?;
-            let val: f64 = it.next().ok_or("缺少值")?.parse().map_err(|e| e.to_string())?;
+            let val: f64 = it.next().ok_or("缺少值")?.parse().map_err(|e: std::num::ParseFloatError| e.to_string())?;
             match key {
                 "tap_max_distance" => gr.config.tap_max_distance = val,
                 "long_press_min_ms" => gr.config.long_press_min_ms = val as u64,

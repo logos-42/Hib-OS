@@ -1,4 +1,4 @@
-//! 元认知 —— 自我监控、自我评估、自我修正与元学习。
+﻿//! 元认知 —— 自我监控、自我评估、自我修正与元学习。
 //!
 //! `Metacognition` 提供 `monitor`（思考/行动置信度） / `evaluate`（结果评估） /
 //! `self_correct`（自我修正） / `learn_from_experience`（从经验学习）。
@@ -375,12 +375,12 @@ pub fn metacognition_act(payload: &str) -> Result<String, String> {
             }
         }
         "threshold" => {
-            let t: f64 = it.next().ok_or("缺少阈值")?.parse().map_err(|e| e.to_string())?;
+            let t: f64 = it.next().ok_or("缺少阈值")?.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
             m.set_correction_threshold(t);
             Ok(format!("修正阈值 -> {:.2}", t))
         }
         "needs_correction" => {
-            let v: f64 = it.next().ok_or("缺少置信度")?.parse().map_err(|e| e.to_string())?;
+            let v: f64 = it.next().ok_or("缺少置信度")?.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
             let u: f64 = it.next().and_then(|v| v.parse().ok()).unwrap_or(0.2);
             let conf = Confidence::new(v, u);
             Ok(format!("需要修正={}", m.needs_correction(&conf)))

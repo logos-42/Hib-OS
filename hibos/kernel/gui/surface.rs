@@ -1,4 +1,4 @@
-//! 32bpp ARGB 表面 —— 图形栈真正的像素层。
+﻿//! 32bpp ARGB 表面 —— 图形栈真正的像素层。
 //!
 //! 与 `gpu::framebuffer` 的 1bpp 单色位图不同，这里是每个像素 32 位的真彩表面，
 //! 支持 alpha 混合、矩形填充、文本光栅化与 BMP 导出。窗口、合成器、壁纸
@@ -351,80 +351,6 @@ impl Surface {
         self.fill_rect(rect.x, rect.bottom() - 1, rect.w, 1, color);
         self.fill_rect(rect.x, rect.y, 1, rect.h, color);
         self.fill_rect(rect.right() - 1, rect.y, 1, rect.h, color);
-    }
-
-    /// 画一条直线（Bresenham 整数算法，无浮点、无依赖）。
-    ///
-    /// 供控件层绘制光标、分隔线、箭头等 1px 线条使用。
-    pub fn draw_line(&mut self, x0: i32, y0: i32, x1: i32, y1: i32, color: u32) {
-        let dx = (x1 - x0).abs();
-        let dy = -(y1 - y0).abs();
-        let sx = if x0 < x1 { 1 } else { -1 };
-        let sy = if y0 < y1 { 1 } else { -1 };
-        let mut err = dx + dy;
-        let mut x = x0;
-        let mut y = y0;
-        loop {
-            self.put(x, y, color);
-            if x == x1 && y == y1 {
-                break;
-            }
-            let e2 = 2 * err;
-            if e2 >= dy {
-                err += dy;
-                x += sx;
-            }
-            if e2 <= dx {
-                err += dx;
-                y += sy;
-            }
-        }
-    }
-
-    /// 画矩形边框，`thickness` 可调（1 = 细线，2 = 复选框边框）。
-    pub fn draw_rect(&mut self, x: i32, y: i32, w: u32, h: u32, color: u32, thickness: u32) {
-        if w == 0 || h == 0 {
-            return;
-        }
-        let t = thickness.max(1).min(w).min(h);
-        let ti = t as i32;
-        self.fill_rect(x, y, w, t, color);
-        self.fill_rect(x, y + h as i32 - ti, w, t, color);
-        self.fill_rect(x, y, t, h, color);
-        self.fill_rect(x + w as i32 - ti, y, t, h, color);
-    }
-
-    /// 画圆环（逐像素判定半径区间，够用且简单）。
-    pub fn draw_circle(&mut self, cx: i32, cy: i32, radius: i32, color: u32, thickness: u32) {
-        if radius <= 0 {
-            return;
-        }
-        let t = thickness.max(1) as i32;
-        let outer = radius * radius;
-        let inner = (radius - t).max(0).pow(2);
-        for y in -radius..=radius {
-            for x in -radius..=radius {
-                let d2 = x * x + y * y;
-                if d2 <= outer && d2 >= inner {
-                    self.put(cx + x, cy + y, color);
-                }
-            }
-        }
-    }
-
-    /// 画实心圆。
-    pub fn fill_circle(&mut self, cx: i32, cy: i32, radius: i32, color: u32) {
-        if radius <= 0 {
-            return;
-        }
-        let r2 = radius * radius;
-        for y in -radius..=radius {
-            for x in -radius..=radius {
-                if x * x + y * y <= r2 {
-                    self.put(cx + x, cy + y, color);
-                }
-            }
-        }
     }
 
     /// 圆角矩形（逐行内缩，无依赖）。

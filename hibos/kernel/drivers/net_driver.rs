@@ -1,4 +1,4 @@
-//! 网卡驱动框架（kernel/drivers/net_driver.rs）。
+﻿//! 网卡驱动框架（kernel/drivers/net_driver.rs）。
 //!
 //! 本模块实现网卡驱动抽象：驱动注册/探测/移除、发送/接收队列（环缓冲区描述符）、
 //! 中断处理、MAC 地址管理、链路状态（up/down）、多队支持简化版与流量控制（XON/XOFF 简化）。
@@ -451,13 +451,13 @@ pub fn net_driver_act_raw(payload: &str) -> Result<String, String> {
         }
         Some("remove") => {
             let id_s = it.next().ok_or("用法: remove <device_id>")?;
-            let id: u64 = id_s.parse().map_err(|e| e.to_string())?;
+            let id: u64 = id_s.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
             let mut drv = NetDriver::driver().lock().unwrap();
             drv.remove(DeviceId(id)).map(|()| format!("已移除设备 {:?}", id))
         }
         Some("mac") => {
             let id_s = it.next().ok_or("用法: mac <device_id> <xx:xx:xx:xx:xx:xx>")?;
-            let id: u64 = id_s.parse().map_err(|e| e.to_string())?;
+            let id: u64 = id_s.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
             let mac_s = it.next().ok_or("缺少 mac")?;
             let mac = parse_mac_driver(mac_s)?;
             let mut drv = NetDriver::driver().lock().unwrap();
@@ -465,7 +465,7 @@ pub fn net_driver_act_raw(payload: &str) -> Result<String, String> {
         }
         Some("link") => {
             let id_s = it.next().ok_or("用法: link <device_id> up|down")?;
-            let id: u64 = id_s.parse().map_err(|e| e.to_string())?;
+            let id: u64 = id_s.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
             let state_s = it.next().ok_or("缺少 up/down")?;
             let state = match state_s { "up" => LinkState::Up, "down" => LinkState::Down, _ => return Err("用法: link <id> up|down".to_string()) };
             let mut drv = NetDriver::driver().lock().unwrap();
@@ -473,7 +473,7 @@ pub fn net_driver_act_raw(payload: &str) -> Result<String, String> {
         }
         Some("irq") => {
             let id_s = it.next().ok_or("用法: irq <device_id>")?;
-            let id: u64 = id_s.parse().map_err(|e| e.to_string())?;
+            let id: u64 = id_s.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
             let mut drv = NetDriver::driver().lock().unwrap();
             drv.trigger_irq(DeviceId(id)).map(|()| format!("已向设备 {:?} 投递中断", id))
         }

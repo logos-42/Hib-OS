@@ -1,4 +1,4 @@
-//! 窗口管理器 —— 窗口生命周期、装饰绘制、焦点管理与 Z-order 排序。
+﻿//! 窗口管理器 —— 窗口生命周期、装饰绘制、焦点管理与 Z-order 排序。
 //!
 //! `WindowManager` 管理窗口的创建、显示/隐藏、关闭、聚焦、最小化/最大化/还原、
 //! 移动、缩放、Z-order 调整与自动布局。`Window` 包含标题栏、客户区、边框、
@@ -888,7 +888,7 @@ pub fn wm_act(payload: &str) -> Result<String, String> {
             }
         }
         "hide" => {
-            let id: u64 = it.next().ok_or("缺少 id")?.parse().map_err(|e| e.to_string())?;
+            let id: u64 = it.next().ok_or("缺少 id")?.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
             if m.hide(id) {
                 Ok(format!("窗口 #{} 已隐藏", id))
             } else {
@@ -896,7 +896,7 @@ pub fn wm_act(payload: &str) -> Result<String, String> {
             }
         }
         "close" => {
-            let id: u64 = it.next().ok_or("缺少 id")?.parse().map_err(|e| e.to_string())?;
+            let id: u64 = it.next().ok_or("缺少 id")?.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
             if m.close(id) {
                 Ok(format!("窗口 #{} 已关闭", id))
             } else {
@@ -904,7 +904,7 @@ pub fn wm_act(payload: &str) -> Result<String, String> {
             }
         }
         "focus" => {
-            let id: u64 = it.next().ok_or("缺少 id")?.parse().map_err(|e| e.to_string())?;
+            let id: u64 = it.next().ok_or("缺少 id")?.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
             if m.focus(id) {
                 Ok(format!("窗口 #{} 已聚焦", id))
             } else {
@@ -912,7 +912,7 @@ pub fn wm_act(payload: &str) -> Result<String, String> {
             }
         }
         "blur" => {
-            let id: u64 = it.next().ok_or("缺少 id")?.parse().map_err(|e| e.to_string())?;
+            let id: u64 = it.next().ok_or("缺少 id")?.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
             if m.blur(id) {
                 Ok(format!("窗口 #{} 已失焦点", id))
             } else {
@@ -920,7 +920,7 @@ pub fn wm_act(payload: &str) -> Result<String, String> {
             }
         }
         "minimize" => {
-            let id: u64 = it.next().ok_or("缺少 id")?.parse().map_err(|e| e.to_string())?;
+            let id: u64 = it.next().ok_or("缺少 id")?.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
             if m.minimize(id) {
                 Ok(format!("窗口 #{} 已最小化", id))
             } else {
@@ -928,7 +928,7 @@ pub fn wm_act(payload: &str) -> Result<String, String> {
             }
         }
         "maximize" => {
-            let id: u64 = it.next().ok_or("缺少 id")?.parse().map_err(|e| e.to_string())?;
+            let id: u64 = it.next().ok_or("缺少 id")?.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
             if m.maximize(id) {
                 Ok(format!("窗口 #{} 已最大化", id))
             } else {
@@ -936,7 +936,7 @@ pub fn wm_act(payload: &str) -> Result<String, String> {
             }
         }
         "restore" => {
-            let id: u64 = it.next().ok_or("缺少 id")?.parse().map_err(|e| e.to_string())?;
+            let id: u64 = it.next().ok_or("缺少 id")?.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
             if m.restore(id) {
                 Ok(format!("窗口 #{} 已还原", id))
             } else {
@@ -944,9 +944,9 @@ pub fn wm_act(payload: &str) -> Result<String, String> {
             }
         }
         "move" => {
-            let id: u64 = it.next().ok_or("缺少 id")?.parse().map_err(|e| e.to_string())?;
-            let x: i32 = it.next().ok_or("缺少 x")?.parse().map_err(|e| e.to_string())?;
-            let y: i32 = it.next().ok_or("缺少 y")?.parse().map_err(|e| e.to_string())?;
+            let id: u64 = it.next().ok_or("缺少 id")?.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
+            let x: i32 = it.next().ok_or("缺少 x")?.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
+            let y: i32 = it.next().ok_or("缺少 y")?.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
             if m.move_window(id, x, y) {
                 Ok(format!("窗口 #{} 已移动到 ({},{})", id, x, y))
             } else {
@@ -954,9 +954,9 @@ pub fn wm_act(payload: &str) -> Result<String, String> {
             }
         }
         "resize" => {
-            let id: u64 = it.next().ok_or("缺少 id")?.parse().map_err(|e| e.to_string())?;
-            let w: u32 = it.next().ok_or("缺少 w")?.parse().map_err(|e| e.to_string())?;
-            let h: u32 = it.next().ok_or("缺少 h")?.parse().map_err(|e| e.to_string())?;
+            let id: u64 = it.next().ok_or("缺少 id")?.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
+            let w: u32 = it.next().ok_or("缺少 w")?.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
+            let h: u32 = it.next().ok_or("缺少 h")?.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
             if m.resize(id, w, h) {
                 Ok(format!("窗口 #{} 已缩放到 {}x{}", id, w, h))
             } else {
@@ -964,8 +964,8 @@ pub fn wm_act(payload: &str) -> Result<String, String> {
             }
         }
         "z_order" => {
-            let id: u64 = it.next().ok_or("缺少 id")?.parse().map_err(|e| e.to_string())?;
-            let level: i32 = it.next().ok_or("缺少 level")?.parse().map_err(|e| e.to_string())?;
+            let id: u64 = it.next().ok_or("缺少 id")?.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
+            let level: i32 = it.next().ok_or("缺少 level")?.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
             if m.z_order(id, level) {
                 Ok(format!("窗口 #{} z_order={}", id, level))
             } else {
@@ -973,7 +973,7 @@ pub fn wm_act(payload: &str) -> Result<String, String> {
             }
         }
         "raise" => {
-            let id: u64 = it.next().ok_or("缺少 id")?.parse().map_err(|e| e.to_string())?;
+            let id: u64 = it.next().ok_or("缺少 id")?.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
             m.raise_to_top(id);
             Ok(format!("窗口 #{} 已置顶", id))
         }

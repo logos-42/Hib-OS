@@ -1158,7 +1158,7 @@ impl MultiHeadAttention {
             let max_score = scores.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
             let exp_sum: f32 = scores.iter().map(|s| (s - max_score).exp()).sum();
             for s in &mut scores {
-                *s = (s - max_score).exp() / exp_sum;
+                *s = (*s - max_score).exp() / exp_sum;
             }
             // 加权求和
             for (i, s) in scores.iter().enumerate() {

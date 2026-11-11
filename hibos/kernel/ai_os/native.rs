@@ -804,23 +804,26 @@ pub fn native_act(payload: &str) -> Result<String, String> {
             let b = it.next().and_then(|s| s.parse().ok()).unwrap_or(0.0);
             let mut eng = consciousness_engine().lock().unwrap();
             let quale = eng.factory.create_visual(r, g, b, 1.0);
+            let id = quale.id;
             eng.inject_qualia(quale)?;
-            Ok(format!("已注入视觉质原 id={} (r={} g={} b={})", quale.id, r, g, b))
+            Ok(format!("已注入视觉质原 id={} (r={} g={} b={})", id, r, g, b))
         }
         Some("inject-semantic") => {
             let concept = it.next().ok_or("用法: native:// inject-semantic <概念>")?;
             let mut eng = consciousness_engine().lock().unwrap();
             let quale = eng.factory.create_semantic(concept);
+            let id = quale.id;
             eng.inject_qualia(quale)?;
-            Ok(format!("已注入语义质原 id={} 概念={}", quale.id, concept))
+            Ok(format!("已注入语义质原 id={} 概念={}", id, concept))
         }
         Some("inject-emotion") => {
             let valence = it.next().and_then(|s| s.parse().ok()).unwrap_or(0.0);
             let arousal = it.next().and_then(|s| s.parse().ok()).unwrap_or(0.5);
             let mut eng = consciousness_engine().lock().unwrap();
             let quale = eng.factory.create_emotional(valence, arousal);
+            let id = quale.id;
             eng.inject_qualia(quale)?;
-            Ok(format!("已注入情感质原 id={} valence={} arousal={}", quale.id, valence, arousal))
+            Ok(format!("已注入情感质原 id={} valence={} arousal={}", id, valence, arousal))
         }
         Some("submit-workspace") => {
             let content = it.next().ok_or("用法: native:// submit-workspace <内容> <模态> <来源> <激活> <紧急>")?;

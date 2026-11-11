@@ -1,4 +1,4 @@
-//! 文件管理器应用 —— 浏览、复制、粘贴、删除、重命名、新建目录、搜索、拖拽。
+﻿//! 文件管理器应用 —— 浏览、复制、粘贴、删除、重命名、新建目录、搜索、拖拽。
 //!
 //! `FileManager` 提供类资源管理器的功能：
 //! * `browse(path)` 列出目录下的 `FileEntry`
@@ -561,6 +561,7 @@ impl FileManager {
         for entry in read_dir.flatten() {
             let path = entry.path();
             let name = entry.file_name().to_string_lossy().to_string();
+            let is_subdir = path.is_dir() && !path.is_symlink();
             if name.to_ascii_lowercase().contains(pat) {
                 let file_type = if path.is_dir() {
                     FileType::Directory
@@ -577,9 +578,9 @@ impl FileManager {
                     .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
                     .map(|d| d.as_secs())
                     .unwrap_or(0);
-                results.push(FileEntry::new(&name, path, file_type, size, modified));
+                results.push(FileEntry::new(&name, path.clone(), file_type, size, modified));
             }
-            if path.is_dir() && !path.is_symlink() {
+            if is_subdir {
                 Self::search_recursive(&path, pat, results);
             }
         }
@@ -728,7 +729,7 @@ pub fn file_manager_act(payload: &str) -> Result<String, String> {
         }
         "delete" => fm.delete().map(|n| format!("已删除 {} 个", n)),
         "rename" => {
-            let index: usize = it.next().ok_or("缺少索引")?.parse().map_err(|e| e.to_string())?;
+            let index: usize = it.next().ok_or("缺少索引")?.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
             let name = it.next().ok_or("缺少新名称")?;
             fm.rename(index, name)
         }
@@ -748,7 +749,7 @@ pub fn file_manager_act(payload: &str) -> Result<String, String> {
             fm.drag_drop(Path::new(src), Path::new(dst), move_mode)
         }
         "select" => {
-            let index: usize = it.next().ok_or("缺少索引")?.parse().map_err(|e| e.to_string())?;
+            let index: usize = it.next().ok_or("缺少索引")?.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
             fm.select_one(index);
             Ok(format!("已选中索引 {}", index))
         }

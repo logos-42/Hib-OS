@@ -7,12 +7,12 @@ use std::sync::Mutex;
 /// fork：克隆当前进程的 PCB（通道集合克隆），返回子进程 pid。
 pub fn fork(parent_pid: ProcessId) -> Result<ProcessId, String> {
     let mut g = pm_state().lock().unwrap();
+    let child_id = ProcessId::new(g.next_id);
+    g.next_id += 1;
     let parent = g
         .processes
         .get(&parent_pid)
         .ok_or("父进程不存在")?;
-    let child_id = ProcessId::new(g.next_id);
-    g.next_id += 1;
     let mut child = parent.clone();
     child.pid = child_id;
     child.parent = Some(parent_pid);

@@ -133,7 +133,7 @@ impl DmaTransferState {
 }
 
 /// 单个 DMA 传输记录。
-/// （callback 为 Box<dyn Fn>，不实现 Clone/Debug，故此处不派生。）
+/// （callback 为 `Arc<dyn Fn>`，不实现 Clone/Debug，故此处不派生。）
 pub struct DmaTransfer {
     pub id: DmaTransferId,
     pub channel: u8,
@@ -145,7 +145,7 @@ pub struct DmaTransfer {
     pub bytes_transferred: u64,
     pub error: Option<String>,
     /// 完成回调（传输完成后调用）。
-    pub callback: Option<Box<dyn Fn(DmaTransferId) + Send + Sync>>,
+    pub callback: Option<Arc<dyn Fn(DmaTransferId) + Send + Sync>>,
     /// 关联的中断线编号（完成后向该 IRQ 发信号，原始 u32，避免跨模块依赖）。
     pub completion_irq: Option<u32>,
 }
@@ -161,6 +161,17 @@ pub enum DmaChannelState {
     Busy,
     Paused,
     Error,
+}
+
+impl DmaChannelState {
+    pub fn name(self) -> &'static str {
+        match self {
+            DmaChannelState::Idle => "IDLE",
+            DmaChannelState::Busy => "BUSY",
+            DmaChannelState::Paused => "PAUSED",
+            DmaChannelState::Error => "ERROR",
+        }
+    }
 }
 
 /// 单个 DMA 通道：维护当前传输、已传输字节、错误计数。
@@ -203,7 +214,7 @@ pub struct DmaEngine {
     /// 下一个通道索引。
     pub next_channel: u8,
     /// 传输完成回调注册表（传输 ID -> 回调）。
-    pub completion_callbacks: HashMap<DmaTransferId, Box<dyn Fn(DmaTransferId) + Send + Sync>>,
+    pub completion_callbacks: HashMap<DmaTransferId, Arc<dyn Fn(DmaTransferId) + Send + Sync>>,
     /// 统计。
     pub stats: DmaStats,
 }
@@ -301,12 +312,12 @@ impl DmaEngine {
 
     /// 为指定传输注册完成回调（传输完成后调用）。
     pub fn register_completion_callback(
-        &mut self, id: DmaTransferId, callback: Box<dyn Fn(DmaTransferId) + Send + Sync>,
+        &mut self, id: DmaTransferId, callback: Arc<dyn Fn(DmaTransferId) + Send + Sync>,
     ) -> Result<(), String> {
         if !self.transfers.contains_key(&id) {
             return Err(format!("DMA 传输 {:?} 不存在", id));
         }
-        self.completion_callbacks.insert(id, callback);
+        self.completion_callbacks.insert(id, callback.clone());
         if let Some(t) = self.transfers.get_mut(&id) {
             t.callback = Some(callback);
         }
@@ -438,7 +449,7 @@ pub fn dma_act_raw(payload: &str) -> Result<String, String> {
             Ok(e.status())
         }
         Some("chan") => {
-            let idx: u8 = it.next().ok_or("用法: chan <index>")?.parse()?;
+            let idx: u8 = it.next().ok_or("用法: chan <index>")?.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
             let e = DmaEngine::engine().lock().unwrap();
             match e.channels.get(&idx) {
                 Some(c) => Ok(format!("DMA 通道 {} state={} queued={} bytes={}", c.index, c.state.name(), c.queue.len(), c.bytes_transferred)),
@@ -450,7 +461,7 @@ pub fn dma_act_raw(payload: &str) -> Result<String, String> {
             if !caps::caps().lock().unwrap().has("CAP_SYS_RAWIO") {
                 return Err("dma submit 需要 CAP_SYS_RAWIO 能力".to_string());
             }
-            let channel: u8 = it.next().ok_or("用法: submit <channel> <dir> <addr:len[,...]> [irq]")?.parse()?;
+            let channel: u8 = it.next().ok_or("用法: submit <channel> <dir> <addr:len[,...]> [irq]")?.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
             let dir_s = it.next().ok_or("缺少方向 (dev2mem|mem2dev)")?;
             let direction = match dir_s {
                 "dev2mem" => DmaDirection::DevToMem,
@@ -473,12 +484,12 @@ pub fn dma_act_raw(payload: &str) -> Result<String, String> {
             Ok(format!("DMA 传输已提交 {:?} ch={} dir={:?}", id, channel, direction))
         }
         Some("pause") => {
-            let ch: u8 = it.next().ok_or("用法: pause <channel>")?.parse()?;
+            let ch: u8 = it.next().ok_or("用法: pause <channel>")?.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
             let mut e = DmaEngine::engine().lock().unwrap();
             e.dma_pause_channel(ch).map(|()| format!("DMA 通道 {} 已暂停", ch))
         }
         Some("resume") => {
-            let ch: u8 = it.next().ok_or("用法: resume <channel>")?.parse()?;
+            let ch: u8 = it.next().ok_or("用法: resume <channel>")?.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
             let mut e = DmaEngine::engine().lock().unwrap();
             e.dma_resume_channel(ch).map(|()| format!("DMA 通道 {} 已恢复", ch))
         }
@@ -588,7 +599,7 @@ mod tests {
         let id = e.dma_submit(test_owner(), ch, DmaDirection::DevToMem, sg, None).unwrap();
         let fired = Arc::new(AtomicU64::new(0));
         let fired2 = fired.clone();
-        e.register_completion_callback(id, Box::new(move |_| { fired2.fetch_add(1, Ordering::SeqCst); })).unwrap();
+        e.register_completion_callback(id, Arc::new(move |_| { fired2.fetch_add(1, Ordering::SeqCst); })).unwrap();
         assert_eq!(fired.load(Ordering::SeqCst), 0);
         e.dma_poll();
         assert_eq!(fired.load(Ordering::SeqCst), 1);

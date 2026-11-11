@@ -651,12 +651,13 @@ impl TemporalEngine {
         self.scheduler.schedule_periodic(name, self.now_ns + delay_ns, interval_ns, action)
     }
 
-    pub fn due_tasks(&mut self) -> Vec<&ScheduledTask> {
-        let due = self.scheduler.due_tasks(self.now_ns);
-        for task in &due {
+    pub fn due_tasks(&mut self) -> Vec<ScheduledTask> {
+        let due: Vec<&ScheduledTask> = self.scheduler.due_tasks(self.now_ns);
+        let cloned: Vec<ScheduledTask> = due.iter().map(|t| (*t).clone()).collect();
+        for task in &cloned {
             self.scheduler.mark_executed(task.id);
         }
-        due
+        cloned
     }
 
     pub fn bind_event(&mut self, event_id: u64, offset_ns: u128, binding_type: &str) -> u64 {

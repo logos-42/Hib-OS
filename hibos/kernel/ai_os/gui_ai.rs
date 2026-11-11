@@ -428,7 +428,7 @@ impl AILayout {
 // =====================================================================================
 
 /// 输入模态。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum InputModality {
     Touch,    // 触摸
     Pen,      // 手写笔
@@ -1130,7 +1130,7 @@ mod tests {
 // =====================================================================================
 
 /// 布局约束。
-#[derive=Clone, Debug)]
+#[derive(Clone, Debug)]
 pub struct LayoutConstraint {
     pub min_width: u32,
     pub min_height: u32,
@@ -1192,7 +1192,7 @@ impl WindowLayoutManager {
 // =====================================================================================
 
 /// 动画类型。
-#[derive=Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AnimationType {
     Fade,       // 淡入淡出
     Slide,      // 滑动
@@ -1201,7 +1201,7 @@ pub enum AnimationType {
 }
 
 /// 动画帧。
-#[derive=Clone, Debug)]
+#[derive(Clone, Debug)]
 pub struct AnimationFrame {
     pub frame_id: u64,
     pub animation_type: AnimationType,
@@ -1268,7 +1268,7 @@ impl ThemeAnimator {
 // =====================================================================================
 
 /// 事件优先级。
-#[derive=Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum EventPriority {
     Low,       // 低
     Normal,    // 普通
@@ -1277,7 +1277,7 @@ pub enum EventPriority {
 }
 
 /// 输入事件队列项。
-#[derive=Clone, Debug)]
+#[derive(Clone, Debug)]
 pub struct QueuedInputEvent {
     pub id: u64,
     pub event_type: String,
@@ -1335,7 +1335,7 @@ impl InputEventQueue {
 // =====================================================================================
 
 /// 渲染命令。
-#[derive=Clone, Debug)]
+#[derive(Clone, Debug)]
 pub struct RenderCommand {
     pub id: u64,
     pub command_type: String,
@@ -1481,350 +1481,3 @@ mod advanced_tests {
 // 窗口布局管理器 (WindowLayoutManager)
 // =====================================================================================
 
-/// 布局约束。
-#[derive=Clone, Debug)]
-pub struct LayoutConstraint {
-    pub min_width: u32,
-    pub min_height: u32,
-    pub max_width: u32,
-    pub max_height: u32,
-    pub preferred_width: u32,
-    pub preferred_height: u32,
-}
-
-/// 窗口布局管理器：管理窗口位置和大小。
-pub struct WindowLayoutManager {
-    pub layouts: BTreeMap<u64, LayoutConstraint>,
-    pub next_id: u64,
-}
-
-impl WindowLayoutManager {
-    pub fn new() -> Self {
-        Self {
-            layouts: BTreeMap::new(),
-            next_id: 1,
-        }
-    }
-
-    pub fn set_constraints(&mut self, window_id: u64, min_w: u32, min_h: u32, max_w: u32, max_h: u32, pref_w: u32, pref_h: u32) -> u64 {
-        let id = self.next_id;
-        self.next_id += 1;
-        self.layouts.insert(window_id, LayoutConstraint {
-            min_width: min_w,
-            min_height: min_h,
-            max_width: max_w,
-            max_height: max_h,
-            preferred_width: pref_w,
-            preferred_height: pref_h,
-        });
-        id
-    }
-
-    pub fn get_constraints(&self, window_id: u64) -> Option<&LayoutConstraint> {
-        self.layouts.get(&window_id)
-    }
-
-    pub fn resize_window(&self, window_id: u64, requested_w: u32, requested_h: u32) -> (u32, u32) {
-        if let Some(c) = self.layouts.get(&window_id) {
-            let w = requested_w.clamp(c.min_width, c.max_width);
-            let h = requested_h.clamp(c.min_height, c.max_height);
-            (w, h)
-        } else {
-            (requested_w, requested_h)
-        }
-    }
-
-    pub fn layout_count(&self) -> usize {
-        self.layouts.len()
-    }
-}
-
-// =====================================================================================
-// 主题动画 (ThemeAnimation)
-// =====================================================================================
-
-/// 动画类型。
-#[derive=Clone, Copy, Debug, PartialEq, Eq)]
-pub enum AnimationType {
-    Fade,
-    Slide,
-    Scale,
-    Rotate,
-}
-
-/// 动画帧。
-#[derive(Clone, Debug)]
-pub struct AnimationFrame {
-    pub frame_id: u64,
-    pub animation_type: AnimationType,
-    pub progress: f32,
-    pub timestamp_ns: u128,
-}
-
-/// 主题动画器：管理 UI 动画效果。
-pub struct ThemeAnimator {
-    pub animations: BTreeMap<u64, AnimationFrame>,
-    pub next_id: u64,
-    pub active_animations: BTreeSet<u64>,
-}
-
-impl ThemeAnimator {
-    pub fn new() -> Self {
-        Self {
-            animations: BTreeMap::new(),
-            next_id: 1,
-            active_animations: BTreeSet::new(),
-        }
-    }
-
-    pub fn start(&mut self, animation_type: AnimationType) -> u64 {
-        let id = self.next_id;
-        self.next_id += 1;
-        self.animations.insert(id, AnimationFrame {
-            frame_id: id,
-            animation_type,
-            progress: 0.0,
-            timestamp_ns: crate::ai_os::native::now_ns(),
-        });
-        self.active_animations.insert(id);
-        id
-    }
-
-    pub fn update_progress(&mut self, id: u64, progress: f32) -> bool {
-        if let Some(anim) = self.animations.get_mut(&id) {
-            anim.progress = progress.clamp(0.0, 1.0);
-            if progress >= 1.0 {
-                self.active_animations.remove(&id);
-            }
-            true
-        } else {
-            false
-        }
-    }
-
-    pub fn get_progress(&self, id: u64) -> Option<f32> {
-        self.animations.get(&id).map(|a| a.progress)
-    }
-
-    pub fn active_count(&self) -> usize {
-        self.active_animations.len()
-    }
-
-    pub fn animation_count(&self) -> usize {
-        self.animations.len()
-    }
-}
-
-// =====================================================================================
-// 输入事件队列 (InputEventQueue)
-// =====================================================================================
-
-/// 事件优先级。
-#[derive=Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub enum EventPriority {
-    Low,
-    Normal,
-    High,
-    Critical,
-}
-
-/// 输入事件队列项。
-#[derive(Clone, Debug)]
-pub struct QueuedInputEvent {
-    pub id: u64,
-    pub event_type: String,
-    pub priority: EventPriority,
-    pub timestamp_ns: u128,
-    pub data: String,
-}
-
-/// 输入事件队列：管理输入事件的优先级调度。
-pub struct InputEventQueue {
-    pub queue: BTreeMap<(EventPriority, u64), QueuedInputEvent>,
-    pub next_id: u64,
-}
-
-impl InputEventQueue {
-    pub fn new() -> Self {
-        Self {
-            queue: BTreeMap::new(),
-            next_id: 1,
-        }
-    }
-
-    pub fn enqueue(&mut self, event_type: &str, priority: EventPriority, data: &str) -> u64 {
-        let id = self.next_id;
-        self.next_id += 1;
-        self.queue.insert((priority, id), QueuedInputEvent {
-            id,
-            event_type: event_type.to_string(),
-            priority,
-            timestamp_ns: crate::ai_os::native::now_ns(),
-            data: data.to_string(),
-        });
-        id
-    }
-
-    pub fn dequeue(&mut self) -> Option<QueuedInputEvent> {
-        if let Some((key, _)) = self.queue.iter().next() {
-            let key = *key;
-            return self.queue.remove(&key);
-        }
-        None
-    }
-
-    pub fn queue_size(&self) -> usize {
-        self.queue.len()
-    }
-
-    pub fn clear(&mut self) {
-        self.queue.clear();
-    }
-}
-
-// =====================================================================================
-// 画布渲染 (CanvasRendering)
-// =====================================================================================
-
-/// 渲染命令。
-#[derive(Clone, Debug)]
-pub struct RenderCommand {
-    pub id: u64,
-    pub command_type: String,
-    pub parameters: Vec<f32>,
-    pub timestamp_ns: u128,
-}
-
-/// 画布渲染器：执行图形渲染命令。
-pub struct CanvasRenderer {
-    pub commands: Vec<RenderCommand>,
-    pub next_id: u64,
-    pub canvas_width: u32,
-    pub canvas_height: u32,
-}
-
-impl CanvasRenderer {
-    pub fn new(width: u32, height: u32) -> Self {
-        Self {
-            commands: Vec::new(),
-            next_id: 1,
-            canvas_width: width,
-            canvas_height: height,
-        }
-    }
-
-    pub fn draw_line(&mut self, x1: f32, y1: f32, x2: f32, y2: f32) -> u64 {
-        let id = self.next_id;
-        self.next_id += 1;
-        self.commands.push(RenderCommand {
-            id,
-            command_type: "draw_line".to_string(),
-            parameters: vec![x1, y1, x2, y2],
-            timestamp_ns: crate::ai_os::native::now_ns(),
-        });
-        id
-    }
-
-    pub fn draw_rect(&mut self, x: f32, y: f32, w: f32, h: f32) -> u64 {
-        let id = self.next_id;
-        self.next_id += 1;
-        self.commands.push(RenderCommand {
-            id,
-            command_type: "draw_rect".to_string(),
-            parameters: vec![x, y, w, h],
-            timestamp_ns: crate::ai_os::native::now_ns(),
-        });
-        id
-    }
-
-    pub fn clear(&mut self) {
-        self.commands.clear();
-    }
-
-    pub fn command_count(&self) -> usize {
-        self.commands.len()
-    }
-
-    pub fn canvas_size(&self) -> (u32, u32) {
-        (self.canvas_width, self.canvas_height)
-    }
-}
-
-// =====================================================================================
-// GUI 扩展测试
-// =====================================================================================
-
-#[cfg(test)]
-mod advanced_tests {
-    use super::*;
-
-    #[test]
-    fn window_layout_manager() {
-        let mut wlm = WindowLayoutManager::new();
-        let id = wlm.set_constraints(1, 100, 100, 800, 600, 400, 300);
-        assert_eq!(id, 1);
-        let constraints = wlm.get_constraints(1).unwrap();
-        assert_eq!(constraints.min_width, 100);
-        assert_eq!(constraints.preferred_width, 400);
-        let (w, h) = wlm.resize_window(1, 50, 50);
-        assert_eq!((w, h), (100, 100));
-        let (w, h) = wlm.resize_window(1, 2000, 2000);
-        assert_eq!((w, h), (800, 600));
-        assert_eq!(wlm.layout_count(), 1);
-    }
-
-    #[test]
-    fn theme_animator() {
-        let mut ta = ThemeAnimator::new();
-        let id1 = ta.start(AnimationType::Fade);
-        let id2 = ta.start(AnimationType::Slide);
-        assert_eq!(id1, 1);
-        assert_eq!(id2, 2);
-        assert_eq!(ta.active_count(), 2);
-        ta.update_progress(id1, 0.5);
-        assert_eq!(ta.get_progress(id1), Some(0.5));
-        ta.update_progress(id1, 1.0);
-        assert_eq!(ta.active_count(), 1);
-        assert_eq!(ta.animation_count(), 2);
-    }
-
-    #[test]
-    fn input_event_queue() {
-        let mut ieq = InputEventQueue::new();
-        ieq.enqueue("click", EventPriority::Critical, "button1");
-        ieq.enqueue("keypress", EventPriority::Low, "key_a");
-        ieq.enqueue("mouse_move", EventPriority::Normal, "100,200");
-        assert_eq!(ieq.queue_size(), 3);
-        let event = ieq.dequeue().unwrap();
-        assert_eq!(event.priority, EventPriority::Critical);
-        let event = ieq.dequeue().unwrap();
-        assert_eq!(event.priority, EventPriority::Normal);
-        ieq.clear();
-        assert_eq!(ieq.queue_size(), 0);
-    }
-
-    #[test]
-    fn canvas_renderer() {
-        let mut cr = CanvasRenderer::new(800, 600);
-        let id1 = cr.draw_line(0.0, 0.0, 100.0, 100.0);
-        let id2 = cr.draw_rect(10.0, 10.0, 50.0, 50.0);
-        assert_eq!(id1, 1);
-        assert_eq!(id2, 2);
-        assert_eq!(cr.command_count(), 2);
-        assert_eq!(cr.canvas_size(), (800, 600));
-        cr.clear();
-        assert_eq!(cr.command_count(), 0);
-    }
-
-    #[test]
-    fn animation_types() {
-        assert_eq!(AnimationType::Fade as u32, 0);
-        assert_eq!(AnimationType::Rotate as u32, 3);
-    }
-
-    #[test]
-    fn event_priorities() {
-        assert_eq!(EventPriority::Low as u32, 0);
-        assert_eq!(EventPriority::Critical as u32, 3);
-    }
-}

@@ -60,7 +60,7 @@ impl AgentIdentity {
 // =====================================================================================
 
 /// 消息类型。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum MessageType {
     Request,    // 请求
     Response,   // 响应
@@ -903,11 +903,12 @@ pub fn society_act(payload: &str) -> Result<String, String> {
                 "value" => ConflictType::Value,
                 _ => ConflictType::Resource,
             };
-            let agents: Vec<u64> = it.filter_map(|s| s.parse().ok()).collect();
+            let rest: Vec<&str> = it.collect();
+            let agents: Vec<u64> = rest.iter().filter_map(|s| s.parse().ok()).collect();
             if agents.len() < 2 {
                 return Err("需要至少2个智能体id".into());
             }
-            let description: String = it.collect::<Vec<&str>>().join(" ");
+            let description: String = rest.join(" ");
             let mut eng = society_engine().lock().unwrap();
             let id = eng.report_conflict(ctype, agents, &description);
             Ok(format!("已报告冲突 id={} 类型={:?}", id, ctype))
@@ -1395,8 +1396,9 @@ impl LeaderElection {
         }
         if let Some(leader) = best {
             self.current_leader = Some(leader);
+            let is_leader_id = self.agents.keys().next().copied().unwrap_or(0);
             for state in self.agents.values_mut() {
-                *state = if *leader == self.agents.keys().next().copied().unwrap_or(0) {
+                *state = if leader == is_leader_id {
                     ElectionState::Leader
                 } else {
                     ElectionState::Follower

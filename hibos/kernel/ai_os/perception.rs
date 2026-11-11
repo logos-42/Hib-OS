@@ -191,7 +191,7 @@ impl PerceptionEvent {
 // =====================================================================================
 
 /// 特征类型。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum FeatureType {
     Edge,       // 边缘特征
     Frequency,  // 频率特征
@@ -858,7 +858,7 @@ pub fn init() {
 pub fn status() -> String {
     let eng = perception_engine().lock().unwrap();
     format!(
-        "perception: channels={} events={} drops={} objects={} fusion_count={} extraction_count={} pass_rate={:.2} avg_latency_ns={} sensors_online={}/{}}",
+        "perception: channels={} events={} drops={} objects={} fusion_count={} extraction_count={} pass_rate={:.2} avg_latency_ns={} sensors_online={}/{}",
         eng.channel_count(),
         eng.total_events,
         eng.total_drops,

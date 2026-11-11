@@ -1367,7 +1367,7 @@ mod tests {
 // =====================================================================================
 
 /// 偏见类型。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum BiasType {
     Confirmation,   // 确认偏见：倾向于确认既有信念
     Anchoring,      // 锚定偏见：过度依赖第一个信息

@@ -1,4 +1,4 @@
-//! 完整 TCP 协议栈（kernel/net/tcp_stack.rs）。
+﻿//! 完整 TCP 协议栈（kernel/net/tcp_stack.rs）。
 //!
 //! 建立于 `kernel/net/tcp.rs` 的 `TcpLayer`/`TcpSegment`/`TcpState` 之上，
 //! 填充更完整的 TCP 状态机（LISTEN/SYN_SENT/SYN_RECEIVED/ESTABLISHED/
@@ -865,14 +865,14 @@ pub fn tcp_stack_act_raw(payload: &str) -> Result<String, String> {
                 .next()
                 .ok_or("用法: connect <local_port> <remote_ip> <remote_port>")?
                 .parse()
-                .map_err(|e| e.to_string())?;
+                .map_err(|e: std::num::ParseIntError| e.to_string())?;
             let ip_s = it.next().ok_or("缺少 remote_ip")?;
             let ip = crate::net::parse_ip(ip_s);
             let rport: u16 = it
                 .next()
                 .ok_or("缺少 remote_port")?
                 .parse()
-                .map_err(|e| e.to_string())?;
+                .map_err(|e: std::num::ParseIntError| e.to_string())?;
             let mut st = TcpStack::stack().lock().unwrap();
             let segs = st.connect(1, port, ip, rport)?;
             let segs_len = segs.len();
@@ -882,7 +882,8 @@ pub fn tcp_stack_act_raw(payload: &str) -> Result<String, String> {
                 let segs_clone: Vec<TcpSegment> = segs.iter().cloned().collect();
                 for seg in &segs_clone {
                     let bytes = seg.serialize(st.our_ip, ip);
-                    if let Ok(replies) = st.process_segment(ip, st.our_ip, &bytes) {
+                    let our_ip = st.our_ip;
+                    if let Ok(replies) = st.process_segment(ip, our_ip, &bytes) {
                         if !replies.is_empty() { progressed = true; }
                     }
                 }
@@ -895,7 +896,7 @@ pub fn tcp_stack_act_raw(payload: &str) -> Result<String, String> {
                 .next()
                 .ok_or("用法: send <local_port> <hex数据>")?
                 .parse()
-                .map_err(|e| e.to_string())?;
+                .map_err(|e: std::num::ParseIntError| e.to_string())?;
             let hex = it.next().ok_or("缺少 hex 数据")?;
             let data = hex_decode(hex)?;
             let mut st = TcpStack::stack().lock().unwrap();
@@ -914,7 +915,7 @@ pub fn tcp_stack_act_raw(payload: &str) -> Result<String, String> {
                 .next()
                 .ok_or("用法: close <local_port>")?
                 .parse()
-                .map_err(|e| e.to_string())?;
+                .map_err(|e: std::num::ParseIntError| e.to_string())?;
             let mut st = TcpStack::stack().lock().unwrap();
             let key = st.conns.iter().find(|(_, c)| c.key.local_port == port).map(|(k, _)| k.clone())
                 .ok_or_else(|| format!("端口 {} 无连接", port))?;

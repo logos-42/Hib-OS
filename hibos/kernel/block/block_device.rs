@@ -42,7 +42,6 @@ pub fn block_device_list() -> Vec<BlockDevice> {
 
 /// 读取块设备数据（模拟：返回零填充）。
 pub fn block_read(device: &str, block: u64, count: u64) -> Result<Vec<u8>, String> {
-    let _ = block_registry().lock().unwrap();
     let _ = device;
     let _ = block;
     Ok(vec![0u8; (count * 512) as usize])
@@ -50,7 +49,6 @@ pub fn block_read(device: &str, block: u64, count: u64) -> Result<Vec<u8>, Strin
 
 /// 写入块设备数据（模拟）。
 pub fn block_write(device: &str, block: u64, data: &[u8]) -> Result<(), String> {
-    let _ = block_registry().lock().unwrap();
     let _ = device;
     let _ = block;
     let _ = data;

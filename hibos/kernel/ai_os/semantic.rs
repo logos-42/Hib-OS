@@ -631,7 +631,7 @@ impl SemanticEngine {
         self.namespace.resolve(path).map(|v| v.norm)
     }
 
-    pub fn analogy(&self, a: &str, b: &str, c: &str) -> Option<(u64, f32)> {
+    pub fn analogy(&mut self, a: &str, b: &str, c: &str) -> Option<(u64, f32)> {
         let va = self.space.all().iter().find(|v| {
             self.namespace.list_paths().iter().any(|p| self.namespace.resolve(p).map(|rv| rv.id == v.id).unwrap_or(false))
         });
@@ -790,7 +790,7 @@ pub fn semantic_act(payload: &str) -> Result<String, String> {
             let a = it.next().ok_or("用法: semantic:// analogy <A> <B> <C>")?;
             let b = it.next().ok_or("缺少 B")?;
             let c = it.next().ok_or("缺少 C")?;
-            let eng = semantic_engine().lock().unwrap();
+            let mut eng = semantic_engine().lock().unwrap();
             match eng.analogy(a, b, c) {
                 Some((id, sim)) => Ok(format!("类比结果 {} - {} + {} ≈ id={} 相似度={:.3}", a, b, c, id, sim)),
                 None => Err("向量不足，无法进行类比".into()),
@@ -1245,7 +1245,7 @@ impl InvertedIndex {
     pub fn search_multi(&self, keywords: &[&str]) -> Vec<u64> {
         let mut results: Vec<u64> = Vec::new();
         for kw in keywords {
-            if let Some(docs) = self.index.get(kw) {
+            if let Some(docs) = self.index.get(*kw) {
                 results.extend(docs.iter().copied());
             }
         }

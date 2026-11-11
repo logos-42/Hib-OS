@@ -20,10 +20,17 @@
 //!
 //! 所有结构均为纯内存原型，无外部 AI 框架依赖，供内核统一核算与调度。
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::sync::{Mutex, OnceLock};
+
+/// 简单伪随机数生成器。
+pub fn fastrand_f32() -> f32 {
+    static COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(1);
+    let val = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    (val % 1000) as f32 / 1000.0
+}
 
 // =====================================================================================
 // 模型架构
@@ -538,17 +545,46 @@ pub enum InferenceStage {
 #[derive(Clone, Debug)]
 pub struct InferenceRequest {
     pub id: u64,
+    pub model_name: String,
     pub instance_id: InstanceId,
     pub prompt_tokens: Vec<u32>,
+    pub input_tokens: Vec<u32>,
     pub max_new_tokens: u64,
     pub temperature: f32,
     pub top_p: f32,
     pub top_k: u32,
+    pub priority: u32,
     pub stage: InferenceStage,
     pub generated_tokens: Vec<u32>,
     pub completed: bool,
     pub first_token_ns: Option<u128>,
     pub last_token_ns: Option<u128>,
+    pub submitted_at: u128,
+    pub callback: Option<String>,
+}
+
+impl InferenceRequest {
+    pub fn new(id: u64, model_name: &str, instance_id: InstanceId, input_tokens: Vec<u32>, max_new_tokens: u64, temperature: f32, top_p: f32, top_k: u32, priority: u32) -> Self {
+        Self {
+            id,
+            model_name: model_name.to_string(),
+            instance_id,
+            prompt_tokens: input_tokens.clone(),
+            input_tokens,
+            max_new_tokens,
+            temperature,
+            top_p,
+            top_k,
+            priority,
+            stage: InferenceStage::Prefill,
+            generated_tokens: Vec::new(),
+            completed: false,
+            first_token_ns: None,
+            last_token_ns: None,
+            submitted_at: crate::ai_os::native::now_ns(),
+            callback: None,
+        }
+    }
 }
 
 /// 推理引擎（抽象，实际推理由模型运行时提供）。
@@ -585,16 +621,21 @@ impl InferenceEngine {
             InferenceRequest {
                 id,
                 instance_id,
-                prompt_tokens: prompt,
+                model_name: String::new(),
+                prompt_tokens: prompt.clone(),
+                input_tokens: prompt.clone(),
                 max_new_tokens: max_new,
                 temperature: 0.7,
                 top_p: 0.9,
                 top_k: 40,
+                priority: 0,
                 stage: InferenceStage::Prefill,
                 generated_tokens: Vec::new(),
                 completed: false,
                 first_token_ns: None,
                 last_token_ns: None,
+                submitted_at: 0,
+                callback: None,
             },
         );
         id
@@ -927,6 +968,12 @@ impl ModelMeta {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct InstanceId(pub u64);
+
+impl std::fmt::Display for InstanceId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct ModelInstance {
@@ -2274,7 +2321,7 @@ impl ModelCalibrator {
 pub enum ExportFormat {
     ONNX,
     TorchScript,
-    TF SavedModel,
+    TF_SavedModel,
     GGML,
     EXL2,
 }
@@ -2519,22 +2566,6 @@ mod advanced_tests {
 
 /// 推理请求。
 #[derive(Clone, Debug)]
-pub struct InferenceRequest {
-    pub id: u64,
-    pub model_name: String,
-    pub instance_id: InstanceId,
-    pub input_tokens: Vec<u32>,
-    pub max_new_tokens: u64,
-    pub temperature: f32,
-    pub top_p: f32,
-    pub top_k: u32,
-    pub priority: u32,
-    pub submitted_at: u128,
-    pub callback: Option<String>,
-}
-
-/// 推理响应。
-#[derive(Clone, Debug)]
 pub struct InferenceResponse {
     pub request_id: u64,
     pub output_tokens: Vec<u32>,
@@ -2587,19 +2618,7 @@ impl InferenceServer {
     pub fn submit(&mut self, model_name: &str, instance_id: InstanceId, input: Vec<u32>, max_new: u64, temp: f32, top_p: f32, top_k: u32, priority: u32) -> u64 {
         let id = self.next_id;
         self.next_id += 1;
-        let req = InferenceRequest {
-            id,
-            model_name: model_name.to_string(),
-            instance_id,
-            input_tokens: input,
-            max_new_tokens: max_new,
-            temperature: temp,
-            top_p,
-            top_k,
-            priority,
-            submitted_at: crate::ai_os::native::now_ns(),
-            callback: None,
-        };
+        let req = InferenceRequest::new(id, model_name, instance_id, input, max_new, temp, top_p, top_k, priority);
         self.total_requests += 1;
         let pos = self.request_queue.iter().position(|r| r.priority < priority).unwrap_or(self.request_queue.len());
         self.request_queue.insert(pos, req);
@@ -2625,7 +2644,7 @@ impl InferenceServer {
             let total = response.total_time_ns;
             self.completed.insert(request_id, response);
             self.completed_count += 1;
-            self.avg_latency_ns = (self.avg_latency_ns * (self.completed_count - 1) + total) / self.completed_count;
+            self.avg_latency_ns = (self.avg_latency_ns * (self.completed_count - 1) as u128 + total as u128) / self.completed_count as u128;
             true
         } else {
             false
@@ -2828,7 +2847,7 @@ impl ResponseCache {
 
     pub fn put(&mut self, key: &str, response: InferenceResponse, ttl_ns: Option<u128>) {
         if self.entries.len() >= self.max_size {
-            if let Some((oldest_key, _)) = self.entries.iter()
+            if let Some(oldest_key) = self.entries.iter()
                 .min_by_key(|(_, e)| e.last_access)
                 .map(|(k, _)| k.clone()) {
                 self.entries.remove(&oldest_key);
@@ -3053,8 +3072,9 @@ impl LoadBalancer {
                 healthy[idx]
             }
             LBStrategy::LeastConn => {
-                healthy.into_iter()
-                    .min_by_key(|id| self.instances.get(id).map(|i| i.active_connections).unwrap_or(u64::MAX))
+                healthy.iter()
+                    .min_by_key(|id| self.instances.get(*id).map(|i| i.active_connections).unwrap_or(u64::MAX))
+                    .copied()
                     .unwrap_or(healthy[0])
             }
             LBStrategy::Random => {
@@ -3170,11 +3190,12 @@ impl ModelServingEngine {
 
     pub fn complete_inference(&mut self, request_id: u64, output_tokens: Vec<u32>, generated_text: String, prefill_ns: u128, decode_ns: u128) -> Result<(), String> {
         let total = prefill_ns + decode_ns;
+        let token_count = output_tokens.len() as u64;
         let response = InferenceResponse {
             request_id,
             output_tokens,
             generated_text,
-            tokens_generated: output_tokens.len() as u64,
+            tokens_generated: token_count,
             prefill_time_ns: prefill_ns,
             decode_time_ns: decode_ns,
             total_time_ns: total,
@@ -3262,22 +3283,6 @@ pub fn model_serving_engine() -> &'static Mutex<ModelServingEngine> {
 // 初始化
 // =====================================================================================
 
-pub fn init() {
-    let _ = model_serving_engine();
-}
-
-// =====================================================================================
-// 状态摘要
-// =====================================================================================
-
-pub fn status() -> String {
-    let eng = model_serving_engine().lock().unwrap();
-    eng.stats()
-}
-
-pub fn serving_status() -> String {
-    status()
-}
 
 // =====================================================================================
 // act 接口
@@ -3299,8 +3304,9 @@ pub fn serving_act(payload: &str) -> Result<String, String> {
             let top_k = it.next().and_then(|s| s.parse::<u32>().ok()).unwrap_or(40);
             let priority = it.next().and_then(|s| s.parse::<u32>().ok()).unwrap_or(0);
             let mut eng = model_serving_engine().lock().unwrap();
+            let token_count = tokens.len();
             let id = eng.submit_inference(model, instance_id, tokens, max_new, temp, top_p, top_k, priority);
-            Ok(format!("已提交推理请求 id={} 模型={} 实例={} tokens={}", id, model, instance_id, tokens.len()))
+            Ok(format!("已提交推理请求 id={} 模型={} 实例={} tokens={}", id, model, instance_id, token_count))
         }
         Some("process") => {
             let mut eng = model_serving_engine().lock().unwrap();
@@ -3308,13 +3314,15 @@ pub fn serving_act(payload: &str) -> Result<String, String> {
             Ok(format!("已启动批处理 请求数={}", started.len()))
         }
         Some("complete") => {
-            let request_id = it.next().and_then(|s| s.parse::<u64>().ok()).ok_or("缺少请求id")?;
-            let tokens: Vec<u32> = it.filter_map(|s| s.parse::<u32>().ok()).collect();
-            let text: String = it.collect::<Vec<&str>>().join(" ");
-            let prefill = it.next().and_then(|s| s.parse::<u128>().ok()).unwrap_or(1_000_000);
-            let decode = it.next().and_then(|s| s.parse::<u128>().ok()).unwrap_or(5_000_000);
+            let rest: Vec<&str> = it.collect();
+            let request_id = rest.get(0).and_then(|s| s.parse::<u64>().ok()).ok_or("缺少请求id")?;
+            let tokens: Vec<u32> = rest.iter().filter_map(|s| s.parse::<u32>().ok()).collect();
+            let text: String = rest.join(" ");
+            let prefill = rest.get(1).and_then(|s| s.parse::<u128>().ok()).unwrap_or(1_000_000);
+            let decode = rest.get(2).and_then(|s| s.parse::<u128>().ok()).unwrap_or(5_000_000);
             let mut eng = model_serving_engine().lock().unwrap();
-            eng.complete_inference(request_id, tokens, text, prefill, decode)
+            eng.complete_inference(request_id, tokens, text, prefill, decode)?;
+            Ok(format!("已完成推理请求 id={}", request_id))
         }
         Some("fail") => {
             let request_id = it.next().and_then(|s| s.parse::<u64>().ok()).ok_or("缺少请求id")?;
@@ -3649,19 +3657,7 @@ mod serving_tests {
 
     #[test]
     fn inference_request_creation() {
-        let req = InferenceRequest {
-            id: 1,
-            model_name: "m".into(),
-            instance_id: InstanceId(1),
-            input_tokens: vec![1, 2, 3],
-            max_new_tokens: 64,
-            temperature: 0.7,
-            top_p: 0.9,
-            top_k: 40,
-            priority: 1,
-            submitted_at: 0,
-            callback: None,
-        };
+        let req = InferenceRequest::new(1, "m", InstanceId(1), vec![1, 2, 3], 64, 0.7, 0.9, 40, 1);
         assert_eq!(req.model_name, "m");
         assert_eq!(req.input_tokens.len(), 3);
     }

@@ -217,7 +217,7 @@ impl AgentSocket {
 // =====================================================================================
 
 /// 流量类别。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum TrafficClass {
     RealTime,    // 实时
     Interactive, // 交互
@@ -691,7 +691,7 @@ impl NetAI {
         if let Some(dst) = dst {
             if let Some(route) = self.router.lookup(dst) {
                 // 记录延迟
-                self.latency.record(src, route.next_hop, route.cost * 100.0);
+                self.latency.record(src, route.next_hop, route.cost as f64 * 100.0);
             }
         }
 
@@ -912,8 +912,8 @@ pub fn net_ai_act(payload: &str) -> Result<String, String> {
             Ok(format!("已记录延迟 {} -> {} {}ms", src, dst, ms))
         }
         Some("firewall") => {
-            let src = it.next().and_then(|s| s.parse::<u64>().ok()).ok();
-            let dst = it.next().and_then(|s| s.parse::<u64>().ok()).ok();
+            let src = it.next().and_then(|s| s.parse::<u64>().ok());
+            let dst = it.next().and_then(|s| s.parse::<u64>().ok());
             let tag = it.next();
             let action_str = it.next().unwrap_or("accept");
             let action = match action_str {
@@ -1386,7 +1386,7 @@ impl TrafficAnalyzer {
 // =====================================================================================
 
 /// 威胁类型。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ThreatType {
     DDoS,          // 分布式拒绝服务
     PortScan,      // 端口扫描
@@ -1471,7 +1471,7 @@ impl NetworkSecurityMonitor {
 // =====================================================================================
 
 /// 服务质量类别。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum QoSClass {
     Voice,        // 语音
     Video,        // 视频
@@ -1662,7 +1662,7 @@ mod advanced_tests {
 // =====================================================================================
 
 /// HTTP 方法。
-#[derive=Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HTTPMethod {
     GET,
     POST,
@@ -1674,7 +1674,7 @@ pub enum HTTPMethod {
 }
 
 /// HTTP 响应状态码。
-#[derive=Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HTTPStatus {
     OK = 200,
     Created = 201,
@@ -1790,7 +1790,7 @@ impl HTTPServer {
 // =====================================================================================
 
 /// 代理类型。
-#[derive=Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ProxyType {
     Forward,
     Reverse,
@@ -1854,7 +1854,7 @@ impl ProxyServer {
 // =====================================================================================
 
 /// 缓存策略。
-#[derive=Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CacheStrategy {
     LRU,
     LFU,
@@ -1874,6 +1874,7 @@ pub struct CDNEdgeNode {
     pub misses: u64,
     pub requests_served: u64,
     pub bytes_served: u64,
+    pub evictions: u64,
 }
 
 impl CDNEdgeNode {
@@ -1889,6 +1890,7 @@ impl CDNEdgeNode {
             misses: 0,
             requests_served: 0,
             bytes_served: 0,
+            evictions: 0,
         }
     }
 
@@ -1969,8 +1971,8 @@ impl CDNEdgeNode {
 
     pub fn cdn_stats(&self) -> String {
         format!(
-            "cdn: node={} region={} cached={} size={}/{bytes} hits={} misses={} rate={:.2} served={} bytes={}",
-            self.node_id, self.region, self.cache.len(), self.current_cache_size, bytes=self.max_cache_size, self.hits, self.misses, self.hit_rate(), self.requests_served, self.bytes_served
+            "cdn: node={} region={} cached={} size={}/{} hits={} misses={} rate={:.2} served={} bytes={}",
+            self.node_id, self.region, self.cache.len(), self.current_cache_size, self.max_cache_size, self.hits, self.misses, self.hit_rate(), self.requests_served, self.bytes_served
         )
     }
 }
@@ -1980,7 +1982,7 @@ impl CDNEdgeNode {
 // =====================================================================================
 
 /// WebSocket 帧类型。
-#[derive=Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum WSFrameType {
     Text,
     Binary,
@@ -2079,11 +2081,24 @@ impl WebSocketConnection {
 // =====================================================================================
 
 /// 健康检查状态。
-#[derive=Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HealthStatus {
     Healthy,
     Unhealthy,
     Unknown,
+}
+
+/// 后端实例。
+#[derive(Clone, Debug)]
+pub struct BackendInstance {
+    pub id: u64,
+    pub name: String,
+    pub endpoint: String,
+    pub weight: u32,
+    pub active_connections: u64,
+    pub total_requests: u64,
+    pub failed_requests: u64,
+    pub healthy: bool,
 }
 
 /// 网络负载均衡器：高级负载均衡与健康检查。
@@ -2323,27 +2338,6 @@ pub fn network_service_engine() -> &'static Mutex<NetworkServiceEngine> {
 }
 
 // =====================================================================================
-// 初始化
-// =====================================================================================
-
-pub fn init() {
-    let _ = network_service_engine();
-}
-
-// =====================================================================================
-// 状态摘要
-// =====================================================================================
-
-pub fn status() -> String {
-    let eng = network_service_engine().lock().unwrap();
-    eng.stats()
-}
-
-pub fn net_service_status() -> String {
-    status()
-}
-
-// =====================================================================================
 // act 接口
 // =====================================================================================
 
@@ -2393,8 +2387,9 @@ pub fn net_service_act(payload: &str) -> Result<String, String> {
                 return Err("缺少内容".into());
             }
             let mut eng = network_service_engine().lock().unwrap();
+            let len = content.len();
             if eng.cdn_cache(key, content) {
-                Ok(format!("已缓存内容 键={} 大小={}B", key, content.len()))
+                Ok(format!("已缓存内容 键={} 大小={}B", key, len))
             } else {
                 Err("缓存失败".into())
             }
@@ -2420,8 +2415,9 @@ pub fn net_service_act(payload: &str) -> Result<String, String> {
                 return Err("缺少载荷".into());
             }
             let mut eng = network_service_engine().lock().unwrap();
+            let len = payload.len();
             let id = eng.ws_send(payload, WSFrameType::Text);
-            Ok(format!("WebSocket 已发送 帧id={} 大小={}B", id, payload.len()))
+            Ok(format!("WebSocket 已发送 帧id={} 大小={}B", id, len))
         }
         Some("ws-receive") => {
             let payload: Vec<u8> = it.collect::<Vec<&str>>().join(" ").into_bytes();
@@ -2429,8 +2425,9 @@ pub fn net_service_act(payload: &str) -> Result<String, String> {
                 return Err("缺少载荷".into());
             }
             let mut eng = network_service_engine().lock().unwrap();
+            let len = payload.len();
             let id = eng.ws_receive(payload, WSFrameType::Text);
-            Ok(format!("WebSocket 已接收 帧id={} 大小={}B", id, payload.len()))
+            Ok(format!("WebSocket 已接收 帧id={} 大小={}B", id, len))
         }
         Some("lb-add") => {
             let name = it.next().ok_or("缺少名称")?;

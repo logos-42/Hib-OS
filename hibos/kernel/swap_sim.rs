@@ -420,7 +420,7 @@ pub fn act_swap(payload: &str) -> Result<String, String> {
                 .ok_or("用法: act swap://area out <page_addr> <data>")?
                 .parse()
                 .map_err(|_| "无效页地址".to_string())?;
-            let data = it.next().ok_or("缺少数据").as_bytes().to_vec();
+            let data = it.next().ok_or("缺少数据")?.as_bytes().to_vec();
             let slot = swap_out(page_addr, &data).map_err(|e| format!("换出失败: {:?}", e))?;
             Ok(format!(
                 "已换出 页={} 插槽={} 大小={}B",

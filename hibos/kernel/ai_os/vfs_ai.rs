@@ -1043,7 +1043,7 @@ impl FileVersionControl {
 // =====================================================================================
 
 /// 权限类型。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum PermissionType {
     Read,
     Write,
@@ -1150,7 +1150,7 @@ impl SemanticSearchOptimizer {
         results.truncate(k);
         let end = crate::ai_os::native::now_ns();
         self.query_count += 1;
-        self.avg_latency_ns = (self.avg_latency_ns * (self.query_count - 1) + (end - start)) / self.query_count;
+        self.avg_latency_ns = (self.avg_latency_ns * (self.query_count - 1) as u128 + (end - start)) / self.query_count as u128;
         results
     }
 

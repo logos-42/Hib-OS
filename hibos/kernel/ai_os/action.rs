@@ -640,7 +640,9 @@ impl ActionEngine {
     pub fn execute_next(&mut self) -> Result<String, String> {
         let cmd_id = self.scheduler.dequeue().ok_or("队列为空")?;
         let cmd = self.command_queue.get(cmd_id).ok_or("命令不存在")?;
-        let primitive = self.primitive_registry.get(cmd.primitive_id).ok_or("原语不存在")?;
+        let primitive_id = cmd.primitive_id;
+        let issued_at = cmd.issued_at;
+        let primitive = self.primitive_registry.get(primitive_id).ok_or("原语不存在")?;
 
         if !primitive.enabled {
             return Err("动作原语已禁用".into());
@@ -649,7 +651,7 @@ impl ActionEngine {
         self.command_queue.start(cmd_id);
         self.scheduler.start_running(cmd_id);
 
-        let (success, duration, result) = self.executor.execute(primitive, cmd.issued_at);
+        let (success, duration, result) = self.executor.execute(primitive, issued_at);
 
         if success {
             self.command_queue.complete(cmd_id, &result);

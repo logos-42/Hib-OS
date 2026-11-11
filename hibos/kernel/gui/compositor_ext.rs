@@ -1,4 +1,4 @@
-//! 合成器扩展 —— 混合模式、透明度、圆角、阴影、动画、双缓冲与防撕裂。
+﻿//! 合成器扩展 —— 混合模式、透明度、圆角、阴影、动画、双缓冲与防撕裂。
 //!
 //! `CompositorExt` 在 `kernel/gui/compositor.rs` 的 `Compositor` 基础上提供：
 //! * `blend(src, dst, mode)` —— 五种混合模式（正常/乘法/滤色/叠加/差值）
@@ -689,7 +689,7 @@ pub fn compositor_ext_act(payload: &str) -> Result<String, String> {
                 .ok_or("缺少图层 id")?
                 .parse::<u64>()
                 .map_err(|e| e.to_string())?;
-            let alpha: u8 = it.next().ok_or("缺少 alpha")?.parse().map_err(|e| e.to_string())?;
+            let alpha: u8 = it.next().ok_or("缺少 alpha")?.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
             if c.set_alpha(id, alpha) {
                 Ok(format!("图层 #{} alpha={}", id, alpha))
             } else {
@@ -697,13 +697,13 @@ pub fn compositor_ext_act(payload: &str) -> Result<String, String> {
             }
         }
         "round_corners" => {
-            let win_id: u64 = it.next().ok_or("缺少窗口 id")?.parse().map_err(|e| e.to_string())?;
-            let radius: u32 = it.next().ok_or("缺少半径")?.parse().map_err(|e| e.to_string())?;
+            let win_id: u64 = it.next().ok_or("缺少窗口 id")?.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
+            let radius: u32 = it.next().ok_or("缺少半径")?.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
             c.set_round_corners(win_id, radius);
             Ok(format!("窗口 #{} 圆角={}", win_id, radius))
         }
         "shadow" => {
-            let win_id: u64 = it.next().ok_or("缺少窗口 id")?.parse().map_err(|e| e.to_string())?;
+            let win_id: u64 = it.next().ok_or("缺少窗口 id")?.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
             let ox: i32 = it.next().and_then(|v| v.parse().ok()).unwrap_or(4);
             let oy: i32 = it.next().and_then(|v| v.parse().ok()).unwrap_or(4);
             let blur: u32 = it.next().and_then(|v| v.parse().ok()).unwrap_or(8);

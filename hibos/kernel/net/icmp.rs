@@ -1,4 +1,4 @@
-//! ICMP 协议处理（kernel/net/icmp.rs）。
+﻿//! ICMP 协议处理（kernel/net/icmp.rs）。
 //!
 //! 在 `kernel/net/ipv4.rs` 的 `IcmpPacket`（Echo Request/Reply）之上，填充更完整的
 //! ICMP 功能：Echo Request/Reply（ping）、目的不可达（Destination Unreachable）、
@@ -474,12 +474,12 @@ pub fn icmp_act_raw(payload: &str) -> Result<String, String> {
                 .next()
                 .ok_or("缺少 id")?
                 .parse()
-                .map_err(|e| e.to_string())?;
+                .map_err(|e: std::num::ParseIntError| e.to_string())?;
             let seq: u16 = it
                 .next()
                 .ok_or("缺少 seq")?
                 .parse()
-                .map_err(|e| e.to_string())?;
+                .map_err(|e: std::num::ParseIntError| e.to_string())?;
             let hex = it.next().unwrap_or("50696e67"); // 默认 "ping"
             let data = hex_decode(hex)?;
             let mut st = IcmpStack::stack().lock().unwrap();
@@ -498,7 +498,7 @@ pub fn icmp_act_raw(payload: &str) -> Result<String, String> {
                 .next()
                 .unwrap_or("1")
                 .parse()
-                .map_err(|e| e.to_string())?; // 默认 Host Unreachable
+                .map_err(|e: std::num::ParseIntError| e.to_string())?; // 默认 Host Unreachable
             let code = DestUnreachableCode::from_u8(code);
             let orig_hdr = [0x45, 0, 0, 20, 0, 0, 0, 0, 64, IP_PROTO_ICMP, 0, 0, 10, 0, 0, 2];
             let orig_data = b"original packet data";

@@ -1375,7 +1375,7 @@ mod tests {
 // =====================================================================================
 
 /// 情感类型。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum EmotionType {
     Joy,      // 喜悦
     Sadness,  // 悲伤
@@ -1561,7 +1561,7 @@ impl MemoryReranker {
         let now = crate::ai_os::native::now_ns();
         let mut scored: Vec<(u64, f32)> = items.into_iter().map(|(id, base_score, recall_count, salience)| {
             let recency_score = 1.0 / (1.0 + (now as f64 / 1_000_000_000.0) as f32 * 0.001);
-            let freq_score = (recall_count as f32).ln1p() / 10.0;
+            let freq_score = (recall_count as f32).ln_1p() / 10.0;
             let final_score = match self.strategy {
                 RerankStrategy::Recency => recency_score,
                 RerankStrategy::Frequency => freq_score,
@@ -1574,7 +1574,7 @@ impl MemoryReranker {
                 }
             };
             (id, final_score)
-        });
+        }).collect();
         scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         scored
     }

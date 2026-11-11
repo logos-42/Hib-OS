@@ -22,7 +22,7 @@ use std::sync::{Mutex, OnceLock};
 // =====================================================================================
 
 /// 伦理原则类型。
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum EthicalPrincipleType {
     Beneficence,    // 行善
     NonMaleficence, // 不伤害
@@ -1256,7 +1256,7 @@ impl EthicalAudit {
 // =====================================================================================
 
 /// 合规标准。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ComplianceStandard {
     GDPR,       // 数据保护
     HIPAA,      // 健康信息

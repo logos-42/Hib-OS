@@ -1,4 +1,4 @@
-//! USB 栈简化版（kernel/drivers/usb_stack.rs）。
+﻿//! USB 栈简化版（kernel/drivers/usb_stack.rs）。
 //!
 //! 本模块实现 USB 总线与设备模型：设备描述符、配置描述符、接口描述符、端点描述符、
 //! 四种传输类型（控制/批量/中断/同步）、设备状态（附加/默认/地址/配置）与枚举流程。
@@ -535,13 +535,13 @@ pub fn usb_act_raw(payload: &str) -> Result<String, String> {
         }
         Some("enumerate") => {
             let id_s = it.next().ok_or("用法: enumerate <dev_id>")?;
-            let id: u64 = id_s.parse().map_err(|e| e.to_string())?;
+            let id: u64 = id_s.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
             let mut bus = UsbBus::bus().lock().unwrap();
             bus.enumerate(UsbDeviceId(id)).map(|()| format!("设备 {:?} 已枚举", id))
         }
         Some("state") => {
             let id_s = it.next().ok_or("用法: state <dev_id>")?;
-            let id: u64 = id_s.parse().map_err(|e| e.to_string())?;
+            let id: u64 = id_s.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
             let bus = UsbBus::bus().lock().unwrap();
             match bus.device_state(UsbDeviceId(id)) {
                 Some(s) => Ok(format!("设备 {:?} state={}", id, s.name())),

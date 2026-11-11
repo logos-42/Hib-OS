@@ -436,13 +436,13 @@ pub fn irq_ctrl_act_raw(payload: &str) -> Result<String, String> {
             Ok(c.status())
         }
         Some("mask") => {
-            let irq: u32 = it.next().ok_or("用法: mask <irq>")?.parse()?;
+            let irq: u32 = it.next().ok_or("用法: mask <irq>")?.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
             let mut c = IrqController::instance().lock().unwrap();
             c.mask_irq(IrqLine(irq));
             Ok(format!("中断 {} 已屏蔽", irq))
         }
         Some("unmask") => {
-            let irq: u32 = it.next().ok_or("用法: unmask <irq>")?.parse()?;
+            let irq: u32 = it.next().ok_or("用法: unmask <irq>")?.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
             let mut c = IrqController::instance().lock().unwrap();
             c.unmask_irq(IrqLine(irq));
             Ok(format!("中断 {} 已取消屏蔽", irq))
@@ -458,7 +458,7 @@ pub fn irq_ctrl_act_raw(payload: &str) -> Result<String, String> {
             Ok("中断已开启 (STI)".to_string())
         }
         Some("raise") => {
-            let irq: u32 = it.next().ok_or("用法: raise <irq>")?.parse()?;
+            let irq: u32 = it.next().ok_or("用法: raise <irq>")?.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
             let mut c = IrqController::instance().lock().unwrap();
             let n = c.irq_dispatch(IrqLine(irq));
             Ok(format!("已触发中断 {}，调用处理器 {} 次", irq, n))
