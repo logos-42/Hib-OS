@@ -18,6 +18,8 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::{Mutex, OnceLock};
 
+use crate::fs::{list_dir, make_dir, read_file, write_file};
+
 // =====================================================================================
 // 命令意图 (CommandIntent)
 // =====================================================================================
@@ -583,7 +585,13 @@ pub fn shell_ai_act(payload: &str) -> Result<String, String> {
                 return Err("缺少命令".into());
             }
             let mut eng = shell_ai().lock().unwrap();
-            Ok(eng.execute_command(&command))
+            let result = eng.execute_command(&command);
+            // 注入：将执行记录写入 L1 VFS，使历史可见。
+            let _ = make_dir("/shell_ai/execute");
+            let safe = command.replace('/', "_").replace(' ', "_");
+            let path = format!("/shell_ai/execute/{}", safe);
+            let _ = write_file(0, &path, result.as_bytes());
+            Ok(result)
         }
         Some("execute-nl") => {
             let input: String = it.collect::<Vec<&str>>().join(" ");
@@ -608,6 +616,8 @@ pub fn shell_ai_act(payload: &str) -> Result<String, String> {
             let command = it.next().ok_or("缺少命令")?;
             let mut eng = shell_ai().lock().unwrap();
             eng.set_alias(alias, command);
+            // 注入：同步别名到 L1 VFS。
+            let _ = write_file(0, &format!("/shell_ai/alias/{}", alias), command.as_bytes());
             Ok(format!("已设置别名 {} -> {}", alias, command))
         }
         Some("resolve-alias") => {
@@ -622,11 +632,17 @@ pub fn shell_ai_act(payload: &str) -> Result<String, String> {
             let dir = it.next().unwrap_or("/");
             let mut eng = shell_ai().lock().unwrap();
             eng.set_dir(dir);
+            // 注入：同步到 L1 VFS，使 `sense fs://vfs` 可见。
+            let _ = make_dir("/shell_ai/cwd");
+            let _ = write_file(0, "/shell_ai/cwd/last", dir.as_bytes());
             Ok(format!("已切换目录: {}", dir))
         }
         Some("pwd") => {
             let eng = shell_ai().lock().unwrap();
-            Ok(format!("当前目录: {}", eng.session_dir()))
+            let dir = eng.session_dir().to_string();
+            // 注入：从 L1 VFS 读取上次 cd 的目录，建立跨层可见性。
+            let _fs_dir = read_file("/shell_ai/cwd/last");
+            Ok(format!("当前目录: {}", dir))
         }
         Some("env") => {
             let key = it.next().unwrap_or("");
@@ -649,6 +665,8 @@ pub fn shell_ai_act(payload: &str) -> Result<String, String> {
             let value = it.next().ok_or("缺少值")?;
             let mut eng = shell_ai().lock().unwrap();
             eng.set_env(key, value);
+            // 注入：同步环境变量到 L1 VFS。
+            let _ = write_file(0, &format!("/shell_ai/env/{}", key), value.as_bytes());
             Ok(format!("已设置环境变量 {}={}", key, value))
         }
         Some("pipeline") => {
@@ -668,6 +686,8 @@ pub fn shell_ai_act(payload: &str) -> Result<String, String> {
             let n = it.next().and_then(|s| s.parse::<usize>().ok()).unwrap_or(10);
             let eng = shell_ai().lock().unwrap();
             let recent = eng.history.recent(n);
+            // 注入：从 L1 VFS 列出执行历史，建立跨层可见性。
+            let _fs_hist = list_dir("/shell_ai/execute");
             let mut out = String::from("命令历史:\n");
             for e in recent {
                 out.push_str(&format!("  id={} 命令={} 成功={}\n", e.id, e.command, e.success));
