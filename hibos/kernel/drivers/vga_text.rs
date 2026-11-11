@@ -51,7 +51,6 @@ fn vga_write_byte(byte: u8) {
     match byte {
         b'\n' => newline(),
         byte => {
-            let row = ROW.load(Ordering::Relaxed);
             let col = COL.load(Ordering::Relaxed);
             if col >= WIDTH {
                 newline();

@@ -37,9 +37,9 @@ pub extern "C" fn kernel_main() -> ! {
 }
 
 #[panic_handler]
-fn panic(info: &PanicInfo) -> ! {
-    serial_println!("PANIC: {}", info);
-    vga_println!("PANIC: {}", info);
+fn panic(_info: &PanicInfo) -> ! {
+    serial_println!("PANIC: {:?}", _info);
+    vga_println!("PANIC: {:?}", _info);
     loop {
         unsafe {
             core::arch::asm!("hlt", options(nostack));
@@ -62,8 +62,10 @@ macro_rules! serial_print {
 /// 向 COM1 串口打印一行（换行）。
 #[macro_export]
 macro_rules! serial_println {
-    () => (serial_print!(""));
-    ($($arg:tt)*) => (serial_print!("{}\n", $($arg)*));
+    ($($arg:tt)*) => {
+        serial_print!($($arg)*);
+        serial_print!("\n");
+    };
 }
 
 /// 向 VGA 文本缓冲区打印。
@@ -80,6 +82,8 @@ macro_rules! vga_print {
 /// 向 VGA 文本缓冲区打印一行（换行）。
 #[macro_export]
 macro_rules! vga_println {
-    () => (vga_print!(""));
-    ($($arg:tt)*) => (vga_print!("{}\n", $($arg)*));
+    ($($arg:tt)*) => {
+        vga_print!($($arg)*);
+        vga_print!("\n");
+    };
 }

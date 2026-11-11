@@ -2,12 +2,11 @@
 target = "x86_64-unknown-none"
 
 [target.x86_64-unknown-none]
-linker = "lld-link.exe"
+linker = "C:\\Users\\Mechrevo\\.rustup\\toolchains\\1.99.1-x86_64-pc-windows-msvc\\lib\\rustlib\\x86_64-pc-windows-msvc\\bin\\gcc-ld\\ld.lld.exe"
 rustflags = [
-  "-C", "link-arg=-flavor",
-  "-C", "link-arg=:link",
-  "-C", "link-arg=-entry:kernel_main",
-  "-C", "link-arg=-subsystem:console",
-  "-C", "link-arg=-nodefaultlib",
+  "-C", "linker-flavor=ld",
+  "-C", "link-arg=-T../boot/linker.ld",
   "-C", "link-arg=-nostdlib",
+  "-C", "link-arg=-e",
+  "-C", "link-arg=kernel_main",
 ]

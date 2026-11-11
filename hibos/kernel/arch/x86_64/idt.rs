@@ -56,5 +56,5 @@ pub fn init() {
 
 #[unsafe(naked)]
 pub unsafe extern "C" fn double_fault_handler() -> ! {
-    core::arch::naked_asm!("hlt", options(noreturn));
+    core::arch::naked_asm!("hlt");
 }

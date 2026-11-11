@@ -1,5 +1,6 @@
 //! 全局描述符表 (GDT) —— 最小基座。
 //! x86_64 长模式下 GDT 仍需存在，但大部份段描述符为 flat 模型。
+//! 注意：bootloader 已完成保护模式->长模式切换，此处仅加载 GDT 表。
 
 use core::arch::asm;
 
@@ -43,29 +44,6 @@ pub fn init() {
             base: GDT.as_ptr() as u64,
         };
 
-        asm!(
-            "lgdt [{}]",
-            in(reg) &ptr as *const GdtPtr,
-            options(readonly, nostack)
-        );
-
-        // 重新加载 CS：远跳转到 64-bit 代码段
-        asm!(
-            "push {}\n"
-            "lea {}, [{}]\n"
-            "retfq\n"
-            "1:\n"
-            "mov ax, {}\n"
-            "mov ds, ax\n"
-            "mov es, ax\n"
-            "mov fs, ax\n"
-            "mov gs, ax\n"
-            "mov ss, ax\n"
-            :
-            : "i"(0x08), "r"(1f as *const u8), "i"(0x08), "i"(0x10)
-            :
-            : "intel"
-        );
-        1: {}
+        asm!("lgdt [{}]", in(reg) &ptr as *const GdtPtr, options(readonly, nostack));
     }
 }
