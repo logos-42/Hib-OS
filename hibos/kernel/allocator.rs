@@ -23,7 +23,7 @@ unsafe impl GlobalAlloc for BumpAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         let size = layout.size();
         let align = layout.align();
-        let mut next = self.next.load(Ordering::Relaxed);
+        let next = self.next.load(Ordering::Relaxed);
         let aligned = (next + align - 1) & !(align - 1);
         let end = aligned + size;
         if end > HEAP_START + HEAP_SIZE {

@@ -5,6 +5,7 @@
 
 use alloc::collections::BTreeMap;
 use alloc::string::String;
+use alloc::string::ToString;
 use alloc::vec::Vec;
 
 use super::dentry::{dentry_create, dentry_create_typed, dentry_delete, dentry_list, dentry_lookup, ROOT_INO};

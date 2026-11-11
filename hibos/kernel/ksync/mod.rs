@@ -50,7 +50,7 @@ impl<'a, T> Deref for SpinLockGuard<'a, T> {
 }
 
 impl<'a, T> DerefMut for SpinLockGuard<'a, T> {
-    fn deref_mut(&self) -> &mut T {
+    fn deref_mut(&mut self) -> &mut T {
         unsafe { &mut *self.lock.value.get() }
     }
 }

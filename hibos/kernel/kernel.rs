@@ -8,6 +8,7 @@
 
 use core::panic::PanicInfo;
 
+#[macro_use]
 extern crate alloc;
 
 pub mod arch;
