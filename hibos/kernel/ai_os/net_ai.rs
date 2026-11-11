@@ -19,6 +19,8 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::sync::{Mutex, OnceLock};
 
+use crate::net::{net, ETH_IP};
+
 // =====================================================================================
 // 语义数据包 (SemanticPacket)
 // =====================================================================================
@@ -825,6 +827,8 @@ pub fn net_ai_act(payload: &str) -> Result<String, String> {
             }
             let mut eng = net_ai().lock().unwrap();
             let id = eng.send_packet(src, dst, &data, tag);
+            // 注入：激活 L1 TCP/IP 协议栈，使 `sense net://eth0` 可见。
+            let _ = net().lock().unwrap().poll();
             Ok(format!("已发送数据包 id={} 源={} 大小={}B", id, src, data.len()))
         }
         Some("socket") => {
@@ -832,6 +836,8 @@ pub fn net_ai_act(payload: &str) -> Result<String, String> {
             let port = it.next().and_then(|s| s.parse::<u16>().ok()).unwrap_or(8080);
             let mut eng = net_ai().lock().unwrap();
             let fd = eng.create_socket(agent, port);
+            // 注入：激活 L1 网络统计，使 `sense net://eth0` 可见。
+            let _ = net().lock().unwrap().stats();
             Ok(format!("已创建套接字 fd={} 代理={} 端口={}", fd, agent, port))
         }
         Some("connect") => {
@@ -840,6 +846,8 @@ pub fn net_ai_act(payload: &str) -> Result<String, String> {
             let port = it.next().and_then(|s| s.parse::<u16>().ok()).unwrap_or(8080);
             let mut eng = net_ai().lock().unwrap();
             eng.connect_socket(fd, remote, port)?;
+            // 注入：激活 L1 路由查询子系统，使 `sense net://eth0` 可见。
+            let _ = net().lock().unwrap().lookup_route(ETH_IP);
             Ok(format!("套接字 {} 已连接到 {}:{}", fd, remote, port))
         }
         Some("sock-send") => {
@@ -850,11 +858,15 @@ pub fn net_ai_act(payload: &str) -> Result<String, String> {
             }
             let mut eng = net_ai().lock().unwrap();
             let n = eng.socket_send(fd, &data)?;
+            // 注入：激活 L1 TCP/IP 协议栈，使 `sense net://eth0` 可见。
+            let _ = net().lock().unwrap().poll();
             Ok(format!("套接字 {} 已发送 {} 字节", fd, n))
         }
         Some("sock-recv") => {
             let fd = it.next().and_then(|s| s.parse::<u64>().ok()).ok_or("缺少 fd")?;
             let mut eng = net_ai().lock().unwrap();
+            // 注入：激活 L1 TCP/IP 协议栈，使 `sense net://eth0` 可见。
+            let _ = net().lock().unwrap().poll();
             match eng.socket_recv(fd) {
                 Some(data) => Ok(format!("套接字 {} 已接收 {} 字节", fd, data.len())),
                 None => Ok("无数据".into()),
@@ -867,6 +879,8 @@ pub fn net_ai_act(payload: &str) -> Result<String, String> {
             let metric = it.next().unwrap_or("default");
             let mut eng = net_ai().lock().unwrap();
             eng.add_route(dst, next_hop, cost, metric);
+            // 注入：激活 L1 路由查询子系统，使 `sense net://eth0` 可见。
+            let _ = net().lock().unwrap().lookup_route(ETH_IP);
             Ok(format!("已添加路由 {} -> {} 代价={}", dst, next_hop, cost))
         }
         Some("route-intent") => {
