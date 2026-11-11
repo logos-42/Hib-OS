@@ -14,6 +14,7 @@ extern crate alloc;
 pub mod arch;
 pub mod drivers;
 pub mod fs;
+pub mod graphics;
 pub mod ksync;
 pub mod syscall_entry;
 pub mod time;
@@ -39,6 +40,7 @@ pub extern "C" fn kernel_main() -> ! {
 
     // 初始化 VGA 文本模式（屏幕可见）。
     drivers::vga_text::init();
+    graphics::init();
     vga_println!("Hib OS 0.1.0");
     vga_println!("Booting on x86_64 (GPU-primed macro-kernel prototype)");
 

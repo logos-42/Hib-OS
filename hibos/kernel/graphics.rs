@@ -5,34 +5,60 @@
 
 use alloc::string::String;
 use alloc::vec::Vec;
-use core::fmt::Write;
 
-use crate::drivers::vga_text::{self, VgaWriter, WRITER};
+use crate::drivers::vga_text::{self, Color as VgaColor, VgaChar, VGA_ADDR, WIDTH, HEIGHT};
+use crate::ksync::{SpinLock, OnceLock};
+
+// =======================================================================
+// 颜色映射（从 vga_text::Color 重新包装，避免泄露内部实现）
+// =======================================================================
 
 /// 屏幕分辨率（字符）。
-pub const SCREEN_COLS: usize = 80;
-pub const SCREEN_ROWS: usize = 25;
+pub const SCREEN_COLS: usize = WIDTH;
+pub const SCREEN_ROWS: usize = HEIGHT;
 
 /// 颜色定义。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[repr(u8)]
 pub enum Color {
-    Black = 0,
-    Blue = 1,
-    Green = 2,
-    Cyan = 3,
-    Red = 4,
-    Magenta = 5,
-    Brown = 6,
-    LightGray = 7,
-    DarkGray = 8,
-    LightBlue = 9,
-    LightGreen = 10,
-    LightCyan = 11,
-    LightRed = 12,
-    Pink = 13,
-    Yellow = 14,
-    White = 15,
+    Black,
+    Blue,
+    Green,
+    Cyan,
+    Red,
+    Magenta,
+    Brown,
+    LightGray,
+    DarkGray,
+    LightBlue,
+    LightGreen,
+    LightCyan,
+    LightRed,
+    Pink,
+    Yellow,
+    White,
+}
+
+impl From<Color> for VgaColor {
+    fn from(c: Color) -> Self {
+        match c {
+            Color::Black => VgaColor::Black,
+            Color::Blue => VgaColor::Blue,
+            Color::Green => VgaColor::Green,
+            Color::Cyan => VgaColor::Cyan,
+            Color::Red => VgaColor::Red,
+            Color::Magenta => VgaColor::Magenta,
+            Color::Brown => VgaColor::Brown,
+            Color::LightGray => VgaColor::LightGray,
+            Color::DarkGray => VgaColor::DarkGray,
+            Color::LightBlue => VgaColor::LightBlue,
+            Color::LightGreen => VgaColor::LightGreen,
+            Color::LightCyan => VgaColor::LightCyan,
+            Color::LightRed => VgaColor::LightRed,
+            Color::Pink => VgaColor::Pink,
+            Color::Yellow => VgaColor::Yellow,
+            Color::White => VgaColor::White,
+        }
+    }
 }
 
 /// 屏幕上的一个字符单元。
@@ -94,23 +120,19 @@ impl Screen {
     }
 
     pub fn render(&self) {
-        let mut writer = WRITER.lock();
-        for y in 0..SCREEN_ROWS {
-            for x in 0..SCREEN_COLS {
-                let cell = self.cells[y][x];
-                // 直接写入 VGA 缓冲区
-                unsafe {
-                    let idx = y * vga_text::WIDTH + x;
-                    vga_text::VGA_ADDR.add(idx).write_volatile(vga_text::VgaChar::new(
+        unsafe {
+            for y in 0..SCREEN_ROWS {
+                for x in 0..SCREEN_COLS {
+                    let cell = self.cells[y][x];
+                    let idx = y * WIDTH + x;
+                    VGA_ADDR.add(idx).write_volatile(VgaChar::new(
                         cell.ch,
-                        cell.fg,
-                        cell.bg,
+                        cell.fg.into(),
+                        cell.bg.into(),
                     ));
                 }
             }
         }
-        // 移动光标到最后一行
-        writer.write_str("\r\n").ok();
     }
 }
 
@@ -152,5 +174,3 @@ pub fn draw_pixel(x: usize, y: usize, color: Color) {
         s.render();
     }
 }
-
-use crate::ksync::{SpinLock, OnceLock};
