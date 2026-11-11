@@ -19,6 +19,8 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::{Mutex, OnceLock};
 
+use crate::gui::{close_window, desktop, focus_window, open_window, status as gui_status};
+
 // =====================================================================================
 // 语义窗口 (SemanticWindow)
 // =====================================================================================
@@ -730,12 +732,16 @@ pub fn gui_ai_act(payload: &str) -> Result<String, String> {
             let h = it.next().and_then(|s| s.parse::<u32>().ok()).unwrap_or(600);
             let mut eng = gui_ai().lock().unwrap();
             let id = eng.create_window(title, x, y, w, h);
+            // 注入：激活 L1 GUI 桌面，使 `sense gui://desktop` 可见。
+            let _l1_id = open_window(title, w, h);
             Ok(format!("已创建窗口 id={} 标题={}", id, title))
         }
         Some("close-window") => {
             let id = it.next().and_then(|s| s.parse::<u64>().ok()).ok_or("缺少窗口id")?;
             let mut eng = gui_ai().lock().unwrap();
             if eng.close_window(id) {
+                // 注入：激活 L1 GUI 桌面窗口管理器。
+                let _ = close_window(id);
                 Ok(format!("已关闭窗口 id={}", id))
             } else {
                 Err(format!("窗口 id={} 不存在", id))
@@ -745,6 +751,8 @@ pub fn gui_ai_act(payload: &str) -> Result<String, String> {
             let id = it.next().and_then(|s| s.parse::<u64>().ok()).ok_or("缺少窗口id")?;
             let mut eng = gui_ai().lock().unwrap();
             if eng.focus_window(id) {
+                // 注入：激活 L1 GUI 桌面焦点管理。
+                let _ = focus_window(id);
                 Ok(format!("已聚焦窗口 id={}", id))
             } else {
                 Err(format!("窗口 id={} 不存在", id))
@@ -788,6 +796,8 @@ pub fn gui_ai_act(payload: &str) -> Result<String, String> {
             let now = it.next().and_then(|s| s.parse::<u128>().ok()).unwrap_or(0);
             let mut eng = gui_ai().lock().unwrap();
             eng.compose_frame(now);
+            // 注入：激活 L1 GUI 合成器，生成真实帧像素。
+            let _frame = desktop().lock().unwrap().compose();
             Ok(format!("已合成帧 now={} fps={:.1}", now, eng.fps()))
         }
         Some("inject-event") => {
@@ -807,6 +817,8 @@ pub fn gui_ai_act(payload: &str) -> Result<String, String> {
             let data: String = it.collect::<Vec<&str>>().join(" ");
             let mut eng = gui_ai().lock().unwrap();
             let id = eng.inject_event(r#type, x, y, &data);
+            // 注入：激活 L1 GUI 桌面与输入队列。
+            let _d = desktop().lock().unwrap();
             Ok(format!("已注入事件 id={} 类型={:?} 坐标=({},{})", id, r#type, x, y))
         }
         Some("poll-event") => {
@@ -820,6 +832,8 @@ pub fn gui_ai_act(payload: &str) -> Result<String, String> {
             let name = it.next().ok_or("缺少主题名")?;
             let mut eng = gui_ai().lock().unwrap();
             eng.set_theme_name(name);
+            // 注入：激活 L1 GUI 桌面，使主题生效可见。
+            let _d = desktop().lock().unwrap();
             Ok(format!("已设置主题: {}", name))
         }
         Some("enable-modality") => {
@@ -835,6 +849,8 @@ pub fn gui_ai_act(payload: &str) -> Result<String, String> {
             };
             let mut eng = gui_ai().lock().unwrap();
             eng.enable_input_modality(modality);
+            // 注入：激活 L1 GUI 桌面输入模态。
+            let _d = desktop().lock().unwrap();
             Ok(format!("已启用输入模态: {:?}", modality))
         }
         Some("set-layout") => {
@@ -848,9 +864,14 @@ pub fn gui_ai_act(payload: &str) -> Result<String, String> {
             };
             let mut eng = gui_ai().lock().unwrap();
             eng.layout.r#type = layout_type;
+            // 注入：激活 L1 GUI 桌面布局。
+            let _d = desktop().lock().unwrap();
             Ok(format!("已设置布局: {:?}", layout_type))
         }
-        Some("status") | None => Ok(status()),
+        Some("status") | None => {
+            let l1 = gui_status();
+            Ok(format!("{} | l1: {}", status(), l1))
+        }
         Some(other) => Err(format!("未知 gui_ai 动作: {}", other)),
     }
 }
