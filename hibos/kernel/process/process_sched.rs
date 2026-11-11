@@ -1,7 +1,6 @@
 //! 进程调度接口 —— P0-2 子模块。
 
-use crate::process::{ProcessId, ProcessState, Pcb};
-use crate::process::process_mgr::{pm_state, ProcessManager};
+use crate::process::{ProcessId, ProcessState};
 
 /// 将进程设为就绪状态。
 pub fn make_ready(pid: ProcessId) -> bool {

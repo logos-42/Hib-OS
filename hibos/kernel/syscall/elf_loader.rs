@@ -21,7 +21,6 @@
 
 use std::collections::BTreeMap;
 use std::fs;
-use std::path::Path;
 
 // ========================================================================
 // 错误
@@ -638,8 +637,8 @@ impl ElfLoader {
     ) -> ElfResult<(Vec<SectionHeader>, Vec<u8>, BTreeMap<String, u64>, Option<String>)> {
         let mut sections = Vec::new();
         let mut shstrtab = Vec::new();
-        let mut symbols = BTreeMap::new();
-        let mut interp = None;
+        let symbols = BTreeMap::new();
+        let interp = None;
 
         if header.shnum == 0 || header.shoff == 0 || header.shentsize == 0 {
             return Ok((sections, shstrtab, symbols, interp));

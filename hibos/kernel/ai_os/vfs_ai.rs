@@ -16,7 +16,7 @@
 //!
 //! 所有结构均为纯 Rust 原型，无磁盘依赖，供内核统一核算与调度。
 
-use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::{Mutex, OnceLock};
 
 use crate::fs::{make_dir, read_file, write_file};

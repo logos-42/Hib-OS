@@ -9,7 +9,7 @@
 //! 与 `kernel/gui/compositor.rs` 的 `Compositor` 互补：WindowManager 负责窗口
 //! 逻辑状态，Compositor 负责像素合成输出。
 
-use super::surface::{argb, Rect, Surface};
+use super::surface::{Rect, Surface};
 use super::surface::palette;
 use super::window::{Hit, WindowId, TITLEBAR_H, BORDER, CLOSE_BTN, TRAFFIC_RIGHT_GAP, TRAFFIC_GAP};
 use std::collections::BTreeMap;
@@ -547,7 +547,7 @@ impl WindowManager {
 
     /// 把窗口送到最底层。
     pub fn send_to_bottom(&mut self, id: WindowId) {
-        if let Some(w) = self.windows.get(&id) {
+        if let Some(_w) = self.windows.get(&id) {
             let min_z = self.windows.values().map(|w| w.z_level).min().unwrap_or(0);
             if let Some(w) = self.windows.get_mut(&id) {
                 w.z_level = min_z.saturating_sub(1);

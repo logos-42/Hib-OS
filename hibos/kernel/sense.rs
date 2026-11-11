@@ -20,23 +20,6 @@ use crate::ai_os::tool::{status as tool_status};
 use crate::ai_os::security;
 use crate::ai_os::deadlock;
 use crate::ai_os::container;
-use crate::ai_os::native;
-use crate::ai_os::mind;
-use crate::ai_os::attention;
-use crate::ai_os::semantic;
-use crate::ai_os::memory_ws;
-use crate::ai_os::body_schema;
-use crate::ai_os::action;
-use crate::ai_os::temporal;
-use crate::ai_os::social;
-use crate::ai_os::ethics;
-use crate::ai_os::evolution;
-use crate::ai_os::dream;
-use crate::ai_os::vfs_ai;
-use crate::ai_os::net_ai;
-use crate::ai_os::driver_ai;
-use crate::ai_os::shell_ai;
-use crate::ai_os::gui_ai;
 use crate::ai_os::{status as ai_os_status};
 use crate::agent;
 use crate::belief::beliefs;
@@ -2573,7 +2556,7 @@ fn act_pagetable(payload: &str) -> Result<String, String> {
                 .ok_or("用法: act pagetable://walk map <vaddr> <paddr> [rw] [user]")?;
             let writable = it.any(|s| s == "rw");
             let user = it.any(|s| s == "user");
-            let flags = crate::page_table_sim::PTEFlags {
+            let _flags = crate::page_table_sim::PTEFlags {
                 present: true,
                 writable,
                 user,

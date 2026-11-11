@@ -18,7 +18,7 @@
 //! 并通过 `native://*` 通道接入 `sense`/`act` 感知层。
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
-use std::sync::{Arc, Mutex, OnceLock, RwLock};
+use std::sync::{Mutex, OnceLock};
 use std::time::SystemTime;
 
 /// 当前时间纳秒（供 AI 原生模块使用）。

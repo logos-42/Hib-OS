@@ -2,7 +2,7 @@
 
 use std::sync::{Mutex, OnceLock};
 
-use crate::smp::{CpuInfo, CpuTopology};
+use crate::smp::CpuTopology;
 
 /// 负载均衡器。
 pub struct LoadBalancer {

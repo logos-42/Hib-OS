@@ -137,7 +137,7 @@ pub struct SwapArea {
             }
             f.flush().map_err(|_| SwapError::IoError)?;
         }
-        let mut free_slots: Vec<usize> = (0..max_pages).rev().collect(); // 反转，pop 从小到大
+        let free_slots: Vec<usize> = (0..max_pages).rev().collect(); // 反转，pop 从小到大
         Ok(Self {
             path,
             max_pages,

@@ -6,7 +6,7 @@ use std::collections::HashMap;
 
 use crate::net::{RouteEntry};
 use crate::net::tcp::TcpSegment;
-use crate::net::udp::{self, UdpHeader};
+use crate::net::udp::UdpHeader;
 
 /// 1 的补码校验和：对多个字节片段连续求和。
 pub(crate) fn compute_checksum(parts: &[&[u8]]) -> u16 {
@@ -161,10 +161,10 @@ pub fn fragment(packet: &Ipv4Packet, mtu: usize) -> Result<Vec<Ipv4Packet>, Stri
     }
 
     let id = packet.header.identification;
-    let src = packet.header.src;
-    let dst = packet.header.dst;
-    let ttl = packet.header.ttl;
-    let protocol = packet.header.protocol;
+    let _src = packet.header.src;
+    let _dst = packet.header.dst;
+    let _ttl = packet.header.ttl;
+    let _protocol = packet.header.protocol;
 
     let mut out = Vec::new();
     let mut offset = 0usize;
@@ -305,7 +305,7 @@ impl IcmpPacket {
     pub fn sequence(&self) -> u16 { u16::from_be_bytes([self.rest[2], self.rest[3]]) }
 
     fn finalize(&mut self) {
-        let mut b = self.serialize_placeholder();
+        let b = self.serialize_placeholder();
         self.checksum = compute_checksum(&[&b]);
     }
 

@@ -1,8 +1,7 @@
 //! fork/exec 镜像加载 —— P0-2 子模块。
 
-use crate::process::{ProcessId, Pcb, ProcessState};
-use crate::process::process_mgr::{pm_state, ProcessManager};
-use std::sync::Mutex;
+use crate::process::{ProcessId, ProcessState};
+use crate::process::process_mgr::pm_state;
 
 /// fork：克隆当前进程的 PCB（通道集合克隆），返回子进程 pid。
 pub fn fork(parent_pid: ProcessId) -> Result<ProcessId, String> {

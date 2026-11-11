@@ -14,13 +14,12 @@
 //!
 //! 接口：`irq_handler_register(irq, handler)` / `irq_dispatch(irq)` / `idt_set_gate(...)` / `idt_load()`。
 
-use std::collections::{HashMap, VecDeque};
-use std::sync::{Arc, Mutex, OnceLock};
-use std::time::{Duration, Instant};
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
+use std::time::Instant;
 
 use crate::caps;
 use crate::exec::ExecId;
-use crate::lease::{self, Epoch};
 
 // =======================================================================
 // 中断线句柄

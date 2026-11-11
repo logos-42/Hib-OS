@@ -340,7 +340,7 @@ pub fn run_scheduler() {
 /// 将当前纤程放回就绪队列（用于时间片到期后的重入队）。
 pub fn requeue_current() {
     let id = {
-        let mut s = scheduler().lock().unwrap();
+        let s = scheduler().lock().unwrap();
         s.current
     };
     if let Some(id) = id {

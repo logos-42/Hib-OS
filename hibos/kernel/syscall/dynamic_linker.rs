@@ -251,7 +251,7 @@ impl DynamicLinker {
         }
 
         let mut temp_visiting: HashSet<String> = HashSet::new();
-        let mut visiting = match visiting {
+        let visiting = match visiting {
             Some(v) => v,
             None => &mut temp_visiting,
         };

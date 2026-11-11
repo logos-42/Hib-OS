@@ -17,7 +17,7 @@
 //! 所有结构均为纯 Rust 原型，供内核统一核算与调度，
 //! 并通过 `attention://*` 通道接入 `sense`/`act` 感知层。
 
-use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::{Mutex, OnceLock};
 
 // =====================================================================================
@@ -416,7 +416,7 @@ impl SelectiveAttention {
         self.target_channel = None;
     }
 
-    pub fn process(&self, channel: &str, signal: f32, noise: f32) -> f32 {
+    pub fn process(&self, channel: &str, signal: f32, _noise: f32) -> f32 {
         match &self.target_channel {
             Some(t) if t == channel => signal * self.enhancement_factor,
             Some(_) => signal * self.suppression_factor,
@@ -1150,7 +1150,7 @@ impl MultiHeadAttention {
     pub fn attend(&mut self, query: &[f32], keys: &[Vec<f32>], values: &[Vec<f32>]) -> Vec<f32> {
         self.attention_count += 1;
         let mut outputs: Vec<f32> = vec![0.0; self.head_dim];
-        for h in 0..self.num_heads {
+        for _h in 0..self.num_heads {
             let mut scores: Vec<f32> = keys.iter().map(|k| {
                 query.iter().zip(k.iter()).map(|(q, k)| q * k).sum::<f32>() / (self.head_dim as f32).sqrt()
             }).collect();

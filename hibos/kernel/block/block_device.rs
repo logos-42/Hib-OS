@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 use std::sync::{Mutex, OnceLock};
 
-use crate::block::{BlockDevice, BlockDeviceType};
+use crate::block::BlockDevice;
 
 /// 块设备注册表。
 struct BlockDeviceRegistry {

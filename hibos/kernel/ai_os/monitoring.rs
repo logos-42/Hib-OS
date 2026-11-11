@@ -20,7 +20,7 @@
 //!
 //! 所有结构均为纯 Rust 原型，无外部依赖，供内核统一核算与调度。
 
-use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::{Mutex, OnceLock};
 
 // =====================================================================================
@@ -447,7 +447,7 @@ impl NotificationChannelManager {
         id
     }
 
-    pub fn send(&mut self, channel_id: u64, message: &str) -> bool {
+    pub fn send(&mut self, channel_id: u64, _message: &str) -> bool {
         if let Some(channel) = self.channels.get_mut(&channel_id) {
             if channel.enabled {
                 channel.sent_count += 1;
@@ -796,7 +796,7 @@ impl SLOMonitor {
     pub fn sli(&self, target_name: &str) -> Option<f64> {
         let evaluations: Vec<&(u64, bool, f64, u128)> = self.evaluations.iter()
             .filter(|(tid, _, _, _)| {
-                self.targets.iter().any(|(name, t)| t.name == target_name && *tid == self.targets.iter().position(|(n, _)| n == target_name).unwrap_or(0) as u64)
+                self.targets.iter().any(|(_name, t)| t.name == target_name && *tid == self.targets.iter().position(|(n, _)| n == target_name).unwrap_or(0) as u64)
             })
             .collect();
         if evaluations.is_empty() {
@@ -1141,7 +1141,7 @@ pub fn monitoring_act(payload: &str) -> Result<String, String> {
             let metric_id = it.next().and_then(|s| s.parse::<u64>().ok()).ok_or("缺少指标id")?;
             let value = it.next().and_then(|s| s.parse::<f64>().ok()).unwrap_or(0.0);
             let mut eng = monitoring_engine().lock().unwrap();
-            let mut labels = BTreeMap::new();
+            let labels = BTreeMap::new();
             eng.collect_metric(metric_id, value, labels);
             Ok(format!("已采集指标 id={} 值={}", metric_id, value))
         }
@@ -1230,7 +1230,7 @@ pub fn monitoring_act(payload: &str) -> Result<String, String> {
             };
             let message: String = it.collect::<Vec<&str>>().join(" ");
             let mut eng = monitoring_engine().lock().unwrap();
-            let mut fields = BTreeMap::new();
+            let fields = BTreeMap::new();
             let id = eng.collect_log(level, &message, "shell", fields);
             Ok(format!("已采集日志 id={} 级别={:?}", id, level))
         }

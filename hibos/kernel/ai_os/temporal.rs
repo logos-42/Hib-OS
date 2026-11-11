@@ -16,7 +16,7 @@
 //!
 //! 所有结构均为纯 Rust 原型，无硬件依赖，供内核统一核算与调度。
 
-use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Mutex, OnceLock};
 
 // =====================================================================================
@@ -366,7 +366,7 @@ impl TemporalScheduler {
 
     pub fn due_tasks(&self, now_ns: u128) -> Vec<&ScheduledTask> {
         let mut due = Vec::new();
-        for (time, ids) in self.time_index.range(..=now_ns) {
+        for (_time, ids) in self.time_index.range(..=now_ns) {
             for id in ids {
                 if let Some(task) = self.tasks.get(id) {
                     if !task.executed {

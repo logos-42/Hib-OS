@@ -37,7 +37,7 @@ impl Taskbar {
         self.menu_open
     }
 
-    fn menu_rect(&self, w: u32, h: u32) -> Rect {
+    fn menu_rect(&self, _w: u32, h: u32) -> Rect {
         let mh = (ALL_APPS.len() as u32 * MENU_ITEM_H as u32 + 10).max(40);
         Rect::new(6, h as i32 - TASKBAR_H as i32 - mh as i32, MENU_W, mh)
     }

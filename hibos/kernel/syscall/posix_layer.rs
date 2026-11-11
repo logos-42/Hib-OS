@@ -708,7 +708,7 @@ impl PosixLayer {
     }
 
     /// 校验当前凭证对文件的访问权限。
-    fn may_access(meta: &FileMeta, uid: u32, gid: u32, flags: OpenFlags) -> bool {
+    fn may_access(meta: &FileMeta, uid: u32, _gid: u32, flags: OpenFlags) -> bool {
         // root (uid 0) 全放行。
         if uid == 0 {
             return true;
@@ -733,7 +733,7 @@ impl PosixLayer {
 
     fn sys_read(fd: i32, buf_len: usize) -> PosixResult<usize> {
         PosixState::with_mut(|s| {
-            let mut entry = s.fds.get_mut(&fd).ok_or(PosixError::EBADF)?;
+            let entry = s.fds.get_mut(&fd).ok_or(PosixError::EBADF)?;
             if !entry.readable {
                 return Err(PosixError::EACCES);
             }
@@ -754,7 +754,7 @@ impl PosixLayer {
     fn sys_write(fd: i32, buf_len: usize) -> PosixResult<usize> {
         // 用户态原型中无实际缓冲区，按 buf_len 视为要写入的字节数（填充零字节模拟）。
         PosixState::with_mut(|s| {
-            let mut entry = s.fds.get_mut(&fd).ok_or(PosixError::EBADF)?;
+            let entry = s.fds.get_mut(&fd).ok_or(PosixError::EBADF)?;
             if !entry.writable {
                 return Err(PosixError::EACCES);
             }
@@ -784,7 +784,7 @@ impl PosixLayer {
         let np = normalize_path(path, &current_cwd())?;
         PosixState::with(|s| {
             let (meta, _) = s.fs.get(&np).ok_or(PosixError::ENOENT)?;
-            Ok(((((meta.mode as u64) << 32) | (meta.size as u64 & 0xFFFF_FFFF)) as usize))
+            Ok((((meta.mode as u64) << 32) | (meta.size as u64 & 0xFFFF_FFFF)) as usize)
         })
     }
 
@@ -792,7 +792,7 @@ impl PosixLayer {
         PosixState::with(|s| {
             let entry = s.fds.get(&fd).ok_or(PosixError::EBADF)?;
             let (meta, _) = s.fs.get(&entry.path).ok_or(PosixError::ENOENT)?;
-            Ok(((((meta.mode as u64) << 32) | (meta.size as u64 & 0xFFFF_FFFF)) as usize))
+            Ok((((meta.mode as u64) << 32) | (meta.size as u64 & 0xFFFF_FFFF)) as usize)
         })
     }
 

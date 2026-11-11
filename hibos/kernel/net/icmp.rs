@@ -15,16 +15,14 @@
 //! 接口：`icmp_echo_request(dst, id, seq, payload)` / `icmp_echo_reply(...)` /
 //! `icmp_destination_unreachable(...)` / `icmp_time_exceeded(...)` / `icmp_process(...)`。
 
-use std::collections::{HashMap, VecDeque};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use crate::caps;
-use crate::exec::ExecId;
-use crate::lease::{self, Epoch};
-use crate::net::ipv4::{self, IcmpPacket, ICMP_ECHO_REQUEST, ICMP_ECHO_REPLY, compute_checksum,
+use crate::net::ipv4::{IcmpPacket, compute_checksum,
     IP_PROTO_ICMP};
-use crate::net::{net, NetStack, fmt_ip};
+use crate::net::{net, fmt_ip};
 
 // =======================================================================
 // ICMP 类型与代码（RFC 792 / RFC 1122）
@@ -336,7 +334,7 @@ pub struct IcmpStats {
     }
     // ------ 入站处理 ------
     /// 处理一段入站 ICMP 数据报（不含 IP 首部），返回上层事件。
-    pub fn process(&mut self, src_ip: [u8; 4], dst_ip: [u8; 4], bytes: &[u8]) -> IcmpEvent {
+    pub fn process(&mut self, src_ip: [u8; 4], _dst_ip: [u8; 4], bytes: &[u8]) -> IcmpEvent {
         let pkt = match IcmpPacket::parse(bytes) {
             Some(p) => p,
             None => { self.stats.packets_dropped += 1; return IcmpEvent::Drop; }

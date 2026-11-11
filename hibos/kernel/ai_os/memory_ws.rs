@@ -18,7 +18,7 @@
 //! 所有结构均为纯 Rust 原型，供内核统一核算与调度，
 //! 并通过 `memory://*` 通道接入 `sense`/`act` 感知层。
 
-use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::sync::{Mutex, OnceLock};
 
 // =====================================================================================
@@ -651,8 +651,8 @@ impl MemoryConsolidation {
     }
 
     pub fn batch_consolidate(&mut self, stm: &ShortTermMemory, ltm: &mut LongTermMemory) -> (u64, u64) {
-        let mut success = 0;
-        let mut fail = 0;
+        let success = 0;
+        let fail = 0;
         // 简化：遍历所有 STM 条目（这里无法直接访问内部，返回计数占位）
         let _ = stm;
         let _ = ltm;
@@ -747,7 +747,7 @@ impl MemoryAssociation {
     }
 
     pub fn associate(&self, key: &str, top_k: usize) -> Vec<AssociationResult> {
-        let mut results: Vec<AssociationResult> = self.associations.get(key)
+        let results: Vec<AssociationResult> = self.associations.get(key)
             .map(|rels| {
                 let mut v: Vec<AssociationResult> = rels.iter().map(|(k, s)| AssociationResult {
                     target_id: 0, // 简化
@@ -875,7 +875,7 @@ impl MemoryEngine {
     pub fn consolidate_wm_to_ltm(&mut self) -> u64 {
         let mut count = 0;
         // 简化：从工作记忆中激活度高的巩固到 LTM
-        let now = crate::ai_os::native::now_ns();
+        let _now = crate::ai_os::native::now_ns();
         let active: Vec<(u64, String, f32)> = self.working.chunks.iter()
             .filter(|(_, e)| e.activation > 0.5)
             .map(|(id, e)| (*id, e.content.clone(), e.activation))
@@ -1562,7 +1562,7 @@ impl MemoryReranker {
         self.strategy = strategy;
     }
 
-    pub fn rerank(&self, mut items: Vec<(u64, f32, u64, f32)>) -> Vec<(u64, f32)> {
+    pub fn rerank(&self, items: Vec<(u64, f32, u64, f32)>) -> Vec<(u64, f32)> {
         // items: (id, base_score, recall_count, salience)
         let now = crate::ai_os::native::now_ns();
         let mut scored: Vec<(u64, f32)> = items.into_iter().map(|(id, base_score, recall_count, salience)| {

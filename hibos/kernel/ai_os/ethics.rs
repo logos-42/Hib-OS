@@ -14,7 +14,7 @@
 //!
 //! 所有结构均为纯 Rust 原型，供内核统一核算与调度。
 
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::{BTreeMap, VecDeque};
 use std::sync::{Mutex, OnceLock};
 
 // =====================================================================================
@@ -455,7 +455,7 @@ impl PolicyEngine {
         }
     }
 
-    pub fn evaluate(&mut self, agent_id: u64, action: &str, context: &str) -> PolicyResult {
+    pub fn evaluate(&mut self, _agent_id: u64, action: &str, context: &str) -> PolicyResult {
         self.eval_count += 1;
 
         // 检查安全约束

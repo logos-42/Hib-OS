@@ -305,7 +305,7 @@ impl Debugger {
         if !self.attached {
             return Err(DebugError::NotAttached);
         }
-        let pid = self.target_pid;
+        let _pid = self.target_pid;
         self.attached = false;
         self.running = false;
         self.single_step = false;
@@ -510,7 +510,7 @@ impl Debugger {
             return Err(DebugError::NotAttached);
         }
         // 存储为一块连续字节。
-        let mut block: Vec<u8> = data.to_vec();
+        let block: Vec<u8> = data.to_vec();
         self.memory.insert(addr, block);
         Ok(data.len())
     }

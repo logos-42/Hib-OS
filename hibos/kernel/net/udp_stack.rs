@@ -15,7 +15,7 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::{Mutex, OnceLock};
 
 use crate::net::ipv4::compute_checksum;
-use crate::net::udp::{udp_checksum, verify_udp_checksum, UdpHeader, UDP_HEADER_LEN};
+use crate::net::udp::{verify_udp_checksum, UdpHeader, UDP_HEADER_LEN};
 
 // =======================================================================
 // 地址类型

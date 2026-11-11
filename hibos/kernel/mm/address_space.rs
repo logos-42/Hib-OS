@@ -10,7 +10,7 @@ use std::sync::{Mutex, OnceLock};
 use crate::exec::ExecId;
 use crate::mm::frame_alloc::{alloc_phys_frame, free_phys_frame};
 use crate::mm::pagetable::{
-    PageTable, PageTableEntry, PageTables, PageTableRoot, PteFlags, VAddr, PAddr,
+    PageTable, PageTableEntry, PageTables, PageTableRoot, PteFlags, VAddr,
 };
 
 /// 地址空间：每个进程/智能体独立的四级页表根。
@@ -57,7 +57,7 @@ pub fn create_address_space(pid: ExecId) -> Result<AddressSpace, String> {
         pgd_pfn,
         [PageTableEntry::new(); crate::mm::pagetable::PT_LEVEL_ENTRIES],
     );
-    let root = PageTableRoot(pgd_pfn);
+    let _root = PageTableRoot(pgd_pfn);
     let now = crate::monitor::get_time_ns();
     let space = AddressSpace {
         pid,
@@ -214,7 +214,7 @@ fn set_pte_flags(pid: ExecId, vaddr: u64, flag: PteFlags, set: bool) -> Result<(
         .get_mut(&pid)
         .ok_or_else(|| format!("地址空间不存在: pid={}", pid))?;
     let vaddr = VAddr(vaddr);
-    let root = PageTableRoot(space.pgd_pfn);
+    let _root = PageTableRoot(space.pgd_pfn);
     // 直接修改映射缓存。
     if let Some(pte) = space.mappings.get_mut(&vaddr.0) {
         if set {

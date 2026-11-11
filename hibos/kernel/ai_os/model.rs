@@ -24,7 +24,6 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::sync::{Mutex, OnceLock};
-use serde::{Deserialize, Serialize};
 
 /// 简单伪随机数生成器。
 pub fn fastrand_f32() -> f32 {
@@ -1663,7 +1662,7 @@ pub fn model_act(payload: &str) -> Result<String, String> {
         }
         // —— Ollama 本地模型支持 ——
         Some("ollama-list") => {
-            let mut eng = model_serving_engine().lock().unwrap();
+            let eng = model_serving_engine().lock().unwrap();
             match eng.ollama_client.list_models() {
                 Ok(models) => {
                     let mut out = String::from("Ollama 模型列表:\n");
@@ -1677,7 +1676,7 @@ pub fn model_act(payload: &str) -> Result<String, String> {
         }
         Some("ollama-pull") => {
             let model = it.next().ok_or("用法: model://ollama-pull <model_name>")?;
-            let mut eng = model_serving_engine().lock().unwrap();
+            let eng = model_serving_engine().lock().unwrap();
             match eng.ollama_client.pull_model(model) {
                 Ok(msg) => Ok(format!("模型 {} 已拉取: {}", model, msg)),
                 Err(e) => Err(format!("拉取模型 {} 失败: {}", model, e)),
@@ -1689,7 +1688,7 @@ pub fn model_act(payload: &str) -> Result<String, String> {
             if prompt.is_empty() {
                 return Err("缺少提示词".into());
             }
-            let mut eng = model_serving_engine().lock().unwrap();
+            let eng = model_serving_engine().lock().unwrap();
             match eng.ollama_client.chat(model, &prompt, 0.7, 0.9, 40, 512) {
                 Ok(text) => Ok(format!("模型 {} 回复:\n{}", model, text)),
                 Err(e) => Err(format!("模型 {} 对话失败: {}", model, e)),
@@ -2124,7 +2123,7 @@ impl ModelPruner {
         self.plan.total_weights = total_weights;
     }
 
-    pub fn prune_step(&mut self, accuracy: f32) -> PruneStep {
+    pub fn prune_step(&mut self, _accuracy: f32) -> PruneStep {
         let step = self.plan.steps + 1;
         let sparsity_before = self.plan.current_sparsity;
         let sparsity_after = (sparsity_before + 0.1).min(self.plan.target_sparsity);
@@ -2328,7 +2327,7 @@ impl ModelCalibrator {
         self.method = method;
     }
 
-    pub fn calibrate(&mut self, tensor_name: &str, min_val: f32, max_val: f32) -> CalibrationResult {
+    pub fn calibrate(&mut self, _tensor_name: &str, min_val: f32, max_val: f32) -> CalibrationResult {
         let (scale, zero_point) = match self.method {
             CalibrationMethod::MinMax => {
                 let scale = (max_val - min_val) / 255.0;

@@ -1,12 +1,11 @@
 //! simplefs 操作 —— P0-4 simplefs 子模块。
 
-use std::collections::BTreeMap;
 use std::sync::{Mutex, OnceLock};
 
-use crate::simplefs::superblock::{format, get_superblock, is_formatted, alloc_block, free_block};
+use crate::simplefs::superblock::{format, get_superblock, is_formatted, alloc_block};
 use crate::simplefs::inode_bitmap::{init as init_inode_bitmap, alloc as alloc_inode};
 use crate::simplefs::block_bitmap::{init as init_block_bitmap};
-use crate::simplefs::directory::{init_root, insert, lookup, remove, list};
+use crate::simplefs::directory::{init_root, insert, remove};
 
 /// 简单文件系统句柄。
 pub struct SimpleFs {

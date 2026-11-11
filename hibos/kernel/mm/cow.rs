@@ -8,10 +8,10 @@ use std::sync::{Mutex, OnceLock};
 
 use crate::exec::ExecId;
 use crate::mm::address_space::{
-    as_registry, create_address_space, get_address_space, map_vaddr, query_pte, translate_vaddr,
+    as_registry, map_vaddr, query_pte,
 };
-use crate::mm::frame_alloc::{alloc_phys_frame, free_phys_frame};
-use crate::mm::pagetable::{PteFlags, VAddr};
+use crate::mm::frame_alloc::alloc_phys_frame;
+use crate::mm::pagetable::PteFlags;
 
 /// COW 区域：一段共享页框范围，标记为 COW，首次写入触发复制。
 #[derive(Clone, Debug)]
@@ -72,7 +72,7 @@ pub fn cow_fork(source_pid: ExecId, target_pid: ExecId) -> Result<(), String> {
 
     // 将源空间的可写用户页也标记为 COW（只读）。
     let mut g2 = as_registry().lock().unwrap();
-    let source_space = g2
+    let _source_space = g2
         .spaces
         .get_mut(&source_pid)
         .ok_or("源地址空间不存在")?;

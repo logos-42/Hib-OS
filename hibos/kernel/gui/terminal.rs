@@ -59,7 +59,7 @@ impl Color {
                 231 => "256色#231",
                 _ => "256色",
             },
-            Color::Rgb(r, g, b) => "真彩色",
+            Color::Rgb(_r, _g, _b) => "真彩色",
             Color::DefaultFg => "默认前景",
             Color::DefaultBg => "默认背景",
         }
@@ -127,7 +127,7 @@ pub struct Cursor {
 }
 
 impl Cursor {
-    pub fn new(rows: usize, cols: usize) -> Self {
+    pub fn new(_rows: usize, _cols: usize) -> Self {
         Self {
             row: 0,
             col: 0,
@@ -191,7 +191,7 @@ impl TerminalBuffer {
     /// 重设大小：保留内容，新增行/列填空白，超出部分截断。
     pub fn resize(&mut self, rows: usize, cols: usize) {
         let old_rows = self.rows;
-        let old_cols = self.cols;
+        let _old_cols = self.cols;
         self.rows = rows;
         self.cols = cols;
 
@@ -273,7 +273,7 @@ impl TerminalBuffer {
             if self.scrollback.len() >= self.max_scrollback {
                 self.scrollback.pop_front();
             }
-            let mut new_row = vec![Cell::blank(); self.cols];
+            let new_row = vec![Cell::blank(); self.cols];
             // 保留当前滚动区内的属性默认。
             self.scrollback.push_back(self.grid.remove(0));
             self.grid.push(new_row);

@@ -16,7 +16,7 @@
 //!
 //! 所有结构均为纯 Rust 原型，无真实网络依赖，供内核统一核算与调度。
 
-use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::{Mutex, OnceLock};
 
 use crate::net::{net, ETH_IP};
@@ -1839,7 +1839,7 @@ impl ProxyServer {
         self.backend_endpoints.push(endpoint);
     }
 
-    pub fn proxy_request(&mut self, client_ip: u64, request_size: u64) -> Option<String> {
+    pub fn proxy_request(&mut self, _client_ip: u64, request_size: u64) -> Option<String> {
         if self.backend_endpoints.is_empty() {
             self.errors += 1;
             return None;

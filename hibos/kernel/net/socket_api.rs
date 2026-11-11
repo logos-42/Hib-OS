@@ -387,7 +387,7 @@ pub fn setsockopt(fd: SocketFd, level: i32, optname: i32, optval: &[u8]) -> Resu
 }
 
 /// 获取 socket 选项。
-pub fn getsockopt(fd: SocketFd, level: i32, optname: i32) -> Result<Vec<u8>, String> {
+pub fn getsockopt(_fd: SocketFd, level: i32, optname: i32) -> Result<Vec<u8>, String> {
     let (_lvl, _opt) = SockOpt::from_raw(level, optname).ok_or_else(|| "无效 socket 选项层/名称".to_string())?;
     let _st = SocketTable::instance().lock().unwrap();
     // 简化：返回空值。

@@ -6,9 +6,8 @@
 //! 的实现并存）。NetStack 上的 poll/process_frame/frame_and_queue 等底层方法
 //! 定义在 kernel/net/mod.rs 中。
 
-use crate::net::{net, NetStack, IP_PROTO_ICMP, IP_PROTO_TCP, IP_PROTO_UDP};
+use crate::net::{net, NetStack, IP_PROTO_UDP};
 use crate::net::tcp::{self, TcpConnKey};
-use crate::net::udp::{self};
 
 pub type SocketFd = u32;
 

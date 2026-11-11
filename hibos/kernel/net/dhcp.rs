@@ -10,7 +10,7 @@
 //! * DHCP 报文：DISCOVER/OFFER/REQUEST/ACK/NAK/RELEASE、XID 事务 ID、选项字段
 //! * sense/act 通道：`net://dhcp`
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::VecDeque;
 use std::sync::{Mutex, OnceLock};
 
 // =======================================================================

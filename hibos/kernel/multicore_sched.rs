@@ -18,7 +18,7 @@
 //! * `yield_to(core_id)` —— 让出指定核心上的当前任务；
 //! * `load_balance()` —— 跨核负载均衡，迁移任务。
 
-use std::collections::{BTreeMap, BinaryHeap, HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap};
 use std::sync::{Mutex, OnceLock};
 
 // =====================================================================================
@@ -153,7 +153,7 @@ pub struct CfsRunQueue {
         // 移除已完成或非就绪的任务。
         self.cleanup_non_ready();
         let mut chosen = None;
-        for (&vruntime, ids) in self.tasks.iter() {
+        for (&_vruntime, ids) in self.tasks.iter() {
             if let Some(tid) = ids.iter().find(|&&t| self.task_map.get(&t).map_or(false, |task| task.state == TaskState::Ready)) {
                 chosen = Some(*tid);
                 break;

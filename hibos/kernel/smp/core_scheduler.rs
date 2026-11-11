@@ -1,6 +1,6 @@
 //! 核心调度器 —— P1-3 子模块。
 
-use crate::smp::{CpuInfo, CpuTopology};
+use crate::smp::CpuTopology;
 
 /// 核心调度器：将任务分配到特定 CPU。
 pub struct CoreScheduler {
@@ -45,7 +45,7 @@ impl CoreScheduler {
 }
 
 /// 全局调度。
-pub fn core_schedule(topo: &mut CpuTopology, cpu: usize, task_id: u64) -> Result<(), String> {
+pub fn core_schedule(topo: &mut CpuTopology, cpu: usize, _task_id: u64) -> Result<(), String> {
     if cpu >= topo.cpus.len() {
         return Err("CPU 不存在".to_string());
     }

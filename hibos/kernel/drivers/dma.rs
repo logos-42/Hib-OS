@@ -17,11 +17,10 @@
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex, OnceLock};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use crate::caps;
 use crate::exec::ExecId;
-use crate::lease::{self, Epoch};
 
 // =======================================================================
 // 散射聚合描述符
@@ -331,7 +330,7 @@ impl DmaEngine {
     pub fn dma_poll(&mut self) -> Vec<DmaTransferId> {
         let mut completed = Vec::new();
         let now = Instant::now();
-        for (ch_idx, ch) in self.channels.iter_mut() {
+        for (_ch_idx, ch) in self.channels.iter_mut() {
             if ch.state != DmaChannelState::Busy { continue; }
             let current_id = match ch.current { Some(id) => id, None => { ch.state = DmaChannelState::Idle; continue; } };
             let transfer = match self.transfers.get_mut(&current_id) {

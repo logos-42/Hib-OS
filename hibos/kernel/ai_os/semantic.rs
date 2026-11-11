@@ -17,7 +17,7 @@
 //! 所有结构均为纯 Rust 原型，无外部嵌入模型依赖，供内核统一核算与调度，
 //! 并通过 `semantic://*` 通道接入 `sense`/`act` 感知层。
 
-use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
+use std::collections::BTreeMap;
 use std::sync::{Mutex, OnceLock};
 
 // =====================================================================================
@@ -631,8 +631,8 @@ impl SemanticEngine {
         self.namespace.resolve(path).map(|v| v.norm)
     }
 
-    pub fn analogy(&mut self, a: &str, b: &str, c: &str) -> Option<(u64, f32)> {
-        let va = self.space.all().iter().find(|v| {
+    pub fn analogy(&mut self, _a: &str, _b: &str, _c: &str) -> Option<(u64, f32)> {
+        let _va = self.space.all().iter().find(|v| {
             self.namespace.list_paths().iter().any(|p| self.namespace.resolve(p).map(|rv| rv.id == v.id).unwrap_or(false))
         });
         // 简化：直接对前三个向量做类比
@@ -1140,7 +1140,7 @@ impl WordEmbedding {
     }
 
     pub fn closest(&self, word: &str, top_k: usize) -> Vec<(String, f32)> {
-        let v = match self.get(word) {
+        let _v = match self.get(word) {
             Some(v) => v,
             None => return Vec::new(),
         };

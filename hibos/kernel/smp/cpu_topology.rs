@@ -2,7 +2,7 @@
 
 use std::sync::{Mutex, OnceLock};
 
-use crate::smp::{CpuInfo, CpuTopology};
+use crate::smp::CpuTopology;
 
 static CPU_TOPO: OnceLock<Mutex<Option<CpuTopology>>> = OnceLock::new();
 

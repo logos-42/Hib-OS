@@ -320,7 +320,7 @@ impl PageTable {
         let (pml4_idx, pdpt_idx, pd_idx, _pt_idx, _offset) = vaddr.decompose();
         let mut cur_pfn = root.0;
 
-        for &(idx, is_last) in &[
+        for &(idx, _is_last) in &[
             (pml4_idx, false),
             (pdpt_idx, false),
             (pd_idx, false),
@@ -372,7 +372,7 @@ impl PageTable {
         root: PageTableRoot,
         vaddr: VAddr,
     ) -> Result<PAddr, String> {
-        let (_pml4, _pdpt, _pd, pt_idx, offset) = vaddr.decompose();
+        let (_pml4, _pdpt, _pd, _pt_idx, offset) = vaddr.decompose();
         let entry = Self::walk_ref(tables, root, vaddr).ok_or("地址未映射")?;
         if !entry.is_present() {
             return Err("页表项未呈现".to_string());

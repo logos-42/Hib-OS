@@ -11,7 +11,7 @@
 //! * 递归查询（串联多台上游服务器）、缓存（TTL 过期淘汰）、hosts 文件支持
 //! * sense/act 通道：`net://dns`
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -287,7 +287,7 @@ fn encode_name(b: &mut Vec<u8>, name: &str) {
 /// 解码 DNS 标签格式域名（不处理指针，简化）。
 fn decode_name(bytes: &[u8], mut i: usize) -> Option<(String, usize)> {
     let mut labels = Vec::new();
-    let mut start = i;
+    let _start = i;
     loop {
         if i >= bytes.len() { return None; }
         let len = bytes[i] as usize;

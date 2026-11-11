@@ -10,10 +10,10 @@
 //! 视图模式：图标 / 列表 / 详细；排序：名称 / 大小 / 时间 / 类型；支持筛选与多选。
 //! 与 `kernel/fsmeta.rs`、`kernel/vfs.rs` 互补，这里侧重 GUI 层的文件条目管理与操作逻辑。
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::UNIX_EPOCH;
 
 // ============================================================================
 // 文件条目
@@ -278,7 +278,7 @@ impl FileManager {
                 .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
                 .map(|d| d.as_secs())
                 .unwrap_or(0);
-            let mut fe = FileEntry::new(&name, path, file_type, size, modified);
+            let fe = FileEntry::new(&name, path, file_type, size, modified);
             if let Some(f) = &self.filter {
                 if !name.to_ascii_lowercase().contains(&f.to_ascii_lowercase()) {
                     continue;

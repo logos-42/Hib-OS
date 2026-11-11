@@ -1,7 +1,6 @@
 //! 块 I/O 调度器 —— P0-4 子模块。
 
 use std::collections::BTreeMap;
-use std::sync::{Mutex, OnceLock};
 
 /// I/O 调度算法。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

@@ -10,10 +10,9 @@
 //!
 //! 所有公共状态均通过 `OnceLock<Mutex<...>>` 全局单例持有，与现有模块保持一致。
 
-use crate::channels::{Access, Channel, ChannelError, ChannelKind, ChannelRegistry};
-use crate::lease::{self, Epoch, Lease, Snapshot};
-use crate::caps;
-use std::collections::{BTreeMap, HashMap, VecDeque};
+use crate::channels::{Access, ChannelError, ChannelKind, ChannelRegistry};
+use crate::lease::{self, Epoch};
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -199,7 +198,7 @@ impl ChannelNotifier {
     }
 
     /// 取消指定订阅者 ID 的订阅。若订阅者不存在则静默忽略。
-    pub fn unsubscribe(&mut self, channel: &str, id: u64) -> bool {
+    pub fn unsubscribe(&mut self, channel: &str, _id: u64) -> bool {
         let list = match self.subscribers.get_mut(channel) {
             Some(l) => l,
             None => return false,

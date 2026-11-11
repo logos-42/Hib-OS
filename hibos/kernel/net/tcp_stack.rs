@@ -17,15 +17,13 @@
 //! `tcp_process_segment(src_ip, dst_ip, bytes)` / `tcp_stack_tick(dt)`。
 
 use std::collections::{HashMap, VecDeque};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use crate::caps;
 use crate::exec::ExecId;
-use crate::lease::{self, Epoch};
-use crate::net::tcp::{self, TcpConnKey, TcpSegment, TcpState, DEFAULT_MSS, TCP_ACK, TCP_FIN,
-    TCP_PSH, TCP_RST, TCP_SYN, TCP_HEADER_LEN};
-use crate::net::{net, NetStack, IP_PROTO_TCP};
+use crate::net::tcp::{TcpConnKey, TcpSegment, TcpState, DEFAULT_MSS, TCP_ACK, TCP_FIN,
+    TCP_PSH, TCP_RST, TCP_SYN};
 
 // =======================================================================
 // 拥塞控制（Reno / Cubic）
@@ -400,7 +398,7 @@ impl TcpStack {
     }
 
     /// 主动打开连接：发送 SYN，返回待发送的段列表。状态 Closed -> SynSent。
-    pub fn connect(&mut self, owner: ExecId, local_port: u16, remote_ip: [u8; 4],
+    pub fn connect(&mut self, _owner: ExecId, local_port: u16, remote_ip: [u8; 4],
                    remote_port: u16) -> Result<Vec<TcpSegment>, String> {
         // 检查 CAP_NET_RAW（原始 TCP 连接需该能力）。
         if !caps::caps().lock().unwrap().has("CAP_NET_RAW") {

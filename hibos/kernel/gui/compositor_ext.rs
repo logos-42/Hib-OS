@@ -176,7 +176,7 @@ impl Layer {
                     let a = ((p >> 24) as u32 * factor / 255) as u8;
                     let r = ((p >> 16) as u8 as u32 * factor / 255) as u8;
                     let g = ((p >> 8) as u8 as u32 * factor / 255) as u8;
-                    let b = ((p as u8 as u32 * factor / 255) as u8);
+                    let b = (p as u8 as u32 * factor / 255) as u8;
                     self.surface.put(x, y, argb(a, r, g, b));
                 }
             }
@@ -518,7 +518,7 @@ impl CompositorExt {
                             let a = ((p >> 24) as u32 * factor / 255) as u8;
                             let r = ((p >> 16) as u8 as u32 * factor / 255) as u8;
                             let g = ((p >> 8) as u8 as u32 * factor / 255) as u8;
-                            let b = ((p as u8 as u32 * factor / 255) as u8);
+                            let b = (p as u8 as u32 * factor / 255) as u8;
                             surf.put(x, y, argb(a, r, g, b));
                         }
                     }
