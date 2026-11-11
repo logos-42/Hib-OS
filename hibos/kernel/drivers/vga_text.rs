@@ -30,13 +30,13 @@ pub enum Color {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(C)]
-struct VgaChar {
-    ascii: u8,
-    color: u8,
+pub struct VgaChar {
+    pub ascii: u8,
+    pub color: u8,
 }
 
 impl VgaChar {
-    fn new(ascii: u8, fg: Color, bg: Color) -> Self {
+    pub fn new(ascii: u8, fg: Color, bg: Color) -> Self {
         VgaChar {
             ascii,
             color: (bg as u8) << 4 | (fg as u8),
