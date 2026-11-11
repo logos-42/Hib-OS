@@ -8,7 +8,7 @@
 //! 截止时间保障，负载均衡保证核间负载均衡。本模块为纯内存模拟，不操作
 //! 真实线程/CPU，适合调度子系统的原型验证。
 //!
-//! 并发：全局 `MulticoreScheduler` 单例由 `OnceLock<Mutex<...>>` 守护；上层可
+//! 并发：全局 `MulticoreScheduler` 单例由 `OnceLock<SpinLock<...>>` 守护；上层可
 //! 沿用 `kernel/lease.rs` 的单写者租约对特定核心的就绪队列做独占写。
 //! 能力：任务入队/调度受 `kernel/caps.rs` 的 `CAP_SYS_ADMIN` 门禁。
 //! 通道：`sched://<域>` 映射到 `sense.rs` / `act_sched`。
@@ -18,8 +18,8 @@
 //! * `yield_to(core_id)` —— 让出指定核心上的当前任务；
 //! * `load_balance()` —— 跨核负载均衡，迁移任务。
 
-use std::collections::{BTreeMap, HashMap};
-use std::sync::{Mutex, OnceLock};
+use alloc::collections::{BTreeMap, HashMap};
+use crate::ksync::{SpinLock, OnceLock};
 
 // =====================================================================================
 // 任务与核心通用类型
@@ -730,26 +730,26 @@ pub struct MulticoreScheduler {
 // =====================================================================================
 // 全局单例
 // =====================================================================================
-static MULTICORE_SCHED: OnceLock<Mutex<MulticoreScheduler>> = OnceLock::new();
-fn multicore_sched() -> &'static Mutex<MulticoreScheduler> {
-    MULTICORE_SCHED.get_or_init(|| Mutex::new(MulticoreScheduler::new(4)))
+static MULTICORE_SCHED: OnceLock<SpinLock<MulticoreScheduler>> = OnceLock::new();
+fn multicore_sched() -> &'static SpinLock<MulticoreScheduler> {
+    MULTICORE_SCHED.get_or_init(|| SpinLock::new(MulticoreScheduler::new(4)))
 }
 /// 创建核心数为 `core_count` 的全局多核调度器。
 pub fn init_multicore(core_count: usize) {
-    *multicore_sched().lock().unwrap() = MulticoreScheduler::new(core_count);
+    *multicore_sched().lock() = MulticoreScheduler::new(core_count);
 }
 /// 入队任务到指定核心。
 pub fn sched_enqueue(core_id: usize, name: &str, nice: i32, use_eevdf: bool) -> TaskId {
     let task = Task::new(name, nice);
     let tid = task.id;
-    multicore_sched().lock().unwrap().enqueue(core_id, task, use_eevdf);
+    multicore_sched().lock().enqueue(core_id, task, use_eevdf);
     tid
 }
 /// 入队到负载最小核心。
 pub fn sched_enqueue_least_loaded(name: &str, nice: i32, use_eevdf: bool) -> TaskId {
     let task = Task::new(name, nice);
     let tid = task.id;
-    multicore_sched().lock().unwrap().enqueue_least_loaded(task, use_eevdf);
+    multicore_sched().lock().enqueue_least_loaded(task, use_eevdf);
     tid
 }
 /// 选出下一个运行任务（接口：pick_next(core_id)）。
@@ -761,7 +761,7 @@ pub fn sched_pick_next(core_id: usize, use_eevdf: bool) -> Option<TaskId> {
 }
 /// 让出指定核心上的任务（接口：yield_to(core_id)）。
 pub fn sched_yield_to(core_id: usize, tid: TaskId, use_eevdf: bool) {
-    multicore_sched().lock().unwrap().yield_to(core_id, tid, use_eevdf);
+    multicore_sched().lock().yield_to(core_id, tid, use_eevdf);
 }
 /// 时钟中断。
 pub fn sched_tick(core_id: usize, tid: TaskId, use_eevdf: bool, delta_ns: u64) {
@@ -772,19 +772,19 @@ pub fn sched_tick(core_id: usize, tid: TaskId, use_eevdf: bool, delta_ns: u64) {
 }
 /// 负载均衡。
 pub fn sched_load_balance() -> Option<(usize, usize, TaskId)> {
-    multicore_sched().lock().unwrap().load_balance()
+    multicore_sched().lock().load_balance()
 }
 /// 返回总就绪数。
 pub fn sched_total_ready() -> usize {
-    multicore_sched().lock().unwrap().total_ready_count()
+    multicore_sched().lock().total_ready_count()
 }
 /// 返回摘要。
 pub fn sched_summary() -> String {
-    multicore_sched().lock().unwrap().summary()
+    multicore_sched().lock().summary()
 }
 /// 返回总负载均衡次数。
 pub fn sched_balance_count() -> u64 {
-    multicore_sched().lock().unwrap().balance_count()
+    multicore_sched().lock().balance_count()
 }
 // =====================================================================================
 // 单元测试

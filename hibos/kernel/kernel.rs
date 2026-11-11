@@ -15,6 +15,7 @@ pub mod arch;
 pub mod drivers;
 pub mod fs;
 pub mod ksync;
+pub mod syscall;
 pub mod time;
 // pub mod mm;           // Phase 3: 内存管理
 
