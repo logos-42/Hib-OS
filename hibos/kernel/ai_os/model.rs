@@ -24,6 +24,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::sync::{Mutex, OnceLock};
+use serde::{Deserialize, Serialize};
 
 /// 简单伪随机数生成器。
 pub fn fastrand_f32() -> f32 {
@@ -1660,6 +1661,60 @@ pub fn model_act(payload: &str) -> Result<String, String> {
             reg.distributor.register_shard(ModelShard { shard_id, name: name.to_string(), offset, size, checksum, peers: Vec::new() });
             Ok(format!("已注册分片 {} shard={} offset={} size={} checksum={}", name, shard_id, offset, size, checksum_out))
         }
+        // —— Ollama 本地模型支持 ——
+        Some("ollama-list") => {
+            let mut eng = model_serving_engine().lock().unwrap();
+            match eng.ollama_client.list_models() {
+                Ok(models) => {
+                    let mut out = String::from("Ollama 模型列表:\n");
+                    for m in models {
+                        out.push_str(&format!("  - {}\n", m));
+                    }
+                    Ok(out)
+                }
+                Err(e) => Err(format!("获取 Ollama 模型列表失败: {}", e)),
+            }
+        }
+        Some("ollama-pull") => {
+            let model = it.next().ok_or("用法: model://ollama-pull <model_name>")?;
+            let mut eng = model_serving_engine().lock().unwrap();
+            match eng.ollama_client.pull_model(model) {
+                Ok(msg) => Ok(format!("模型 {} 已拉取: {}", model, msg)),
+                Err(e) => Err(format!("拉取模型 {} 失败: {}", model, e)),
+            }
+        }
+        Some("ollama-chat") => {
+            let model = it.next().ok_or("用法: model://ollama-chat <model_name> <prompt>")?;
+            let prompt: String = it.collect::<Vec<&str>>().join(" ");
+            if prompt.is_empty() {
+                return Err("缺少提示词".into());
+            }
+            let mut eng = model_serving_engine().lock().unwrap();
+            match eng.ollama_client.chat(model, &prompt, 0.7, 0.9, 40, 512) {
+                Ok(text) => Ok(format!("模型 {} 回复:\n{}", model, text)),
+                Err(e) => Err(format!("模型 {} 对话失败: {}", model, e)),
+            }
+        }
+        Some("ollama-set-endpoint") => {
+            let url = it.next().ok_or("用法: model://ollama-set-endpoint <url>")?;
+            let mut eng = model_serving_engine().lock().unwrap();
+            eng.ollama_client.base_url = url.to_string();
+            Ok(format!("Ollama 端点已设置: {}", url))
+        }
+        Some("ollama-status") => {
+            let eng = model_serving_engine().lock().unwrap();
+            match eng.ollama_client.list_models() {
+                Ok(models) => {
+                    let mut out = String::from(format!("Ollama 状态: 可用 (端点: {})\n", eng.ollama_client.base_url));
+                    out.push_str(&format!("可用模型数: {}\n", models.len()));
+                    for m in models.iter().take(10) {
+                        out.push_str(&format!("  - {}\n", m));
+                    }
+                    Ok(out)
+                }
+                Err(e) => Err(format!("Ollama 服务不可用: {}", e)),
+            }
+        }
         Some("status") | None => Ok(status()),
         Some(other) => Err(format!("未知 model 动作: {}", other)),
     }
@@ -2433,6 +2488,86 @@ impl ModelMetadataIndex {
 }
 
 // =====================================================================================
+// Ollama 客户端 (OllamaClient)
+// =====================================================================================
+
+/// Ollama API 客户端：调用本地 Ollama 服务进行模型推理。
+#[derive(Clone, Debug)]
+pub struct OllamaClient {
+    pub base_url: String,
+    pub client: ureq::Agent,
+}
+
+impl OllamaClient {
+    pub fn new() -> Self {
+        Self {
+            base_url: "http://localhost:11434".to_string(),
+            client: ureq::Agent::new(),
+        }
+    }
+
+    pub fn new_with_url(url: &str) -> Self {
+        Self {
+            base_url: url.to_string(),
+            client: ureq::Agent::new(),
+        }
+    }
+
+    /// 列出本地 Ollama 可用模型。
+    pub fn list_models(&self) -> Result<Vec<String>, String> {
+        let url = format!("{}/api/tags", self.base_url);
+        let resp: serde_json::Value = self.client.get(&url).call().map_err(|e| e.to_string())?
+            .into_string().map_err(|e| e.to_string())
+            .and_then(|s| serde_json::from_str(&s).map_err(|e| e.to_string()))?;
+        let models = resp.get("models")
+            .and_then(|m| m.as_array())
+            .map(|arr| arr.iter()
+                .filter_map(|m| m.get("name").and_then(|n| n.as_str().map(|s| s.to_string())))
+                .collect())
+            .unwrap_or_default();
+        Ok(models)
+    }
+
+    /// 拉取模型。
+    pub fn pull_model(&self, model: &str) -> Result<String, String> {
+        let url = format!("{}/api/pull", self.base_url);
+        let body = serde_json::json!({ "name": model });
+        self.client.post(&url)
+            .send_string(&serde_json::to_string(&body).map_err(|e| e.to_string())?)
+            .map_err(|e| e.to_string())?
+            .into_string()
+            .map_err(|e| e.to_string())
+    }
+
+    /// 聊天对话。
+    pub fn chat(&self, model: &str, prompt: &str, temperature: f32, top_p: f32, top_k: u32, max_tokens: u64) -> Result<String, String> {
+        let url = format!("{}/api/chat", self.base_url);
+        let body = serde_json::json!({
+            "model": model,
+            "messages": [{"role": "user", "content": prompt}],
+            "stream": false,
+            "options": {
+                "temperature": temperature,
+                "top_p": top_p,
+                "top_k": top_k,
+                "num_predict": max_tokens,
+            }
+        });
+        let resp: serde_json::Value = self.client.post(&url)
+            .send_string(&serde_json::to_string(&body).map_err(|e| e.to_string())?)
+            .map_err(|e| e.to_string())?
+            .into_string().map_err(|e| e.to_string())
+            .and_then(|s| serde_json::from_str(&s).map_err(|e| e.to_string()))?;
+        let message = resp.get("message")
+            .and_then(|m| m.get("content"))
+            .and_then(|c| c.as_str())
+            .unwrap_or("")
+            .to_string();
+        Ok(message)
+    }
+}
+
+// =====================================================================================
 // 模型元数据索引测试
 // =====================================================================================
 
@@ -3151,6 +3286,7 @@ pub struct ModelServingEngine {
     pub response_cache: ResponseCache,
     pub metrics: MetricsCollector,
     pub load_balancer: LoadBalancer,
+    pub ollama_client: OllamaClient,
     pub enabled: bool,
     pub total_requests: u64,
 }
@@ -3163,6 +3299,7 @@ impl ModelServingEngine {
             response_cache: ResponseCache::new(),
             metrics: MetricsCollector::new(),
             load_balancer: LoadBalancer::new(),
+            ollama_client: OllamaClient::new(),
             enabled: true,
             total_requests: 0,
         }
@@ -3184,6 +3321,39 @@ impl ModelServingEngine {
                 .sum();
             self.batch_processor.create_batch(started.clone(), total_tokens);
             self.metrics.increment_counter("model_batches_total", 1.0, &[]);
+
+            // 通过 Ollama 处理每个请求
+            for id in started.clone() {
+                if let Some(req) = self.inference_server.processing.get(&id) {
+                    let model_name = &req.model_name;
+                    let prompt_tokens_str: String = req.input_tokens.iter()
+                        .map(|t| t.to_string())
+                        .collect::<Vec<_>>()
+                        .join(" ");
+                    match self.ollama_client.chat(
+                        model_name,
+                        &prompt_tokens_str,
+                        req.temperature,
+                        req.top_p,
+                        req.top_k,
+                        req.max_new_tokens,
+                    ) {
+                        Ok(text) => {
+                            let output_tokens: Vec<u32> = text.chars()
+                                .filter_map(|c| c.to_digit(10))
+                                .collect();
+                            let prefill_ns = req.input_tokens.len() as u128 * 1000;
+                            let decode_ns = output_tokens.len() as u128 * 100;
+                            let _ = self.complete_inference(
+                                id, output_tokens, text, prefill_ns, decode_ns
+                            );
+                        }
+                        Err(e) => {
+                            let _ = self.fail_inference(id, &format!("Ollama error: {}", e));
+                        }
+                    }
+                }
+            }
         }
         started
     }

@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 
 use super::dentry::{dentry_create, dentry_create_typed, dentry_delete, dentry_list, dentry_lookup, ROOT_INO};
 use super::fd_table::{fd_alloc, fd_close, fd_count, fd_get, fd_registry, Access, FdTable};
-use super::inode::{alloc_inode, free_inode, get_inode, get_inode_mut, InodeType};
+use super::inode::{free_inode, get_inode, get_inode_mut, InodeType};
 
 /// 全局 VFS：按进程 ID 维护独立 fd 表。
 pub struct Vfs {

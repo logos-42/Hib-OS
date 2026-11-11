@@ -19,6 +19,8 @@ bench = false
 
 [dependencies]
 ureq = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 winit = { version = "0.30", optional = true }
 softbuffer = { version = "0.4", optional = true }
 

@@ -17,7 +17,9 @@
 //! 所有结构均为纯 Rust 原型，无磁盘依赖，供内核统一核算与调度。
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
-use\ std::sync::\{Mutex,\ OnceLock};\\nuse\ crate::fs::\{make_dir,\ read_file,\ write_file};
+use std::sync::{Mutex, OnceLock};
+
+use crate::fs::{make_dir, read_file, write_file};
 
 // =====================================================================================
 // 语义 inode (SemanticInode)
@@ -165,7 +167,7 @@ impl MemoryFile {
         if self.append_only || self.readonly {
             return Err("文件只追加/只读".into());
         }
-        let offset = self.content.len();
+        let _offset = self.content.len();
         self.content.extend_from_slice(data);
         Ok(data.len() as u64)
     }
