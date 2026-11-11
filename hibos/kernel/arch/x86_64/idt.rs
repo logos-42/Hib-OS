@@ -26,10 +26,6 @@ const IDT_ENTRIES: usize = 256;
 
 static mut IDT: [IdtEntry; IDT_ENTRIES] = [IdtEntry { offset_low: 0, selector: 0, ist: 0, type_attr: 0, offset_mid: 0, offset_high: 0, _reserved: 0}; IDT_ENTRIES];
 
-extern "C" {
-    fn double_fault_handler();
-}
-
 /// 初始化 IDT：只安装双重错误处理器，其余留空。
 pub fn init() {
     unsafe {
@@ -58,8 +54,7 @@ pub fn init() {
     }
 }
 
-#[naked]
-#[no_mangle]
+#[unsafe(naked)]
 pub unsafe extern "C" fn double_fault_handler() -> ! {
-    asm!("hlt", options(noreturn));
+    core::arch::naked_asm!("hlt", options(noreturn));
 }

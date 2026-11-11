@@ -3,7 +3,7 @@
 use core::fmt::Write;
 use core::sync::atomic::{AtomicUsize, Ordering};
 
-const VGA_ADDR: *mut u16 = 0xB8000 as *mut u16;
+const VGA_ADDR: *mut VgaChar = 0xB8000 as *mut VgaChar;
 const WIDTH: usize = 80;
 const HEIGHT: usize = 25;
 
@@ -121,8 +121,8 @@ impl Write for VgaWriter {
     }
 }
 
-pub static VGA: VgaWriter = VgaWriter;
+pub static mut VGA: VgaWriter = VgaWriter;
 
-pub fn writer() -> &'static VgaWriter {
-    &VGA
+pub fn writer() -> &'static mut VgaWriter {
+    unsafe { &mut VGA }
 }

@@ -2,7 +2,7 @@
 
 use core::sync::atomic::{AtomicU8, Ordering};
 
-const COM1: u16 = 0x3F8;
+const COM1_PORT: u16 = 0x3F8;
 
 static INIT: AtomicU8 = AtomicU8::new(0);
 
@@ -25,29 +25,25 @@ pub fn init() {
     if INIT.swap(1, Ordering::SeqCst) == 1 {
         return;
     }
-    unsafe {
-        port_out(COM1 + 1, 0x00); // 禁用所有中断
-        port_out(COM1 + 3, 0x80); // 启用 DLAB
-        port_out(COM1 + 0, 0x01); // 除数低字节 (115200 baud)
-        port_out(COM1 + 1, 0x00); // 除数高字节
-        port_out(COM1 + 3, 0x03); // 8 位，无校验，1 位停止
-        port_out(COM1 + 2, 0xC7); // 启用 FIFO，清空
-        port_out(COM1 + 4, 0x0B); // IRQ 启用，RTS/DSR
-    }
+    port_out(COM1_PORT + 1, 0x00); // 禁用所有中断
+    port_out(COM1_PORT + 3, 0x80); // 启用 DLAB
+    port_out(COM1_PORT + 0, 0x01); // 除数低字节 (115200 baud)
+    port_out(COM1_PORT + 1, 0x00); // 除数高字节
+    port_out(COM1_PORT + 3, 0x03); // 8 位，无校验，1 位停止
+    port_out(COM1_PORT + 2, 0xC7); // 启用 FIFO，清空
+    port_out(COM1_PORT + 4, 0x0B); // IRQ 启用，RTS/DSR
 }
 
 /// 向 COM1 发送一个字节。
 fn write_byte(byte: u8) {
-    unsafe {
-        // 等待发送寄存器空
-        loop {
-            let status = port_in(COM1 + 5);
-            if status & 0x20 != 0 {
-                break;
-            }
+    // 等待发送寄存器空
+    loop {
+        let status = port_in(COM1_PORT + 5);
+        if status & 0x20 != 0 {
+            break;
         }
-        port_out(COM1, byte);
     }
+    port_out(COM1_PORT, byte);
 }
 
 /// 向 COM1 发送字符串。
@@ -72,14 +68,14 @@ impl core::fmt::Write for Com1Writer {
     }
 }
 
-pub static COM1: Com1Writer = Com1Writer;
+pub static COM1_WRITER: Com1Writer = Com1Writer;
 
 #[macro_export]
 macro_rules! writelock {
     ($target:expr, $($arg:tt)*) => {
         {
             use core::fmt::Write;
-            let _ = $target.write_fmt(core::fmt::format_args!($($arg)*));
+            let _ = $target.write_fmt(format_args!($($arg)*));
         }
     };
 }

@@ -8,8 +8,8 @@
 
 use core::panic::PanicInfo;
 
-mod arch;
-mod drivers;
+pub mod arch;
+pub mod drivers;
 
 /// 内核主入口：由 bootloader 跳转到这里。
 #[no_mangle]
@@ -23,8 +23,8 @@ pub extern "C" fn kernel_main() -> ! {
     vga_println!("Booting on x86_64 (GPU-primed macro-kernel prototype)");
 
     // 初始化 GDT + IDT（最小中断基座，防止三重错误重启）。
-    arch::gdt::init();
-    arch::idt::init();
+    arch::x86_64::gdt::init();
+    arch::x86_64::idt::init();
 
     serial_println!("[OK] GDT+IDT initialized");
 
@@ -47,13 +47,14 @@ fn panic(info: &PanicInfo) -> ! {
     }
 }
 
-/// 向 COM1 串口打印一行。
+/// 向 COM1 串口打印。
 #[macro_export]
 macro_rules! serial_print {
     ($($arg:tt)*) => {
         {
             use core::fmt::Write;
-            let _ = writelock!(drivers::serial::COM1, $($arg)*);
+            let mut w = crate::drivers::serial::Com1Writer;
+            let _ = w.write_fmt(format_args!($($arg)*));
         }
     };
 }
@@ -61,21 +62,24 @@ macro_rules! serial_print {
 /// 向 COM1 串口打印一行（换行）。
 #[macro_export]
 macro_rules! serial_println {
-    () => (serial_print!("\n"));
+    () => (serial_print!(""));
     ($($arg:tt)*) => (serial_print!("{}\n", $($arg)*));
 }
 
-/// 向 VGA 文本缓冲区打印一行。
+/// 向 VGA 文本缓冲区打印。
 #[macro_export]
 macro_rules! vga_print {
     ($($arg:tt)*) => {
-        drivers::vga_text::writer().write_fmt(core::fmt::format_args!($($arg)*)).ok();
+        {
+            use core::fmt::Write;
+            let _ = crate::drivers::vga_text::writer().write_fmt(format_args!($($arg)*));
+        }
     };
 }
 
 /// 向 VGA 文本缓冲区打印一行（换行）。
 #[macro_export]
 macro_rules! vga_println {
-    () => (vga_print!("\n"));
+    () => (vga_print!(""));
     ($($arg:tt)*) => (vga_print!("{}\n", $($arg)*));
 }
