@@ -1,9 +1,11 @@
 //! 文件描述符表与系统调用层（open/read/write/close/llseek）。
 //!
 //! 每进程独立 fd 表；open/read/write/close/llseek 与简单文件系统
-//! 配合，为 `fs://` 通道提供 POSIX 风格的文件访问。
+//! 配合，为 `fs://` 通道提供 POSIX 风格的文件访问（no_std 内核版本）。
 
-use std::collections::BTreeMap;
+use alloc::collections::BTreeMap;
+use alloc::string::String;
+use alloc::vec::Vec;
 
 use super::dentry::{dentry_create, dentry_create_typed, dentry_delete, dentry_list, dentry_lookup, ROOT_INO};
 use super::fd_table::{fd_alloc, fd_close, fd_count, fd_get, fd_registry, Access, FdTable};
@@ -48,7 +50,7 @@ impl Vfs {
             buf[..n].copy_from_slice(&inode.data[start..end]);
         }
         {
-            let mut g = fd_registry().lock().unwrap();
+            let mut g = fd_registry().lock();
             if let Some(table) = g.tables.get_mut(&pid) {
                 if let Some(of) = table.get_mut(fd) {
                     of.offset += n as u64;
@@ -75,7 +77,7 @@ impl Vfs {
         })
         .ok_or("inode 未找到")?;
         {
-            let mut g = fd_registry().lock().unwrap();
+            let mut g = fd_registry().lock();
             if let Some(table) = g.tables.get_mut(&pid) {
                 if let Some(of) = table.get_mut(fd) {
                     of.offset += buf.len() as u64;
@@ -107,7 +109,7 @@ impl Vfs {
         if new_offset < 0 {
             return Err("负偏移".to_string());
         }
-        let mut g = fd_registry().lock().unwrap();
+        let mut g = fd_registry().lock();
         let table = g.tables.get_mut(&pid).ok_or("进程表未找到")?;
         let of = table.get_mut(fd).ok_or("fd 未找到")?;
         of.offset = new_offset as u64;
@@ -116,7 +118,7 @@ impl Vfs {
 
     /// 是否有有效的 fd。
     pub fn has_fd(&self, pid: u64, fd: u64) -> bool {
-        let g = fd_registry().lock().unwrap();
+        let g = fd_registry().lock();
         g.tables.get(&pid).and_then(|t| t.get(fd)).is_some()
     }
 
@@ -208,7 +210,7 @@ pub fn vfs_unlink(_pid: u64, path: &str) -> Result<(), String> {
 
 /// vfs_stats 便捷函数。
 pub fn vfs_stats() -> String {
-    let n = fd_registry().lock().unwrap().tables.len();
+    let n = fd_registry().lock().tables.len();
     format!("vfs 就绪，fd 表项数={}", n)
 }
 
@@ -362,7 +364,7 @@ pub fn stat_path(path: &str) -> Result<String, String> {
 pub fn fs_sense_snapshot() -> String {
     let inodes = super::inode::inode_count();
     let root_entries = dentry_list(ROOT_INO).len();
-    let tables = fd_registry().lock().unwrap().tables.len();
+    let tables = fd_registry().lock().tables.len();
     let mut out = format!(
         "vfs inodes={} root_entries={} fd_tables={}\n",
         inodes, root_entries, tables

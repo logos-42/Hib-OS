@@ -12,8 +12,8 @@ pub mod vfs;
 pub mod inode;
 pub mod dentry;
 pub mod fd_table;
-pub mod mount_mgr;
-pub mod procfs_ext;
+// pub mod mount_mgr;      // Phase 3: 挂载管理
+// pub mod procfs_ext;     // Phase 3: procfs 扩展
 
 // 公共类型
 pub use vfs::{Vfs, vfs, vfs_open, vfs_read, vfs_write, vfs_close, vfs_unlink, vfs_stats, write_file, read_file, read_file_text, list_dir, make_dir, remove_path, stat_path, fs_sense_snapshot, fs_act_dispatch, resolve_inode};
@@ -43,8 +43,8 @@ pub enum VfsError {
     IsDirectory,
 }
 
-impl std::fmt::Display for VfsError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Display for VfsError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             VfsError::NotFound => write!(f, "文件未找到"),
             VfsError::PermissionDenied => write!(f, "权限不足"),

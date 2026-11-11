@@ -8,8 +8,26 @@
 
 use core::panic::PanicInfo;
 
+extern crate alloc;
+
 pub mod arch;
 pub mod drivers;
+pub mod fs;
+pub mod ksync;
+pub mod time;
+// pub mod mm;           // Phase 3: 内存管理
+
+// 全局堆分配器（bump allocator，供 alloc::collections::BTreeMap / String / Vec 使用）
+mod allocator;
+use allocator::BumpAllocator;
+
+#[global_allocator]
+static ALLOCATOR: BumpAllocator = BumpAllocator::new();
+
+/// 堆起始地址（1MB 以上，避免与 bootloader / 内核镜像重叠）。
+const HEAP_START: usize = 0x1000_0000;
+/// 堆大小：64 MiB。
+const HEAP_SIZE: usize = 64 * 1024 * 1024;
 
 /// 内核主入口：由 bootloader 跳转到这里。
 #[no_mangle]

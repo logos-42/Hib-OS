@@ -1,7 +1,10 @@
-//! inode 节点 —— P0-3 子模块。
+//! inode 节点 —— P0-3 子模块（no_std 内核版本）。
 
-use std::collections::BTreeMap;
-use std::sync::{Mutex, OnceLock};
+use alloc::collections::BTreeMap;
+use alloc::string::String;
+use alloc::vec::Vec;
+
+use crate::ksync::{SpinLock, OnceLock};
 
 /// inode 类型。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -30,7 +33,7 @@ pub struct Inode {
 
 impl Inode {
     pub fn new(ino: u64, kind: InodeType) -> Self {
-        let now = crate::monitor::get_time_ns();
+        let now = crate::time::get_time_ns();
         Self {
             ino,
             kind,
@@ -62,10 +65,10 @@ struct InodeTable {
     next_ino: u64,
 }
 
-static INODE_TABLE: OnceLock<Mutex<InodeTable>> = OnceLock::new();
+static INODE_TABLE: OnceLock<SpinLock<InodeTable>> = OnceLock::new();
 
-fn inode_table() -> &'static Mutex<InodeTable> {
-    INODE_TABLE.get_or_init(|| Mutex::new(InodeTable {
+fn inode_table() -> &'static SpinLock<InodeTable> {
+    INODE_TABLE.get_or_init(|| SpinLock::new(InodeTable {
         inodes: BTreeMap::new(),
         next_ino: 1,
     }))
@@ -73,7 +76,7 @@ fn inode_table() -> &'static Mutex<InodeTable> {
 
 /// 分配新 inode。
 pub fn alloc_inode(kind: InodeType) -> u64 {
-    let mut g = inode_table().lock().unwrap();
+    let mut g = inode_table().lock();
     let ino = g.next_ino;
     g.next_ino += 1;
     let inode = Inode::new(ino, kind);
@@ -83,7 +86,7 @@ pub fn alloc_inode(kind: InodeType) -> u64 {
 
 /// 查询 inode。
 pub fn get_inode(ino: u64) -> Option<Inode> {
-    let g = inode_table().lock().unwrap();
+    let g = inode_table().lock();
     g.inodes.get(&ino).cloned()
 }
 
@@ -92,7 +95,7 @@ pub fn get_inode_mut<F>(ino: u64, f: F) -> Option<()>
 where
     F: FnOnce(&mut Inode),
 {
-    let mut g = inode_table().lock().unwrap();
+    let mut g = inode_table().lock();
     g.inodes.get_mut(&ino).map(|i| {
         f(i);
     })
@@ -100,20 +103,19 @@ where
 
 /// 释放 inode。
 pub fn free_inode(ino: u64) -> bool {
-    let mut g = inode_table().lock().unwrap();
+    let mut g = inode_table().lock();
     g.inodes.remove(&ino).is_some()
 }
 
 /// 当前已分配的 inode 总数（不含已释放）。
 pub fn inode_count() -> usize {
-    inode_table().lock().unwrap().inodes.len()
+    inode_table().lock().inodes.len()
 }
 
 /// 已分配 inode 的总字节数（data 部分），用于 `df` 类感知。
 pub fn inode_bytes() -> u64 {
     inode_table()
         .lock()
-        .unwrap()
         .inodes
         .values()
         .map(|i| i.data.len() as u64)
@@ -151,3 +153,4 @@ mod tests {
         assert!(get_inode(ino).is_none());
     }
 }
+

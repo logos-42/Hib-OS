@@ -1,10 +1,12 @@
-//! 文件描述符表 —— 进程级 fd 分配与打开文件状态。
+//! 文件描述符表 —— 进程级 fd 分配与打开文件状态（no_std 内核版本）。
 //!
 //! 每进程独立 fd 表，记录打开的文件句柄、访问权限、当前偏移量。
 //! 与 `kernel/fs/inode.rs`、`kernel/fs/dentry.rs` 配合，为 VFS 提供 POSIX 风格 fd 访问。
 
-use std::collections::BTreeMap;
-use std::sync::{Mutex, OnceLock};
+use alloc::collections::BTreeMap;
+use alloc::string::String;
+
+use crate::ksync::{SpinLock, OnceLock};
 
 /// 文件访问权限。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -77,28 +79,28 @@ pub(crate) struct FdRegistry {
     pub(crate) tables: BTreeMap<u64, FdTable>,
 }
 
-static FD_REGISTRY: OnceLock<Mutex<FdRegistry>> = OnceLock::new();
+static FD_REGISTRY: OnceLock<SpinLock<FdRegistry>> = OnceLock::new();
 
-fn fd_registry_inner() -> &'static Mutex<FdRegistry> {
-    FD_REGISTRY.get_or_init(|| Mutex::new(FdRegistry { tables: BTreeMap::new() }))
+fn fd_registry_inner() -> &'static SpinLock<FdRegistry> {
+    FD_REGISTRY.get_or_init(|| SpinLock::new(FdRegistry { tables: BTreeMap::new() }))
 }
 
 /// 为进程分配 fd。
 pub fn fd_alloc(pid: u64, ino: u64, access: Access) -> u64 {
-    let mut g = fd_registry_inner().lock().unwrap();
+    let mut g = fd_registry_inner().lock();
     let table = g.tables.entry(pid).or_default();
     table.alloc(ino, access)
 }
 
 /// 获取进程的 fd 句柄（不可变）。
 pub fn fd_get(pid: u64, fd: u64) -> Option<OpenFile> {
-    let g = fd_registry_inner().lock().unwrap();
+    let g = fd_registry_inner().lock();
     g.tables.get(&pid).and_then(|t| t.get(fd)).cloned()
 }
 
 /// 关闭进程的 fd。
 pub fn fd_close(pid: u64, fd: u64) -> bool {
-    let mut g = fd_registry_inner().lock().unwrap();
+    let mut g = fd_registry_inner().lock();
     if let Some(table) = g.tables.get_mut(&pid) {
         table.close(fd)
     } else {
@@ -108,12 +110,12 @@ pub fn fd_close(pid: u64, fd: u64) -> bool {
 
 /// 进程打开的 fd 数量。
 pub fn fd_count(pid: u64) -> usize {
-    let g = fd_registry_inner().lock().unwrap();
+    let g = fd_registry_inner().lock();
     g.tables.get(&pid).map(|t| t.count()).unwrap_or(0)
 }
 
 /// 返回全局 fd 注册表引用（供 VFS 等模块直接锁访问）。
-pub fn fd_registry() -> &'static Mutex<FdRegistry> {
+pub fn fd_registry() -> &'static SpinLock<FdRegistry> {
     fd_registry_inner()
 }
 
@@ -146,3 +148,4 @@ mod tests {
         assert_eq!(fd_count(4), 1);
     }
 }
+

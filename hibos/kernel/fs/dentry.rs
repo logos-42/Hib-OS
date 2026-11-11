@@ -1,7 +1,10 @@
-//! dentry 目录项 —— P0-3 子模块。
+//! dentry 目录项 —— P0-3 子模块（no_std 内核版本）。
 
-use std::collections::BTreeMap;
-use std::sync::{Mutex, OnceLock};
+use alloc::collections::BTreeMap;
+use alloc::string::String;
+use alloc::vec::Vec;
+
+use crate::ksync::{SpinLock, OnceLock};
 
 /// 目录项：文件名 -> inode。
 #[derive(Clone, Debug)]
@@ -19,17 +22,17 @@ struct DentryTable {
     entries: BTreeMap<(u64, String), Dentry>,
 }
 
-static DENTRY_TABLE: OnceLock<Mutex<DentryTable>> = OnceLock::new();
+static DENTRY_TABLE: OnceLock<SpinLock<DentryTable>> = OnceLock::new();
 
-fn dentry_table() -> &'static Mutex<DentryTable> {
-    DENTRY_TABLE.get_or_init(|| Mutex::new(DentryTable {
+fn dentry_table() -> &'static SpinLock<DentryTable> {
+    DENTRY_TABLE.get_or_init(|| SpinLock::new(DentryTable {
         entries: BTreeMap::new(),
     }))
 }
 
 /// 查找 dentry。
 pub fn dentry_lookup(parent_ino: u64, name: &str) -> Option<u64> {
-    let g = dentry_table().lock().unwrap();
+    let g = dentry_table().lock();
     g.entries.get(&(parent_ino, name.to_string())).map(|d| d.ino)
 }
 
@@ -46,7 +49,7 @@ pub fn dentry_create_typed(
     name: &str,
     kind: crate::fs::inode::InodeType,
 ) -> Result<u64, String> {
-    let mut g = dentry_table().lock().unwrap();
+    let mut g = dentry_table().lock();
     if g.entries.contains_key(&(parent_ino, name.to_string())) {
         return Err(format!("已存在: {}", name));
     }
@@ -62,13 +65,13 @@ pub fn dentry_create_typed(
 
 /// 删除 dentry。
 pub fn dentry_delete(parent_ino: u64, name: &str) -> bool {
-    let mut g = dentry_table().lock().unwrap();
+    let mut g = dentry_table().lock();
     g.entries.remove(&(parent_ino, name.to_string())).is_some()
 }
 
 /// 列出目录下的所有条目。
 pub fn dentry_list(parent_ino: u64) -> Vec<(String, u64)> {
-    let g = dentry_table().lock().unwrap();
+    let g = dentry_table().lock();
     g.entries
         .iter()
         .filter(|((p, _), _)| *p == parent_ino)
@@ -94,3 +97,4 @@ mod tests {
         assert_eq!(dentry_lookup(ROOT_INO, "del.txt"), None);
     }
 }
+
