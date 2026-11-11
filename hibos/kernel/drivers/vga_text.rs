@@ -3,13 +3,13 @@
 use core::fmt::Write;
 use core::sync::atomic::{AtomicUsize, Ordering};
 
-const VGA_ADDR: *mut VgaChar = 0xB8000 as *mut VgaChar;
-const WIDTH: usize = 80;
-const HEIGHT: usize = 25;
+pub const VGA_ADDR: *mut VgaChar = 0xB8000 as *mut VgaChar;
+pub const WIDTH: usize = 80;
+pub const HEIGHT: usize = 25;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
-enum Color {
+pub enum Color {
     Black = 0,
     Blue = 1,
     Green = 2,

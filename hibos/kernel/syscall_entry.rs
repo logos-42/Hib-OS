@@ -1,8 +1,8 @@
 //! 内核系统调用入口（no_std）。
 //!
 //! 提供 `sense`/`act` 通道分发，作为用户态与内核的系统调用接口。
-//! 当前仅引用已迁移到 no_std 的内核模块（fs, net, time），其余通道
-//! 留给后续阶段（GPU、桌面、AI 等）逐步填充。
+//! 当前仅引用已迁移到 no_std 的内核模块（fs, time），其余通道
+//! 留给后续阶段（net、GPU、桌面、AI 等）逐步填充。
 
 use alloc::string::String;
 use alloc::string::ToString;
@@ -11,11 +11,10 @@ use core::fmt::Write;
 
 use crate::fs::{fs_act_dispatch, fs_sense_snapshot};
 use crate::ksync::{SpinLock, OnceLock};
-use crate::net::net;
 use crate::time::get_time_ns;
 
 // =======================================================================
-// 全局系统调用表
+// 全局系统调用锁
 // =======================================================================
 
 /// 系统调用结果。
@@ -37,39 +36,21 @@ pub fn sys_sense(name: &str) -> Option<String> {
     let _guard = syscall_lock().lock();
     match name {
         "fs://vfs" => Some(fs_sense_snapshot()),
-        "net://eth0" => {
-            let st = net().lock();
-            Some(format!(
-                "net eth0: link_up={} ip={}.{}.{}.{} tx={} rx={}",
-                st.iface.link_up,
-                st.iface.ip[0], st.iface.ip[1], st.iface.ip[2], st.iface.ip[3],
-                st.stats.tx_packets, st.stats.rx_packets
-            ))
-        }
         "dev://timer" => Some(format!("now={}ns", get_time_ns())),
         "dev://null" => Some("null device".to_string()),
-        "fs://meta" => Some("fsmeta: 未迁移到内核（待 Phase 7）".to_string()),
         _ => None,
     }
 }
 
 // =======================================================================
 // act：通道行动（读写操作）
-// ======================================================================}
+// =======================================================================
 
 /// 执行指定通道的行动。返回 None 表示通道未实现。
 pub fn sys_act(name: &str, payload: &str) -> Option<SysCallResult> {
     let _guard = syscall_lock().lock();
     match name {
         "fs://vfs" => Some(fs_act_dispatch(payload)),
-        "net://eth0" => {
-            let st = net().lock();
-            // 激活协议栈一轮
-            drop(st);
-            let mut st = net().lock();
-            st.poll();
-            Some(Ok(format!("net eth0: poll completed, tx={} rx={}", st.stats.tx_packets, st.stats.rx_packets)))
-        }
         "dev://null" => Some(Ok(format!("已丢弃 {} 字节", payload.len()))),
         "dev://timer" => Some(Ok(format!("now={}ns", get_time_ns()))),
         _ => None,
