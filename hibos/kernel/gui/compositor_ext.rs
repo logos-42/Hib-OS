@@ -829,7 +829,8 @@ mod tests {
 
     #[test]
     fn animation_value() {
-        let anim = Animation::new(1, AnimTarget::Opacity, 0.0, 100.0, 1_000_000_000, Easing::Linear);
+        let mut anim =
+            Animation::new(1, AnimTarget::Opacity, 0.0, 100.0, 1_000_000_000, Easing::Linear);
         // start_time=0，value_at 返回 None（未启动）。
         assert_eq!(anim.value_at(0), None);
     }

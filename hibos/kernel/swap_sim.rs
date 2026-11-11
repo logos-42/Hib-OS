@@ -489,6 +489,15 @@ mod tests {
     fn test_swap_path() -> PathBuf {
         temp_dir().join(format!("hibos_swap_test_{}.swp", std::process::id()))
     }
+
+    /// 小写十六进制编码（测试内自备，不引入 hex crate 依赖）。
+    fn to_hex(bytes: &[u8]) -> String {
+        let mut s = String::with_capacity(bytes.len() * 2);
+        for b in bytes {
+            s.push_str(&format!("{:02x}", b));
+        }
+        s
+    }
     #[test]
     fn swap_out_and_in() {
         let path = test_swap_path();
@@ -647,7 +656,7 @@ mod tests {
         let _ = fs::remove_file(&path);
         let path_str = path.to_string_lossy().to_string();
         let _ = act_swap(&format!("init {} 16", path_str)).unwrap();
-        let hex = hex::encode(vec![0xABu8; 64]);
+        let hex = to_hex(&[0xABu8; 64]);
         let out = act_swap(&format!("out 100 {}", hex)).unwrap();
         assert!(out.contains("已换出"));
         // 再查出插槽号：out 返回 "已换出 页=100 插槽=0 大小=64B"，插槽=0
@@ -663,7 +672,7 @@ mod tests {
         let _ = fs::remove_file(&path);
         let path_str = path.to_string_lossy().to_string();
         let _ = act_swap(&format!("init {} 16", path_str)).unwrap();
-        let hex = hex::encode(vec![0xCDu8; 32]);
+        let hex = to_hex(&[0xCDu8; 32]);
         let _ = act_swap(&format!("out 200 {}", hex)).unwrap();
         let hit = act_swap("fault 200").unwrap();
         assert!(hit.contains("页故障命中"));

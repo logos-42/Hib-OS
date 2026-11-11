@@ -1683,7 +1683,7 @@ mod advanced_tests {
         let mut cm = ConsensusMechanism::new();
         cm.set_algorithm(ConsensusAlgorithm::Majority);
         cm.set_total_voters(3);
-        let pid = cm.propose(1, "提案A").unwrap();
+        let pid = cm.propose(1, "提案A");
         assert_eq!(pid, 1);
         cm.vote_for(pid).unwrap();
         cm.vote_for(pid).unwrap();
@@ -1698,7 +1698,7 @@ mod advanced_tests {
         let mut cm = ConsensusMechanism::new();
         cm.set_algorithm(ConsensusAlgorithm::Unanimous);
         cm.set_total_voters(2);
-        let pid = cm.propose(1, "提案B").unwrap();
+        let pid = cm.propose(1, "提案B");
         cm.vote_for(pid).unwrap();
         let result = cm.decide(pid).unwrap();
         assert!(!result);

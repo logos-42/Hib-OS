@@ -92,6 +92,6 @@ mod tests {
         init(10);
         alloc().unwrap();
         alloc().unwrap();
-        assert_eq!(allocated_count(), 2);
+        assert_eq!(super::allocated_count(), 2);
     }
 }

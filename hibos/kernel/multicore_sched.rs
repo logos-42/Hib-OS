@@ -570,20 +570,22 @@ pub struct MulticoreScheduler {
         self.core_count
     }
     /// 将任务入队到指定核心。
-    pub fn enqueue(&mut self, core_id: usize, task: Task, use_eevdf: bool) {
+    pub fn enqueue(&mut self, core_id: usize, task: Task, use_eevdf: bool) -> TaskId {
+        let tid = task.id;
         let core = self.cores.get_mut(&core_id).expect("core not found");
         core.enqueue(task, use_eevdf);
         self.task_count += 1;
+        tid
     }
     /// 将任务入队到负载最小的核心（自动选择）。
-    pub fn enqueue_least_loaded(&mut self, task: Task, use_eevdf: bool) {
+    pub fn enqueue_least_loaded(&mut self, task: Task, use_eevdf: bool) -> TaskId {
         let (best_core, _) = self
             .cores
             .iter()
             .min_by_key(|(_, c)| c.load())
             .map(|(id, c)| (*id, c.load()))
             .unwrap_or((0, 0));
-        self.enqueue(best_core, task, use_eevdf);
+        self.enqueue(best_core, task, use_eevdf)
     }
     /// 选出指定核心的下一个运行任务（接口：pick_next(core_id)）。
     pub fn pick_next(&mut self, core_id: usize, use_eevdf: bool) -> Option<TaskId> {

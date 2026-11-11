@@ -169,6 +169,22 @@ impl Idt {
     pub fn present_count(&self) -> usize {
         self.entries.iter().filter(|e| e.is_present()).count()
     }
+
+    /// 已启用（存在位为 1）的向量号，升序返回。
+    ///
+    /// 控制器层的 `IrqController::idt_present_vectors` 正是基于本方法聚合，
+    /// 二者语义一致：这里只描述 IDT 表本身，不含屏蔽字。
+    pub fn present_vectors(&self) -> Vec<u8> {
+        let mut out: Vec<u8> = self
+            .entries
+            .iter()
+            .enumerate()
+            .filter(|(_, e)| e.is_present())
+            .map(|(i, _)| i as u8)
+            .collect();
+        out.sort_unstable();
+        out
+    }
 }
 
 impl Default for Idt {
@@ -512,7 +528,7 @@ mod tests {
         idt.set_gate(0xFF, IdtEntry::set_handler(1, 0x08, 0, 0, false));
         idt.set_gate(0x20, IdtEntry::set_handler(2, 0x08, 0, 0, false));
         idt.set_gate(0x21, IdtEntry::set_handler(3, 0x08, 0, 0, false));
-        let vecs = idt.idt_present_vectors();
+        let vecs = idt.present_vectors();
         assert_eq!(vecs, vec![0x20, 0x21, 0xFF]);
     }
 

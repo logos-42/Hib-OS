@@ -589,7 +589,7 @@ impl RuntimeExt {
 
     pub fn spawn_many<F>(&mut self, futures: Vec<(&str, F)>) -> Vec<u64>
     where
-        F: Future<Output = ()> + Send + 'static,
+        F: Future + Send + 'static,
     {
         futures.into_iter().map(|(name, f)| self.rt.spawn(name, f)).collect()
     }
@@ -750,8 +750,8 @@ mod tests {
     fn runtime_ext_spawn_many() {
         let mut ext = RuntimeExt::new();
         let ids = ext.spawn_many(vec![
-            ("a", Box::new(CounterFuture::new("a", 1))),
-            ("b", Box::new(CounterFuture::new("b", 2))),
+            ("a", CounterFuture::new("a", 1)),
+            ("b", CounterFuture::new("b", 2)),
         ]);
         assert_eq!(ids.len(), 2);
         let total = ext.run_all();

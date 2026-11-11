@@ -1174,8 +1174,8 @@ mod tests {
     #[test]
     fn action_schedule_policy_names() {
         // 测试 action 模块的枚举（这里只是确保引入正确）
-        let _ = ActionSchedulePolicy::Fifo;
-        let _ = ActionSchedulePolicy::Priority;
+        let _ = crate::ai_os::action::ActionSchedulePolicy::Fifo;
+        let _ = crate::ai_os::action::ActionSchedulePolicy::Priority;
     }
 }
 

@@ -906,7 +906,7 @@ mod tests {
     fn adaptor() {
         let mut adaptor = Adaptor::new();
         adaptor.adapt("lr", 0.1, 0.01, "collect");
-        adaptor.adapt("bs", 32, 64, "memory");
+        adaptor.adapt("bs", 32.0, 64.0, "memory");
         assert_eq!(adaptor.adaptation_count, 2);
         assert_eq!(adaptor.successful_count, 2);
     }
@@ -915,17 +915,17 @@ mod tests {
     fn evolution_engine_full() {
         let mut eng = EvolutionEngine::new();
         let gid = eng.create_genome(1, None);
-        eng.add_gene_to_genome(gid, "lr", 0.01, 0.0, 1.0, 0.1).unwrap();
-        eng.mutate_genome(gid, "lr", 0.05).unwrap();
+        assert!(eng.add_gene_to_genome(gid, "lr", 0.01, 0.0, 1.0, 0.1));
+        assert!(eng.mutate_genome(gid, "lr", 0.05));
         eng.set_fitness_metric("accuracy", 1.0);
-        eng.set_fitness_value("accuracy", 0.9).unwrap();
+        assert!(eng.set_fitness_value("accuracy", 0.9));
         let f = eng.compute_fitness();
         assert!((f - 0.9).abs() < 1e-6);
         eng.assign_fitness_to_genome(gid).unwrap();
         let ind_id = eng.add_individual(gid);
         assert_eq!(ind_id, 1);
         eng.snapshot_genome(gid).unwrap();
-        eng.adapt_parameter("lr", 0.06, 0.02, "converge").unwrap();
+        eng.adapt_parameter("lr", 0.06, 0.02, "converge");
     }
 
     #[test]

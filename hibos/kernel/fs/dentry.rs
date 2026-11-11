@@ -35,11 +35,22 @@ pub fn dentry_lookup(parent_ino: u64, name: &str) -> Option<u64> {
 
 /// 创建 dentry。
 pub fn dentry_create(parent_ino: u64, name: &str, kind: u8) -> Result<u64, String> {
+    let _ = kind;
+    dentry_create_typed(parent_ino, name, crate::fs::inode::InodeType::File)
+}
+
+/// 按 inode 类型创建 dentry（`kind` 描述符与 ``InodeType`` 的映射由调用方决定，
+/// 这里直接接收类型，避免 `dentry_create` 的 u8 参数在目录场景下失真）。
+pub fn dentry_create_typed(
+    parent_ino: u64,
+    name: &str,
+    kind: crate::fs::inode::InodeType,
+) -> Result<u64, String> {
     let mut g = dentry_table().lock().unwrap();
     if g.entries.contains_key(&(parent_ino, name.to_string())) {
         return Err(format!("已存在: {}", name));
     }
-    let ino = crate::fs::inode::alloc_inode(crate::fs::inode::InodeType::File);
+    let ino = crate::fs::inode::alloc_inode(kind);
     let dentry = Dentry {
         name: name.to_string(),
         ino,

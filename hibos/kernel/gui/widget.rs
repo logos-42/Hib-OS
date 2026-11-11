@@ -1334,13 +1334,14 @@ mod tests {
     fn widget_mouse_click_triggers_callback() {
         let mut mgr = WidgetManager::new();
         let id = mgr.add_button(None, Rect::new(0, 0, 50, 20), "btn");
-        let mut clicked = false;
-        mgr.on_click(id, || {
-            clicked = true;
+        let clicked = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let clicked2 = clicked.clone();
+        mgr.on_click(id, move || {
+            clicked2.store(true, std::sync::atomic::Ordering::SeqCst);
         });
         mgr.mouse_down(25, 10);
         mgr.mouse_up(25, 10);
-        assert!(clicked);
+        assert!(clicked.load(std::sync::atomic::Ordering::SeqCst));
     }
 
     #[test]

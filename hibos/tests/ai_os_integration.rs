@@ -4,6 +4,16 @@
 
 use hibos::kernel::ai_os::*;
 
+// `kernel/ai_os/perception.rs` 目前尚未在 `kernel/ai_os/mod.rs` 中声明，
+// 所以 `hibos::kernel::ai_os::perception` 这条路径还不存在。这里先用 `#[path]`
+// 把该文件并入测试 crate，避免测试完全失去对感知层的覆盖；
+// `use ... as ai_os` 让文件内部 `crate::ai_os::native::*` 的绝对路径继续成立。
+// 一旦 mod.rs 补上 `pub mod perception;`，删掉这两行、改回 `hibos::kernel::ai_os::perception` 即可。
+use hibos::kernel::ai_os as ai_os;
+
+#[path = "../kernel/ai_os/perception.rs"]
+mod perception;
+
 #[test]
 fn model_to_agent_pipeline() {
     // 模型加载 -> 实例化 -> 智能体绑定 -> 推理
@@ -46,7 +56,7 @@ fn consciousness_to_mind_pipeline() {
     // 写入工作记忆
     let wm_id = eng.write_working_memory(
         "处理视觉输入".into(),
-        crate::ai_os::native::QualiaModality::Visual,
+        native::QualiaModality::Visual,
     );
     assert!(wm_id > 0);
 
@@ -81,23 +91,23 @@ fn consciousness_to_mind_pipeline() {
 #[test]
 fn attention_to_perception_pipeline() {
     // 注意力透镜 -> 感知通道 -> 特征提取 -> 多模态融合 -> 感知绑定
+    let mut attn = attention::AttentionEngine::new();
+    attn.lens.allow_channel("camera");
+    attn.lens.set_threshold(0.3);
+    assert!(attn.lens.should_pass("camera", 0.8));
+
     let mut eng = perception::PerceptionEngine::new();
 
     let ch_id = eng.add_channel("camera", perception::SensoryModality::Visual, "cam0");
     assert_eq!(ch_id, 1);
 
-    eng.lens.allow_channel("camera");
-    eng.lens.set_threshold(0.3);
+    // 感知层的注意过滤：放行并聚焦该通道
+    eng.attention.enable_channel(ch_id);
+    eng.attention.set_focus(Some(ch_id));
 
     // 注入感知事件
     let obj_id = eng.inject_event(ch_id, vec![0.8, 0.2, 0.9, 0.1]).unwrap();
     assert!(obj_id > 0);
-
-    // 分配分散注意
-    assert!(eng.allocate_attention("vision_task", 0.5));
-
-    // 设置焦点
-    eng.set_focus("camera_obj", "视觉目标");
 
     assert_eq!(eng.channel_count(), 1);
     assert_eq!(eng.object_count(), 1);
@@ -108,9 +118,11 @@ fn semantic_to_memory_pipeline() {
     // 语义索引 -> 语义记忆 -> 情景记忆 -> 记忆巩固
     let mut eng = memory_ws::MemoryEngine::new();
 
-    // 语义索引
-    let vec_id = eng.space.insert_from_text("机器学习是人工智能的一个分支");
+    // 语义索引（MemoryEngine 本身不含向量空间，向量索引由 semantic::SemanticSpace 提供）
+    let mut space = semantic::SemanticSpace::new(128);
+    let vec_id = space.insert_from_text("机器学习是人工智能的一个分支");
     assert_eq!(vec_id, 1);
+    assert_eq!(space.len(), 1);
 
     // 语义记忆事实
     let fact_id = eng.semantic_add("机器学习", "属于", "人工智能", 0.95);
@@ -169,15 +181,15 @@ fn body_to_action_pipeline() {
 #[test]
 fn temporal_to_society_pipeline() {
     // 时间调度 -> 多智能体通信 -> 协商 -> 冲突解决
-    let mut eng = society::SocietyEngine::new();
+    let mut eng = social::SocietyEngine::new();
 
     let alice = eng.register_agent("Alice", "assistant");
     let bob = eng.register_agent("Bob", "assistant");
     assert_eq!(alice, 1);
     assert_eq!(bob, 2);
 
-    eng.subscribe(bob, society::MessageType::Request);
-    eng.send_message(alice, Some(bob), society::MessageType::Request, "协作任务");
+    eng.subscribe(bob, social::MessageType::Request);
+    eng.send_message(alice, Some(bob), social::MessageType::Request, "协作任务");
 
     let msg = eng.poll_messages(bob).unwrap();
     assert_eq!(msg.content, "协作任务");
@@ -193,7 +205,7 @@ fn temporal_to_society_pipeline() {
 
     // 冲突
     let conflict_id = eng.report_conflict(
-        society::ConflictType::Resource,
+        social::ConflictType::Resource,
         vec![alice, bob],
         "GPU资源争用",
     );
@@ -212,14 +224,14 @@ fn ethics_to_evolution_pipeline() {
 
     // 注册基因组
     let genome_id = eng.create_genome(1, None);
-    eng.add_gene_to_genome(genome_id, "learning_rate", 0.01, 0.0, 1.0, 0.1).unwrap();
-    eng.add_gene_to_genome(genome_id, "exploration_rate", 0.2, 0.0, 1.0, 0.1).unwrap();
+    assert!(eng.add_gene_to_genome(genome_id, "learning_rate", 0.01, 0.0, 1.0, 0.1));
+    assert!(eng.add_gene_to_genome(genome_id, "exploration_rate", 0.2, 0.0, 1.0, 0.1));
 
     // 设置适应度指标
     eng.set_fitness_metric("task_success", 0.7);
     eng.set_fitness_metric("energy_efficiency", 0.3);
-    eng.set_fitness_value("task_success", 0.85).unwrap();
-    eng.set_fitness_value("energy_efficiency", 0.6).unwrap();
+    assert!(eng.set_fitness_value("task_success", 0.85));
+    assert!(eng.set_fitness_value("energy_efficiency", 0.6));
 
     let fitness = eng.compute_fitness();
     assert!(fitness > 0.0 && fitness <= 1.0);
@@ -241,7 +253,8 @@ fn ethics_to_evolution_pipeline() {
     assert_eq!(version, 1);
 
     // 适应
-    eng.adapt_parameter("learning_rate", 0.015, 0.01, "收敛").unwrap();
+    let adapt_id = eng.adapt_parameter("learning_rate", 0.015, 0.01, "收敛");
+    assert!(adapt_id > 0);
 
     eng.next_generation();
     assert_eq!(eng.generation(), 1);
@@ -428,7 +441,7 @@ fn full_ai_os_integration() {
     let _ = body_schema::BodyEngine::new();
     let _ = action::ActionEngine::new();
     let _ = temporal::TemporalEngine::new();
-    let _ = society::SocietyEngine::new();
+    let _ = social::SocietyEngine::new();
     let _ = ethics::EthicsEngine::new();
     let _ = evolution::EvolutionEngine::new();
     let _ = dream::DreamEngine::new();

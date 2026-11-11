@@ -985,7 +985,7 @@ mod tests {
     #[test]
     fn fm_sense_and_act() {
         let mut fm = file_manager().lock().unwrap();
-        fm.browse(std::env::temp_dir());
+        fm.browse(&std::env::temp_dir());
         drop(fm);
         let sense = file_manager_sense();
         assert!(sense.contains("entries="));

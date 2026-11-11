@@ -1421,7 +1421,7 @@ mod monitoring_tests {
         assert_eq!(id, 1);
         sc.add_attribute(id, "http.method".into(), "GET".into());
         sc.add_event(id, "request received".into());
-        sc.end_span(id).unwrap();
+        assert!(sc.end_span(id));
         let span = sc.get_span(id).unwrap();
         assert_eq!(span.name, "http_request");
         assert_eq!(sc.span_count(), 1);
@@ -1470,7 +1470,7 @@ mod monitoring_tests {
         eng.add_dashboard_widget(did, "cpu".into(), "graph".into(), "cpu_usage".into(), 60_000_000_000);
         eng.collect_log(LogLevel::Info, "system started".into(), "kernel".into(), BTreeMap::new());
         let sid = eng.start_span(1, None, "request".into(), SpanKind::Server);
-        eng.end_span(sid).unwrap();
+        assert!(eng.end_span(sid));
         let slo_id = eng.add_slo_target("availability".into(), "uptime".into(), 99.9, 86_400_000_000_000, ">=");
         eng.evaluate_slo("availability".into(), 99.95, 0);
         let agg_id = eng.add_aggregation_rule("cpu_usage".into(), "cpu_avg".into(), AggregationFunction::Avg, 60_000_000_000);

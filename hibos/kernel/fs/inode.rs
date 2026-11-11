@@ -104,6 +104,22 @@ pub fn free_inode(ino: u64) -> bool {
     g.inodes.remove(&ino).is_some()
 }
 
+/// 当前已分配的 inode 总数（不含已释放）。
+pub fn inode_count() -> usize {
+    inode_table().lock().unwrap().inodes.len()
+}
+
+/// 已分配 inode 的总字节数（data 部分），用于 `df` 类感知。
+pub fn inode_bytes() -> u64 {
+    inode_table()
+        .lock()
+        .unwrap()
+        .inodes
+        .values()
+        .map(|i| i.data.len() as u64)
+        .sum()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

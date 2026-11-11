@@ -1117,11 +1117,14 @@ mod tests {
         let _ = mgr.create_window(Rect::new(0, 0, 200, 150), "c", WindowFlags::all());
         mgr.layout_windows();
         // 级联后窗口位置应不同。
-        let ws: Vec<&Window> = mgr.windows_by_zorder();
-        assert!(ws[1].x > ws[0].x || ws[1].y > ws[0].y);
+        let (x1, y1, x0, y0) = {
+            let ws: Vec<&Window> = mgr.windows_by_zorder();
+            (ws[1].x, ws[1].y, ws[0].x, ws[0].y)
+        };
+        assert!(x1 > x0 || y1 > y0);
         mgr.tile_windows();
         // 平铺后窗口不应重叠太多。
-        assert!(ws.len() == 3);
+        assert!(mgr.windows_by_zorder().len() == 3);
     }
 
     #[test]

@@ -293,6 +293,10 @@ impl Session {
         self.last_activity_ns = crate::ai_os::native::now_ns();
     }
 
+    pub fn get_dir(&self) -> &str {
+        &self.current_dir
+    }
+
     pub fn set_env(&mut self, key: &str, value: &str) {
         self.env.insert(key.to_string(), value.to_string());
     }

@@ -1330,7 +1330,7 @@ mod advanced_tests {
     #[test]
     fn value_conflict() {
         let mut cr = ValueConflictResolver::new();
-        let id = cr.create_conflict(ValueDimension::Safety, ValueDimension::Autonomy, "医疗决策").unwrap();
+        let id = cr.create_conflict(ValueDimension::Safety, ValueDimension::Autonomy, "医疗决策");
         assert_eq!(id, 1);
         cr.resolve(id, ConflictResolution::Prioritize, ValueDimension::Safety).unwrap();
         assert_eq!(cr.conflict_count(), 1);

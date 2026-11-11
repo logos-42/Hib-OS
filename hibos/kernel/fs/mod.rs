@@ -16,9 +16,9 @@ pub mod mount_mgr;
 pub mod procfs_ext;
 
 // 公共类型
-pub use vfs::{Vfs, vfs, vfs_open, vfs_read, vfs_write, vfs_close, vfs_unlink, vfs_stats};
-pub use inode::{Inode, InodeType};
-pub use dentry::{Dentry, dentry_lookup, dentry_create};
+pub use vfs::{Vfs, vfs, vfs_open, vfs_read, vfs_write, vfs_close, vfs_unlink, vfs_stats, write_file, read_file, read_file_text, list_dir, make_dir, remove_path, stat_path, fs_sense_snapshot, fs_act_dispatch, resolve_inode};
+pub use inode::{Inode, InodeType, inode_count, inode_bytes};
+pub use dentry::{Dentry, dentry_lookup, dentry_create, dentry_create_typed, dentry_list};
 
 // 文件操作类型。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

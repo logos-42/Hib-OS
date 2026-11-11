@@ -954,7 +954,7 @@ impl DreamNarrativeBuilder {
 // =====================================================================================
 
 /// 创造力维度。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum CreativityDimension {
     Novelty,      // 新颖度
     Usefulness,   // 有用性
@@ -1089,7 +1089,7 @@ impl MemoryConsolidator {
 // =====================================================================================
 
 /// 分析维度。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum AnalysisDimension {
     Emotional,    // 情感维度
     Symbolic,     // 象征维度
@@ -1156,10 +1156,11 @@ mod advanced_tests {
         let mut builder = DreamNarrativeBuilder::new();
         let id = builder.create("飞行梦境".into());
         assert_eq!(id, 1);
-        let elem_id = builder.add_element(id, "场景", "天空", 0.8).unwrap();
+        let elem_id = builder.add_element(id, "场景", "天空", 0.8);
         assert_eq!(elem_id, 1);
-        builder.add_element(id, "动作", "飞翔", 0.9).unwrap();
-        builder.connect_elements(id, 1, 2).unwrap();
+        let elem2 = builder.add_element(id, "动作", "飞翔", 0.9);
+        assert_eq!(elem2, 2);
+        assert!(builder.connect_elements(id, 1, 2));
         let coherence = builder.compute_coherence(id);
         assert!(coherence >= 0.0);
         assert_eq!(builder.narrative_count(), 1);
@@ -1183,7 +1184,7 @@ mod advanced_tests {
     #[test]
     fn memory_consolidator() {
         let mut consolidator = MemoryConsolidator::new();
-        let id = consolidator.consolidate(1, ConsolidationType::Synaptic, 0.3).unwrap();
+        let id = consolidator.consolidate(1, ConsolidationType::Synaptic, 0.3);
         assert_eq!(id, 1);
         let record = consolidator.get_record(id).unwrap();
         assert_eq!(record.source_memory_id, 1);

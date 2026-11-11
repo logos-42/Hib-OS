@@ -48,6 +48,34 @@ pub enum BodyPartType {
     Internal,      // 内脏
 }
 
+impl BodyPartType {
+    /// 部位类型的稳定标识名（小写）。
+    pub fn name(&self) -> &'static str {
+        match self {
+            BodyPartType::Head => "head",
+            BodyPartType::Torso => "torso",
+            BodyPartType::LeftArm => "left_arm",
+            BodyPartType::RightArm => "right_arm",
+            BodyPartType::LeftHand => "left_hand",
+            BodyPartType::RightHand => "right_hand",
+            BodyPartType::LeftLeg => "left_leg",
+            BodyPartType::RightLeg => "right_leg",
+            BodyPartType::LeftFoot => "left_foot",
+            BodyPartType::RightFoot => "right_foot",
+            BodyPartType::Neck => "neck",
+            BodyPartType::Spine => "spine",
+            BodyPartType::LeftEye => "left_eye",
+            BodyPartType::RightEye => "right_eye",
+            BodyPartType::LeftEar => "left_ear",
+            BodyPartType::RightEar => "right_ear",
+            BodyPartType::Mouth => "mouth",
+            BodyPartType::Nose => "nose",
+            BodyPartType::Skin => "skin",
+            BodyPartType::Internal => "internal",
+        }
+    }
+}
+
 /// 身体部位：身体的基本组成单元。
 #[derive(Clone, Debug)]
 pub struct BodyPart {
@@ -843,7 +871,7 @@ mod tests {
 
     #[test]
     fn body_part_type_names() {
-        assert_eq!(BodyPartType::Head.name(), "head"); // 这里 BodyPartType 没有 name 方法，只是测试变体存在
+        assert_eq!(BodyPartType::Head.name(), "head");
         let _ = BodyPartType::Head;
         let _ = BodyPartType::Torso;
         let _ = BodyPartType::LeftHand;

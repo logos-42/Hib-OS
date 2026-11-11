@@ -5,9 +5,17 @@ edition = "2021"
 authors = ["logos-42"]
 license = "MIT"
 
+[lib]
+name = "hibos"
+path = "lib.rs"
+
 [[bin]]
 name = "hibos"
 path = "kernel/mod.rs"
+# 库目标已包含同一棵模块树及其全部 #[cfg(test)]；
+# 若 bin 也跑测试，会重复执行 2000+ 用例，故关闭。
+test = false
+bench = false
 
 [dependencies]
 ureq = "2"

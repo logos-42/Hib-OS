@@ -982,7 +982,7 @@ mod tests {
         let child = dt.add_node("child", Some(root));
         assert_eq!(root, 1);
         assert_eq!(child, 2);
-        assert_eq!(dt.root_id(), Some(1));
+        assert_eq!(dt.root_id, Some(1));
         dt.set_property(child, "model", "x86").unwrap();
         assert_eq!(dt.get_property(child, "model"), Some(&"x86".to_string()));
         assert_eq!(dt.node_count(), 2);
@@ -1488,8 +1488,8 @@ mod advanced_tests {
         let mut fum = FirmwareUpdateManager::new();
         let id = fum.schedule(1, "v2.0.0".into());
         assert_eq!(id, 1);
-        fum.update_progress(id, 0.5, UpdateStatus::Installing).unwrap();
-        fum.update_progress(id, 1.0, UpdateStatus::Completed).unwrap();
+        assert!(fum.update_progress(id, 0.5, UpdateStatus::Installing));
+        assert!(fum.update_progress(id, 1.0, UpdateStatus::Completed));
         let update = fum.get_update(id).unwrap();
         assert_eq!(update.status, UpdateStatus::Completed);
         assert!((update.progress - 1.0).abs() < 1e-6);
@@ -1990,10 +1990,10 @@ mod driver_extension_tests {
         assert_eq!(usb.device_count(), 2);
         let dev = usb.get_device(1).unwrap();
         assert_eq!(dev.descriptor.vendor_id, 0x1234);
-        usb.transfer(1, 1024).unwrap();
+        assert!(usb.transfer(1, 1024));
         assert_eq!(usb.total_transfers, 1);
         assert_eq!(usb.total_bytes, 1024);
-        usb.detach_device(1).unwrap();
+        assert!(usb.detach_device(1));
         assert_eq!(usb.device_count(), 1);
     }
 
@@ -2005,8 +2005,8 @@ mod driver_extension_tests {
         assert_eq!(out_id, 1);
         assert_eq!(in_id, 2);
         assert_eq!(am.device_count(), 2);
-        am.set_volume(1, 0.8).unwrap();
-        am.set_muted(2, true).unwrap();
+        assert!(am.set_volume(1, 0.8));
+        assert!(am.set_muted(2, true));
         let dev = am.get_device(1).unwrap();
         assert!((dev.volume - 0.8).abs() < 1e-6);
         assert_eq!(am.default_output, Some(1));
@@ -2021,8 +2021,8 @@ mod driver_extension_tests {
         assert_eq!(id1, 1);
         assert_eq!(id2, 2);
         assert_eq!(dm.device_count(), 2);
-        dm.set_resolution(1, 3840, 2160).unwrap();
-        dm.set_refresh_rate(1, 120).unwrap();
+        assert!(dm.set_resolution(1, 3840, 2160));
+        assert!(dm.set_refresh_rate(1, 120));
         let dev = dm.get_device(1).unwrap();
         assert_eq!(dev.width, 3840);
         assert_eq!(dev.height, 2160);

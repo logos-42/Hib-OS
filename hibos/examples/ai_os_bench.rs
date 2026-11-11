@@ -7,6 +7,14 @@ use std::time::Instant;
 
 use hibos::kernel::ai_os::*;
 
+// `kernel/ai_os/perception.rs` 尚未在 `kernel/ai_os/mod.rs` 中声明，
+// 因此 `hibos::kernel::ai_os::perception` 不可用；这里用 `#[path]` 直接并入示例
+// crate，`use ... as ai_os` 用于满足文件内部 `crate::ai_os::native::*` 的绝对路径。
+use hibos::kernel::ai_os as ai_os;
+
+#[path = "../kernel/ai_os/perception.rs"]
+mod perception;
+
 fn bench_model_load() {
     let start = Instant::now();
     for _ in 0..1000 {
@@ -102,7 +110,8 @@ fn bench_attention_receive() {
 fn bench_perception_inject() {
     let mut eng = perception::PerceptionEngine::new();
     let ch_id = eng.add_channel("ch1", perception::SensoryModality::Visual, "cam0");
-    eng.lens.allow_channel("ch1");
+    eng.attention.enable_channel(ch_id);
+    eng.attention.set_focus(Some(ch_id));
     let start = Instant::now();
     for _ in 0..10000 {
         eng.inject_event(ch_id, vec![0.5, 0.3, 0.8]).unwrap();
@@ -167,13 +176,13 @@ fn bench_temporal_tick() {
 }
 
 fn bench_society_send() {
-    let mut eng = society::SocietyEngine::new();
+    let mut eng = social::SocietyEngine::new();
     eng.register_agent("alice", "assistant");
     eng.register_agent("bob", "assistant");
-    eng.subscribe(2, society::MessageType::Request);
+    eng.subscribe(2, social::MessageType::Request);
     let start = Instant::now();
     for _ in 0..100000 {
-        eng.send_message(1, Some(2), society::MessageType::Request, "hello");
+        eng.send_message(1, Some(2), social::MessageType::Request, "hello");
     }
     let elapsed = start.elapsed();
     println!("society_send: {} ops in {:?} ({:.2} ns/op)", 100000, elapsed, elapsed.as_nanos() / 100000);
@@ -182,7 +191,7 @@ fn bench_society_send() {
 fn bench_ethics_evaluate() {
     let mut eng = ethics::EthicsEngine::new();
     eng.add_principle(
-        ethics::EthicalPrincipleType::NoHarm,
+        ethics::EthicalPrincipleType::NonMaleficence,
         "不伤害",
         "不得对人类造成伤害",
         1.0,
@@ -202,7 +211,7 @@ fn bench_ethics_evaluate() {
 fn bench_evolution_mutate() {
     let mut eng = evolution::EvolutionEngine::new();
     let genome_id = eng.create_genome(1, None);
-    eng.add_gene_to_genome(genome_id, "lr", 0.01, 0.0, 1.0, 0.1).unwrap();
+    assert!(eng.add_gene_to_genome(genome_id, "lr", 0.01, 0.0, 1.0, 0.1));
     let start = Instant::now();
     for _ in 0..100000 {
         eng.mutate_genome(genome_id, "lr", 0.001);

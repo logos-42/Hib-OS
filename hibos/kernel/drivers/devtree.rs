@@ -76,7 +76,7 @@ mod tests {
     #[test]
     fn insert_duplicate() {
         let props = BTreeMap::new();
-        assert!(devtree_insert("x", "/a", props).is_ok());
+        assert!(devtree_insert("x", "/a", props.clone()).is_ok());
         assert!(devtree_insert("y", "/a", props).is_err());
     }
 }

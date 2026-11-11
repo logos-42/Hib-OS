@@ -2565,7 +2565,7 @@ mod advanced_tests {
 // =====================================================================================
 
 /// 推理请求。
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct InferenceResponse {
     pub request_id: u64,
     pub output_tokens: Vec<u32>,
@@ -3626,7 +3626,7 @@ mod serving_tests {
         serving_act("submit model-a 1 1 2 3 64 0.7 0.9 40 1").unwrap();
         serving_act("process").unwrap();
         let res = serving_act("complete 1 4 5 hi 1000000 2000000").unwrap();
-        assert!(res.is_ok());
+        assert!(res.contains("已完成推理请求"));
     }
 
     #[test]

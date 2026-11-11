@@ -5,9 +5,9 @@
 
 use std::collections::BTreeMap;
 
-use super::dentry::{dentry_create, dentry_delete, dentry_lookup, ROOT_INO};
+use super::dentry::{dentry_create, dentry_create_typed, dentry_delete, dentry_list, dentry_lookup, ROOT_INO};
 use super::fd_table::{fd_alloc, fd_close, fd_count, fd_get, fd_registry, Access, FdTable};
-use super::inode::{alloc_inode, get_inode, get_inode_mut, InodeType};
+use super::inode::{alloc_inode, free_inode, get_inode, get_inode_mut, InodeType};
 
 /// 全局 VFS：按进程 ID 维护独立 fd 表。
 pub struct Vfs {
@@ -212,6 +212,239 @@ pub fn vfs_stats() -> String {
     format!("vfs 就绪，fd 表项数={}", n)
 }
 
+// =====================================================================
+// 高层文件操作 —— `fs://vfs` 通道的落地实现
+//
+// 低层 open/read/write/close 要求调用方自己持有 fd 与偏移；通道层
+// （`sense` / `act`）只关心"路径 → 内容"。以下函数全部复用上面的
+// POSIX 实现与同一份 inode/dentry 表，不引入第二套状态。
+// =====================================================================
+
+/// 解析绝对路径到 inode 号（不分配 fd，不修改任何状态）。
+///
+/// 中间路径分量必须是目录；最后一个分量可以是文件或目录。
+/// 空路径（`/`、`.`、`//`）解析为根目录。
+pub fn resolve_inode(path: &str) -> Result<u64, String> {
+    let comps = resolve_path(path);
+    if comps.is_empty() {
+        return Ok(ROOT_INO);
+    }
+    let mut ino = ROOT_INO;
+    for (i, c) in comps.iter().enumerate() {
+        let next = dentry_lookup(ino, c).ok_or_else(|| format!("未找到: {}", path))?;
+        if i + 1 < comps.len() {
+            let inode = get_inode(next).ok_or("inode 未找到")?;
+            if !inode.is_dir() {
+                return Err(format!("不是目录: {}", c));
+            }
+        }
+        ino = next;
+    }
+    Ok(ino)
+}
+
+/// 一次性写入整个文件：不存在则创建，存在则从 0 偏移覆盖并截断。
+///
+/// 与 shell 的 `write` 语义一致（覆盖而非追加），但走真实 inode。
+pub fn write_file(pid: u64, path: &str, data: &[u8]) -> Result<u64, String> {
+    let mut v = Vfs::new();
+    let fd = v.open(pid, path, Access::ReadWrite)?;
+    let ino = fd_get(pid, fd).ok_or("fd 未找到")?.ino;
+    // 截断：清空旧内容并把偏移归零，避免残留尾部字节。
+    get_inode_mut(ino, |inode| {
+        if inode.is_dir() {
+            return;
+        }
+        inode.data.clear();
+        inode.size = 0;
+    })
+    .ok_or("inode 未找到")?;
+    v.llseek(pid, fd, 0, 0)?;
+    let written = v.write(pid, fd, data);
+    let _ = v.close(pid, fd);
+    written
+}
+
+/// 读取整个文件内容。目录返回错误。
+pub fn read_file(path: &str) -> Result<Vec<u8>, String> {
+    let ino = resolve_inode(path)?;
+    let inode = get_inode(ino).ok_or("inode 未找到")?;
+    if inode.is_dir() {
+        return Err(format!("是目录: {}", path));
+    }
+    Ok(inode.data)
+}
+
+/// 读取整个文件并解码为 UTF-8 文本。
+pub fn read_file_text(path: &str) -> Result<String, String> {
+    let data = read_file(path)?;
+    String::from_utf8(data).map_err(|e| format!("非 UTF-8 内容: {}", e))
+}
+
+/// 列出目录内容：`(名字, inode 号, 是否目录)`，按名字排序。
+pub fn list_dir(path: &str) -> Result<Vec<(String, u64, bool)>, String> {
+    let ino = resolve_inode(path)?;
+    let inode = get_inode(ino).ok_or("inode 未找到")?;
+    if !inode.is_dir() {
+        return Err(format!("不是目录: {}", path));
+    }
+    let mut out: Vec<(String, u64, bool)> = dentry_list(ino)
+        .into_iter()
+        .map(|(name, child)| {
+            let is_dir = get_inode(child).map(|i| i.is_dir()).unwrap_or(false);
+            (name, child, is_dir)
+        })
+        .collect();
+    out.sort_by(|a, b| a.0.cmp(&b.0));
+    Ok(out)
+}
+
+/// 递归创建目录（等价 `mkdir -p`），返回最终 inode 号。
+pub fn make_dir(path: &str) -> Result<u64, String> {
+    let comps = resolve_path(path);
+    if comps.is_empty() {
+        return Ok(ROOT_INO);
+    }
+    let mut ino = ROOT_INO;
+    for c in &comps {
+        match dentry_lookup(ino, c) {
+            Some(next) => {
+                let inode = get_inode(next).ok_or("inode 未找到")?;
+                if !inode.is_dir() {
+                    return Err(format!("不是目录: {}", c));
+                }
+                ino = next;
+            }
+            None => {
+                ino = dentry_create_typed(ino, c, InodeType::Dir)?;
+            }
+        }
+    }
+    Ok(ino)
+}
+
+/// 删除文件或空目录。非空目录拒绝删除（无 `rm -r` 语义）。
+pub fn remove_path(path: &str) -> Result<(), String> {
+    let comps = resolve_path(path);
+    if comps.is_empty() {
+        return Err("不能删除根目录".to_string());
+    }
+    let name = comps.last().unwrap().clone();
+    let parent = resolve_parent(&comps)?;
+    let ino = dentry_lookup(parent, &name).ok_or_else(|| format!("未找到: {}", path))?;
+    let inode = get_inode(ino).ok_or("inode 未找到")?;
+    if inode.is_dir() && !dentry_list(ino).is_empty() {
+        return Err(format!("目录非空: {}", path));
+    }
+    if !dentry_delete(parent, &name) {
+        return Err("删除失败".to_string());
+    }
+    free_inode(ino);
+    Ok(())
+}
+
+/// 路径的元数据快照，形如 `ino=2 type=file size=10 mode=644 uid=0 gid=0`。
+pub fn stat_path(path: &str) -> Result<String, String> {
+    let ino = resolve_inode(path)?;
+    let inode = get_inode(ino).ok_or("inode 未找到")?;
+    let kind = match inode.kind {
+        InodeType::File => "file",
+        InodeType::Dir => "dir",
+        InodeType::Symlink => "symlink",
+    };
+    Ok(format!(
+        "ino={} type={} size={} mode={:o} uid={} gid={}",
+        inode.ino, kind, inode.size, inode.mode, inode.uid, inode.gid
+    ))
+}
+
+/// `fs://vfs` 的感知快照：inode 总数、根目录条目数、fd 表规模。
+pub fn fs_sense_snapshot() -> String {
+    let inodes = super::inode::inode_count();
+    let root_entries = dentry_list(ROOT_INO).len();
+    let tables = fd_registry().lock().unwrap().tables.len();
+    let mut out = format!(
+        "vfs inodes={} root_entries={} fd_tables={}\n",
+        inodes, root_entries, tables
+    );
+    for (name, ino, is_dir) in list_dir("/").unwrap_or_default() {
+        out.push_str(&format!(
+            "  {}{} ino={}\n",
+            name,
+            if is_dir { "/" } else { "" },
+            ino
+        ));
+    }
+    out
+}
+
+/// `fs://vfs` 的行动分发。
+///
+/// 用法：
+/// * `write <路径> <内容>` —— 覆盖写入文本
+/// * `read <路径>`          —— 读取文本
+/// * `ls [路径]`            —— 列目录
+/// * `mkdir <路径>`         —— 递归建目录
+/// * `rm <路径>`            —— 删除文件或空目录
+/// * `stat <路径>`          —— 元数据
+pub fn fs_act_dispatch(payload: &str) -> Result<String, String> {
+    let payload = payload.trim();
+    let (cmd, rest) = match payload.split_once(char::is_whitespace) {
+        Some((c, r)) => (c, r.trim()),
+        None => (payload, ""),
+    };
+    match cmd {
+        "write" => {
+            let (path, content) = rest
+                .split_once(char::is_whitespace)
+                .ok_or("用法: write <路径> <内容>")?;
+            let n = write_file(0, path, content.as_bytes())?;
+            Ok(format!("已写入 {} 字节 -> {}", n, path))
+        }
+        "read" => {
+            if rest.is_empty() {
+                return Err("用法: read <路径>".to_string());
+            }
+            Ok(read_file_text(rest)?)
+        }
+        "ls" => {
+            let path = if rest.is_empty() { "/" } else { rest };
+            let entries = list_dir(path)?;
+            let mut out = format!("{}: {} 项\n", path, entries.len());
+            for (name, ino, is_dir) in entries {
+                out.push_str(&format!(
+                    "  {}{} ino={}\n",
+                    name,
+                    if is_dir { "/" } else { "" },
+                    ino
+                ));
+            }
+            Ok(out)
+        }
+        "mkdir" => {
+            if rest.is_empty() {
+                return Err("用法: mkdir <路径>".to_string());
+            }
+            let ino = make_dir(rest)?;
+            Ok(format!("已创建目录 {} ino={}", rest, ino))
+        }
+        "rm" => {
+            if rest.is_empty() {
+                return Err("用法: rm <路径>".to_string());
+            }
+            remove_path(rest)?;
+            Ok(format!("已删除 {}", rest))
+        }
+        "stat" => {
+            if rest.is_empty() {
+                return Err("用法: stat <路径>".to_string());
+            }
+            Ok(format!("{} {}", rest, stat_path(rest)?))
+        }
+        other => Err(format!("未知操作: {}（write/read/ls/mkdir/rm/stat）", other)),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -228,7 +461,7 @@ mod tests {
         let mut buf = [0u8; 16];
         let n = v.read(1, fd2, &mut buf).unwrap();
         assert_eq!(n, 10);
-        assert_eq!(&buf[..n], b"hello vfs");
+        assert_eq!(&buf[..n as usize], b"hello vfs");
 
         v.close(1, fd).unwrap();
         v.close(1, fd2).unwrap();

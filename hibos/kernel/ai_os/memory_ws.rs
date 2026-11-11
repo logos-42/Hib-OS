@@ -676,6 +676,15 @@ pub struct ForgettingCurve {
     pub repetitions: u64,
 }
 
+impl ForgettingCurve {
+    /// R = e^(-t/S)，S 为相对强度
+    pub fn retention(&self, elapsed_seconds: f64) -> f32 {
+        let s = self.initial_strength.max(0.01);
+        let t = elapsed_seconds;
+        (-(t as f32) * self.decay_rate / s).exp()
+    }
+}
+
 /// 遗忘机制：基于艾宾浩斯遗忘曲线的记忆衰减。
 pub struct MemoryForgetting {
     pub forgotten_count: u64,
@@ -691,10 +700,7 @@ impl MemoryForgetting {
     }
 
     pub fn retention(&self, elapsed_seconds: f64) -> f32 {
-        // R = e^(-t/S)，S 为相对强度
-        let s = self.curve.initial_strength.max(0.01);
-        let t = elapsed_seconds;
-        (-(t as f32) * self.curve.decay_rate / s).exp()
+        self.curve.retention(elapsed_seconds)
     }
 
     pub fn should_forget(&self, retention: f32, threshold: f32) -> bool {

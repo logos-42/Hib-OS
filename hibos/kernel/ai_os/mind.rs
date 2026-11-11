@@ -1717,9 +1717,9 @@ mod advanced_tests {
     #[test]
     fn decision_tree() {
         let mut tree = DecisionTree::new();
-        let root = tree.add_node(Some("is_human".into()), None).unwrap();
-        let left = tree.add_node(None, Some("treat_as_human".into())).unwrap();
-        let right = tree.add_node(None, Some("treat_as_object".into())).unwrap();
+        let root = tree.add_node(Some("is_human".into()), None);
+        let left = tree.add_node(None, Some("treat_as_human".into()));
+        let right = tree.add_node(None, Some("treat_as_object".into()));
         tree.link_left(root, left).unwrap();
         tree.link_right(root, right).unwrap();
         assert_eq!(tree.node_count(), 3);
@@ -1732,9 +1732,9 @@ mod advanced_tests {
     #[test]
     fn behavior_tree() {
         let mut bt = BehaviorTree::new();
-        let root = bt.add_node(BTNodeType::Selector, "root").unwrap();
-        let child1 = bt.add_node(BTNodeType::Action, "action1").unwrap();
-        let child2 = bt.add_node(BTNodeType::Action, "action2").unwrap();
+        let root = bt.add_node(BTNodeType::Selector, "root");
+        let child1 = bt.add_node(BTNodeType::Action, "action1");
+        let child2 = bt.add_node(BTNodeType::Action, "action2");
         bt.add_child(root, child1).unwrap();
         bt.add_child(root, child2).unwrap();
         assert_eq!(bt.node_count(), 3);

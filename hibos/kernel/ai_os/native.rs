@@ -1097,7 +1097,7 @@ mod tests {
         assert_eq!(QualiaModality::Visual.name(), "visual");
         assert_eq!(QualiaModality::Semantic.name(), "semantic");
         assert_eq!(QualiaModality::Emotional.name(), "emotional");
-        assert_eq!(QualiaModality::Self.name(), "self");
+        assert_eq!(QualiaModality::Ego.name(), "self");
     }
 
     #[test]

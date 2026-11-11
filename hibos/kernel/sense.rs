@@ -11,6 +11,7 @@ use crate::gpu::{iommu, vram, VramPartitionId};
 use crate::monitor::get_time_ns;
 use crate::net::ETH_NAME;
 use crate::vfs::Vfs;
+use crate::fs::{fs_act_dispatch, fs_sense_snapshot};
 
 use crate::ai_os::model::{status as model_status};
 use crate::ai_os::ctx_mem;
@@ -238,6 +239,7 @@ pub fn probe(name: &str) -> Option<String> {
         "mem://ram" => Some(mem().lock().unwrap().stats()),
         "mem://mmap" => Some(mem().lock().unwrap().regions()),
         "fs://meta" => Some(fsmeta().lock().unwrap().list()),
+        "fs://vfs" => Some(fs_sense_snapshot()),
         "user://db" => Some(userdb().lock().unwrap().list()),
         "socket://tcp" => Some(netio().lock().unwrap().last.clone()),
         "net://dns" => Some(netio().lock().unwrap().last.clone()),
@@ -800,6 +802,7 @@ fn act_raw(name: &str, payload: &str) -> Option<Result<String, String>> {
         "mem://ram" => Some(act_ram(payload)),
         "mem://mmap" => Some(act_mmap(payload)),
         "fs://meta" => Some(act_fsmeta(payload)),
+        "fs://vfs" => Some(fs_act_dispatch(payload)),
         "user://db" => Some(act_user(payload)),
         "socket://tcp" => Some(act_socket(payload)),
         "net://dns" => Some(act_dns(payload)),

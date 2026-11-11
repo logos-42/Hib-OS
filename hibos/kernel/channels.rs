@@ -115,6 +115,8 @@ pub enum ChannelKind {
     ShellAi,
     /// AI 原生：智能图形界面层（gui_ai://*）
     GuiAi,
+    /// AI 原生：POSIX 文件系统通道（fs://vfs）
+    Vfs,
 }
 
 impl ChannelKind {
@@ -171,6 +173,7 @@ impl ChannelKind {
             ChannelKind::DriverAi => "driver_ai",
             ChannelKind::ShellAi => "shell_ai",
             ChannelKind::GuiAi => "gui_ai",
+            ChannelKind::Vfs => "vfs",
         }
     }
 }
@@ -405,6 +408,7 @@ pub fn bootstrap() -> ChannelRegistry {
         (ChannelKind::Memory, "mem://mmap", Access::ReadWrite),
         (ChannelKind::Memory, "lease://channels", Access::ReadWrite),
         (ChannelKind::File, "fs://meta", Access::ReadWrite),
+        (ChannelKind::Vfs, "fs://vfs", Access::ReadWrite),
         (ChannelKind::User, "user://db", Access::ReadWrite),
         (ChannelKind::Net, "socket://tcp", Access::ReadWrite),
         (ChannelKind::Net, "net://dns", Access::ReadWrite),

@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use std::sync::{Mutex, OnceLock};
 
 /// 目录项。
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DirEntry {
     pub name: String,
     pub ino: u64,

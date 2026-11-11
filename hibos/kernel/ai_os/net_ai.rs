@@ -2564,7 +2564,7 @@ mod net_service_tests {
         let id2 = ws.receive(vec![4, 5, 6], WSFrameType::Binary);
         assert_eq!(id2, 2);
         assert_eq!(ws.frame_count(), 2);
-        assert!((ws.total_bytes() - 12).abs() < 1e-6);
+        assert_eq!(ws.total_bytes(), 6); // 3 字节发送 + 3 字节接收
         ws.close();
         assert!(!ws.open);
     }

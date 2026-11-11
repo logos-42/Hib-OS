@@ -17,7 +17,7 @@
 //! 所有结构均为纯 Rust 原型，无磁盘依赖，供内核统一核算与调度。
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
-use std::sync::{Mutex, OnceLock};
+use\ std::sync::\{Mutex,\ OnceLock};\\nuse\ crate::fs::\{make_dir,\ read_file,\ write_file};
 
 // =====================================================================================
 // 语义 inode (SemanticInode)
@@ -675,6 +675,10 @@ pub fn vfs_ai_act(payload: &str) -> Result<String, String> {
             }
             let mut eng = vfs_ai().lock().unwrap();
             let written = eng.write_file(file_id, offset, &data)?;
+            // 注入：同步写入 L1 POSIX VFS，使 `sense fs://vfs` 可见。
+            let _ = make_dir("/ai_os/vfs_ai");
+            let path = format!("/ai_os/vfs_ai/{}", file_id);
+            let _ = write_file(0, &path, &data);
             Ok(format!("已写入 {} 字节 到 file_id={} offset={}", written, file_id, offset))
         }
         Some("read") => {
@@ -683,6 +687,9 @@ pub fn vfs_ai_act(payload: &str) -> Result<String, String> {
             let len = it.next().and_then(|s| s.parse::<u64>().ok()).unwrap_or(4096);
             let mut eng = vfs_ai().lock().unwrap();
             let data = eng.read_file(file_id, offset, len)?;
+            // 注入：也从 L1 POSIX VFS 读取，建立跨层可见性。
+            let path = format!("/ai_os/vfs_ai/{}", file_id);
+            let _fs_data = read_file(&path);
             Ok(format!("已读取 {} 字节 从 file_id={} offset={}", data.len(), file_id, offset))
         }
         Some("delete") => {
