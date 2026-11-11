@@ -8,7 +8,7 @@
 //! 校验和算法遵循 RFC 768：伪首部(12B) + UDP 首部(校验和置 0) + 数据，
 //! 16 位反码求和后取反；结果为 0 时按惯例发送 0xFFFF。
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use alloc::collections::{HashMap, HashSet, VecDeque};
 
 /// UDP 首部固定长度（字节）。
 pub const UDP_HEADER_LEN: usize = 8;

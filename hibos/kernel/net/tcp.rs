@@ -4,7 +4,7 @@
 //! 本层不依赖以太网：`TcpLayer` 只处理 TCP 段字节流，收发由上层（`NetStack`）经
 //! IPv4 层封装成以太网帧送出。
 
-use std::collections::{HashMap, VecDeque};
+use alloc::collections::{HashMap, VecDeque};
 
 use crate::net::ipv4::compute_checksum;
 

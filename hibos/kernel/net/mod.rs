@@ -11,6 +11,9 @@
 //! `parse_ip/parse_mac/fmt_ip/fmt_mac/same_subnet`、`send/recv/arp_add/...`
 //! 与原 kernel/net.rs 接口一致，供 kernel/sense.rs / kernel/netif.rs / kernel/shell.rs 继续使用。
 
+use alloc::collections::{HashMap, VecDeque};
+use crate::ksync::{SpinLock, OnceLock};
+
 pub mod device;
 pub mod ethernet;
 pub mod ipv4;
@@ -119,13 +122,13 @@ pub struct NetStats {
 pub struct NetStack {
     pub iface: Interface,
     /// ARP 表：IP -> MAC。
-    pub arp: std::collections::HashMap<[u8; 4], [u8; 6]>,
+    pub arp: HashMap<[u8; 4], [u8; 6]>,
     /// 路由表。
     pub routes: Vec<RouteEntry>,
     /// 旧版发送队列（裸 IP 包，供 net://eth0 send 兼容）。
-    pub tx: std::collections::VecDeque<Packet>,
+    pub tx: VecDeque<Packet>,
     /// 旧版接收队列（裸 IP 包，供 net://eth0 recv 兼容）。
-    pub rx: std::collections::VecDeque<Packet>,
+    pub rx: VecDeque<Packet>,
     pub stats: NetStats,
 
     device: Box<dyn NetDevice>,
@@ -147,17 +150,17 @@ impl NetStack {
         });
         Self {
             iface: Interface::default_eth0(),
-            arp: std::collections::HashMap::new(),
+            arp: HashMap::new(),
             routes,
-            tx: std::collections::VecDeque::new(),
-            rx: std::collections::VecDeque::new(),
+            tx: VecDeque::new(),
+            rx: VecDeque::new(),
             stats: NetStats::default(),
             device: Box::new(LoopbackDevice::new(ETH_NAME)),
             ip: ipv4::Ipv4Layer::new(ETH_IP),
             tcp: tcp::TcpLayer::new(ETH_IP),
             udp: udp::UdpLayer::new(ETH_IP),
             sockets: socket::SocketTable::new(),
-            out_queue: std::collections::VecDeque::new(),
+            out_queue: VecDeque::new(),
         }
     }
 
@@ -318,9 +321,9 @@ impl Default for NetStack {
 }
 
 /// 全局协议栈（感知通道 `net://eth0` 的实体）。
-pub fn net() -> &'static std::sync::Mutex<NetStack> {
-    static NET: std::sync::OnceLock<std::sync::Mutex<NetStack>> = std::sync::OnceLock::new();
-    NET.get_or_init(|| std::sync::Mutex::new(NetStack::new()))
+pub fn net() -> &'static SpinLock<NetStack> {
+    static NET: OnceLock<SpinLock<NetStack>> = OnceLock::new();
+    NET.get_or_init(|| SpinLock::new(NetStack::new()))
 }
 
 /// 把点分十进制字符串解析为 IPv4 地址；解析失败返回 0.0.0.0。

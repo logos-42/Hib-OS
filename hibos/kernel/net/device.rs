@@ -4,8 +4,8 @@
 //! * `LoopbackDevice`：环回设备，把发出的帧送回自己的接收队列，适用于单元测试和无 NIC 环境；
 //! * `TapDevice`：TUN/TAP 骨架，方法签名已就绪，尚未接入宿主 TUN fd。
 
-use std::collections::VecDeque;
-use std::sync::atomic::{AtomicU64, Ordering};
+use alloc::collections::VecDeque;
+use core::sync::atomic::{AtomicU64, Ordering};
 
 /// 原生网卡能力：收发原始字节（以太网帧或预封装的 IP 包，取决于链路模式）。
 pub trait NetDevice: Send + Sync {

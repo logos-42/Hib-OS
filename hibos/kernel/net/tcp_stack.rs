@@ -16,14 +16,57 @@
 //! `tcp_recv(key, len)` / `tcp_accept(listener_port)` / `tcp_close(key)` /
 //! `tcp_process_segment(src_ip, dst_ip, bytes)` / `tcp_stack_tick(dt)`。
 
-use std::collections::{HashMap, VecDeque};
-use std::sync::{Mutex, OnceLock};
-use std::time::{Duration, Instant};
+use alloc::collections::{HashMap, VecDeque};
+use crate::ksync::{SpinLock, OnceLock};
+use core::time::Duration;
 
 use crate::caps;
 use crate::exec::ExecId;
 use crate::net::tcp::{TcpConnKey, TcpSegment, TcpState, DEFAULT_MSS, TCP_ACK, TCP_FIN,
     TCP_PSH, TCP_RST, TCP_SYN};
+
+// no_std 环境下的 Instant 替代：基于内核纳秒时间戳。
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Instant(u64);
+
+impl Instant {
+    pub fn now() -> Self {
+        Instant(crate::time::get_time_ns())
+    }
+
+    pub fn checked_add(self, duration: Duration) -> Option<Self> {
+        self.0.checked_add(duration.as_nanos() as u64).map(Instant)
+    }
+
+    pub fn saturating_add(self, duration: Duration) -> Self {
+        Instant(self.0.saturating_add(duration.as_nanos() as u64))
+    }
+
+    pub fn saturating_sub(self, other: Instant) -> Duration {
+        Duration::from_nanos(self.0.saturating_sub(other.0))
+    }
+}
+
+impl core::ops::Add<Duration> for Instant {
+    type Output = Self;
+    fn add(self, rhs: Duration) -> Self {
+        self.saturating_add(rhs)
+    }
+}
+
+impl core::ops::Sub<Instant> for Instant {
+    type Output = Duration;
+    fn sub(self, rhs: Instant) -> Duration {
+        self.saturating_sub(rhs)
+    }
+}
+
+impl core::ops::Sub<Duration> for Instant {
+    type Output = Self;
+    fn sub(self, rhs: Duration) -> Self {
+        Instant(self.0.saturating_sub(rhs.as_nanos() as u64))
+    }
+}
 
 // =======================================================================
 // 拥塞控制（Reno / Cubic）
@@ -352,9 +395,9 @@ impl TcpStack {
     }
 
     /// 全局 TCP 协议栈单例（`net://tcp_stack` 通道后端）。
-    pub fn stack() -> &'static Mutex<TcpStack> {
-        static STACK: OnceLock<Mutex<TcpStack>> = OnceLock::new();
-        STACK.get_or_init(|| Mutex::new(Self::new([10, 0, 0, 2])))
+    pub fn stack() -> &'static SpinLock<TcpStack> {
+        static STACK: OnceLock<SpinLock<TcpStack>> = OnceLock::new();
+        STACK.get_or_init(|| SpinLock::new(Self::new([10, 0, 0, 2])))
     }
 
     /// 分配下一个临时端口。
@@ -372,7 +415,7 @@ impl TcpStack {
     /// 绑定本地端口（状态 Closed），检查 `CAP_NET_BIND` 能力（<1024 端口需该能力）。
     pub fn bind(&mut self, owner: ExecId, local_port: u16) -> Result<(), String> {
         // 受保护端口（<1024）需要 CAP_NET_BIND。
-        if local_port < 1024 && !caps::caps().lock().unwrap().has("CAP_NET_BIND") {
+        if local_port < 1024 && !caps::caps().lock().has("CAP_NET_BIND") {
             return Err(format!("绑定特权端口 {} 需要 CAP_NET_BIND 能力", local_port));
         }
         let _ = owner; // 租约由调用方在上层持有，此处仅做能力校验。
@@ -401,7 +444,7 @@ impl TcpStack {
     pub fn connect(&mut self, _owner: ExecId, local_port: u16, remote_ip: [u8; 4],
                    remote_port: u16) -> Result<Vec<TcpSegment>, String> {
         // 检查 CAP_NET_RAW（原始 TCP 连接需该能力）。
-        if !caps::caps().lock().unwrap().has("CAP_NET_RAW") {
+        if !caps::caps().lock().has("CAP_NET_RAW") {
             return Err("tcp_connect 需要 CAP_NET_RAW 能力".to_string());
         }
         let key = TcpConnKey { local_port, remote_ip: [0, 0, 0, 0], remote_port: 0 };
@@ -844,7 +887,7 @@ impl TcpStack {
 
 /// 查询 TCP 协议栈状态快照（供 `sense net://tcp_stack`）。
 pub fn tcp_stack_sense_snapshot() -> String {
-    let st = TcpStack::stack().lock().unwrap();
+    let st = TcpStack::stack().lock();
     st.status()
 }
 
@@ -855,7 +898,7 @@ pub fn tcp_stack_act_raw(payload: &str) -> Result<String, String> {
     match it.next() {
         Some("stats") => Ok(tcp_stack_sense_snapshot()),
         Some("conns") => {
-            let st = TcpStack::stack().lock().unwrap();
+            let st = TcpStack::stack().lock();
             Ok(st.status())
         }
         Some("connect") => {
@@ -871,7 +914,7 @@ pub fn tcp_stack_act_raw(payload: &str) -> Result<String, String> {
                 .ok_or("缺少 remote_port")?
                 .parse()
                 .map_err(|e: std::num::ParseIntError| e.to_string())?;
-            let mut st = TcpStack::stack().lock().unwrap();
+            let mut st = TcpStack::stack().lock();
             let segs = st.connect(1, port, ip, rport)?;
             let segs_len = segs.len();
             // 环回驱动握手：把发出的段再送回本栈处理（模拟对端回应）。
@@ -897,7 +940,7 @@ pub fn tcp_stack_act_raw(payload: &str) -> Result<String, String> {
                 .map_err(|e: std::num::ParseIntError| e.to_string())?;
             let hex = it.next().ok_or("缺少 hex 数据")?;
             let data = hex_decode(hex)?;
-            let mut st = TcpStack::stack().lock().unwrap();
+            let mut st = TcpStack::stack().lock();
             // 找到该端口的已建立连接（任意对端）。
             let key = st
                 .conns
@@ -914,7 +957,7 @@ pub fn tcp_stack_act_raw(payload: &str) -> Result<String, String> {
                 .ok_or("用法: close <local_port>")?
                 .parse()
                 .map_err(|e: std::num::ParseIntError| e.to_string())?;
-            let mut st = TcpStack::stack().lock().unwrap();
+            let mut st = TcpStack::stack().lock();
             let key = st.conns.iter().find(|(_, c)| c.key.local_port == port).map(|(k, _)| k.clone())
                 .ok_or_else(|| format!("端口 {} 无连接", port))?;
             let segs = st.close(&key)?;
