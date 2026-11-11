@@ -5,6 +5,7 @@
 //! 留给后续阶段（GPU、桌面、AI 等）逐步填充。
 
 use alloc::string::String;
+use alloc::string::ToString;
 use alloc::vec::Vec;
 use core::fmt::Write;
 
