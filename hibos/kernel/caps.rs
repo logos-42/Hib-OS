@@ -1,9 +1,13 @@
-//! 安全能力 (capabilities) —— AI 原生的「权限意图」。
+//! 安全能力 (capabilities) —— AI 原生的「权限意图」（no_std 内核版本）。
 //!
 //! 用能力位而非 uid 硬编码来约束行动，可授予 / 撤销 / 校验。
 
-use std::collections::BTreeSet;
-use std::sync::{Mutex, OnceLock};
+use alloc::collections::BTreeSet;
+use alloc::string::String;
+use alloc::string::ToString;
+use alloc::vec::Vec;
+
+use crate::ksync::{SpinLock, OnceLock};
 
 pub const ALL_CAPS: &[&str] = &[
     "CAP_CHOWN",
@@ -26,7 +30,9 @@ pub struct Caps {
 impl Caps {
     fn new() -> Self {
         // 默认授予全部能力；AI 可主动 revoke 来演示最小权限。
-        Self { set: ALL_CAPS.iter().map(|s| s.to_string()).collect() }
+        Self {
+            set: ALL_CAPS.iter().map(|s| s.to_string()).collect(),
+        }
     }
 
     pub fn has(&self, cap: &str) -> bool {
@@ -63,8 +69,8 @@ impl Caps {
     }
 }
 
-static CAPS: OnceLock<Mutex<Caps>> = OnceLock::new();
+static CAPS: OnceLock<SpinLock<Caps>> = OnceLock::new();
 
-pub fn caps() -> &'static Mutex<Caps> {
-    CAPS.get_or_init(|| Mutex::new(Caps::new()))
+pub fn caps() -> &'static SpinLock<Caps> {
+    CAPS.get_or_init(|| SpinLock::new(Caps::new()))
 }

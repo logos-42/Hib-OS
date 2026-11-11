@@ -12,6 +12,7 @@ use core::panic::PanicInfo;
 extern crate alloc;
 
 pub mod arch;
+pub mod caps;
 pub mod drivers;
 pub mod fs;
 pub mod graphics;
