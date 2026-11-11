@@ -1,0 +1,13 @@
+[build]
+target = "x86_64-unknown-none"
+
+[target.x86_64-unknown-none]
+linker = "lld-link.exe"
+rustflags = [
+  "-C", "link-arg=-flavor",
+  "-C", "link-arg=:link",
+  "-C", "link-arg=-entry:kernel_main",
+  "-C", "link-arg=-subsystem:console",
+  "-C", "link-arg=-nodefaultlib",
+  "-C", "link-arg=-nostdlib",
+]

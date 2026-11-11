@@ -1,0 +1,17 @@
+[package]
+name = "hibos-kernel"
+version = "0.1.0"
+edition = "2021"
+description = "Hib OS bare-metal kernel (no_std, x86_64-unknown-none)"
+
+[[bin]]
+name = "hibos_kernel"
+path = "kernel.rs"
+# 裸机内核入口，no_std，无 std 依赖
+
+[profile.release]
+opt-level = 2
+panic = "abort"
+
+[target.x86_64-unknown-none]
+# 裸机目标：不需要 std 依赖

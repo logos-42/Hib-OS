@@ -12,8 +12,7 @@ path = "lib.rs"
 [[bin]]
 name = "hibos"
 path = "kernel/mod.rs"
-# 库目标已包含同一棵模块树及其全部 #[cfg(test)]；
-# 若 bin 也跑测试，会重复执行 2000+ 用例，故关闭。
+# 用户态 shell 入口（std 环境），保留用于在宿主 OS 上运行原型。
 test = false
 bench = false
 
