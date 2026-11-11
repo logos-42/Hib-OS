@@ -552,6 +552,7 @@ fn hex_decode(s: &str) -> Result<Vec<u8>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::net::{ICMP_ECHO_REQUEST, ICMP_ECHO_REPLY};
     use crate::net::ipv4::IP_PROTO_ICMP;
     #[test]
     fn echo_request_reply_roundtrip() {

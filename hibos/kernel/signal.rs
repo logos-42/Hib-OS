@@ -700,6 +700,7 @@ pub fn signal_set_summary(set: &SigSet) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::Ordering;
 
     #[test]
     fn signal_number_and_name() {

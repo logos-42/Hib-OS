@@ -263,7 +263,7 @@ pub fn close(fd: SocketFd) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::net::{EthernetFrame, ETH_TYPE_IPV4, ICMP_ECHO_REPLY, IcmpPacket, Ipv4Packet};
+    use crate::net::{EthernetFrame, ETH_TYPE_IPV4, ICMP_ECHO_REPLY, IP_PROTO_ICMP, IcmpPacket, Ipv4Packet};
     use std::sync::MutexGuard;
 
     fn test_ip() -> [u8; 4] { [10, 0, 0, 2] }
