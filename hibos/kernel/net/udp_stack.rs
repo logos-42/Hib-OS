@@ -178,9 +178,9 @@ impl UdpStack {
     }
 
     /// 全局 UDP 协议栈实例（`net://udp` 通道后端）。
-    pub fn stack() -> &'static Mutex<UdpStack> {
-        static STACK: OnceLock<Mutex<UdpStack>> = OnceLock::new();
-        STACK.get_or_init(|| Mutex::new(Self::new([10, 0, 0, 2])))
+    pub fn stack() -> &'static SpinLock<UdpStack> {
+        static STACK: OnceLock<SpinLock<UdpStack>> = OnceLock::new();
+        STACK.get_or_init(|| SpinLock::new(Self::new([10, 0, 0, 2])))
     }
 
     /// 分配下一个临时端口。
@@ -321,7 +321,7 @@ impl UdpStack {
 
 /// 查询 UDP 协议栈状态快照（供 `sense net://udp`）。
 pub fn udp_sense_snapshot() -> String {
-    let st = UdpStack::stack().lock().unwrap();
+    let st = UdpStack::stack().lock();
     format!("udp sockets={} local_ip={}.{}.{}.{}", st.socket_count(), st.local_ip[0], st.local_ip[1], st.local_ip[2], st.local_ip[3])
 }
 
@@ -331,7 +331,7 @@ pub fn udp_act_raw(payload: &str) -> Result<String, String> {
     match it.next() {
         Some("stats") => Ok(udp_sense_snapshot()),
         Some("sockets") => {
-            let st = UdpStack::stack().lock().unwrap();
+            let st = UdpStack::stack().lock();
             let mut lines = Vec::new();
             for (id, sock) in &st.sockets {
                 lines.push(format!("  {} port={} bound={} conn={} rx={} tx={}",
