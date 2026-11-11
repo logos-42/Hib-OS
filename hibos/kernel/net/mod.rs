@@ -136,7 +136,7 @@ pub struct NetStack {
     tcp: tcp::TcpLayer,
     udp: udp::UdpLayer,
     sockets: socket::SocketTable,
-    out_queue: std::collections::VecDeque<Vec<u8>>,
+    out_queue: VecDeque<Vec<u8>>,
 }
 
 impl NetStack {

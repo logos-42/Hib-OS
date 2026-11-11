@@ -11,9 +11,8 @@
 //! * 递归查询（串联多台上游服务器）、缓存（TTL 过期淘汰）、hosts 文件支持
 //! * sense/act 通道：`net://dns`
 
-use std::collections::HashMap;
-use std::sync::{Mutex, OnceLock};
-use std::time::{SystemTime, UNIX_EPOCH};
+use alloc::collections::HashMap;
+use crate::ksync::{SpinLock, OnceLock};
 
 // =======================================================================
 // DNS 类型与常量
@@ -383,7 +382,7 @@ impl DnsCache {
 
 /// 当前纪元秒。
 fn now_secs() -> u32 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs() as u32).unwrap_or(0)
+    (crate::time::get_time_ns() / 1_000_000_000) as u32
 }
 
 // =======================================================================
@@ -460,9 +459,9 @@ impl DnsResolver {
     }
 
     /// 默认解析器（`net://dns` 通道后端）。
-    pub fn resolver() -> &'static Mutex<DnsResolver> {
-        static RESOLVER: OnceLock<Mutex<DnsResolver>> = OnceLock::new();
-        RESOLVER.get_or_init(|| Mutex::new(Self::new(Vec::new())))
+    pub fn resolver() -> &'static SpinLock<DnsResolver> {
+        static RESOLVER: OnceLock<SpinLock<DnsResolver>> = OnceLock::new();
+        RESOLVER.get_or_init(|| SpinLock::new(Self::new(Vec::new())))
     }
 
     /// 加载 hosts 文件内容。
@@ -585,7 +584,7 @@ fn fmt_ip(ip: [u8; 4]) -> String {
 
 /// 查询 DNS 状态快照（供 `sense net://dns`）。
 pub fn dns_sense_snapshot() -> String {
-    let r = DnsResolver::resolver().lock().unwrap();
+    let r = DnsResolver::resolver().lock();
     format!("dns servers={} cache={} hosts={}", r.servers.len(), r.cache_len(), 0)
 }
 
@@ -594,7 +593,7 @@ pub fn dns_act_raw(payload: &str) -> Result<String, String> {
     let mut it = payload.split_whitespace();
     match it.next() {
         Some("resolve") => {
-            let mut r = DnsResolver::resolver().lock().unwrap();
+            let mut r = DnsResolver::resolver().lock();
             let name = it.next().ok_or("用法: resolve <name> [类型]")?;
             let rtype = match it.next().unwrap_or("A") {
                 "AAAA" => DnsRecordType::AAAA,
@@ -612,13 +611,13 @@ pub fn dns_act_raw(payload: &str) -> Result<String, String> {
             Ok(out)
         }
         Some("resolve_ipv4") => {
-            let mut r = DnsResolver::resolver().lock().unwrap();
+            let mut r = DnsResolver::resolver().lock();
             let name = it.next().ok_or("用法: resolve_ipv4 <name>")?;
             let ips = r.resolve_ipv4(name);
             Ok(format!("{} -> {}", name, ips.iter().map(|ip| fmt_ip(*ip)).collect::<Vec<_>>().join(",")))
         }
         Some("reverse") => {
-            let mut r = DnsResolver::resolver().lock().unwrap();
+            let mut r = DnsResolver::resolver().lock();
             let ip = parse_ip4_dns(it.next().ok_or("用法: reverse <ip>")?)?;
             let names = r.reverse_lookup(ip);
             Ok(format!("reverse {} -> {}", fmt_ip(ip), names.join(",")))

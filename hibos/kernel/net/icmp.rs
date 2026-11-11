@@ -15,14 +15,46 @@
 //! 接口：`icmp_echo_request(dst, id, seq, payload)` / `icmp_echo_reply(...)` /
 //! `icmp_destination_unreachable(...)` / `icmp_time_exceeded(...)` / `icmp_process(...)`。
 
-use std::collections::HashMap;
-use std::sync::{Mutex, OnceLock};
-use std::time::{Duration, Instant};
+use alloc::collections::HashMap;
+use crate::ksync::{SpinLock, OnceLock};
+use core::time::Duration;
 
 use crate::caps;
 use crate::net::ipv4::{IcmpPacket, compute_checksum,
     IP_PROTO_ICMP};
 use crate::net::{net, fmt_ip};
+
+// no_std 环境下的 Instant 替代：基于内核纳秒时间戳。
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Instant(u64);
+
+impl Instant {
+    pub fn now() -> Self {
+        Instant(crate::time::get_time_ns())
+    }
+
+    pub fn saturating_add(self, duration: Duration) -> Self {
+        Instant(self.0.saturating_add(duration.as_nanos() as u64))
+    }
+
+    pub fn saturating_sub(self, other: Instant) -> Duration {
+        Duration::from_nanos(self.0.saturating_sub(other.0))
+    }
+}
+
+impl core::ops::Add<Duration> for Instant {
+    type Output = Self;
+    fn add(self, rhs: Duration) -> Self {
+        self.saturating_add(rhs)
+    }
+}
+
+impl core::ops::Sub<Instant> for Instant {
+    type Output = Duration;
+    fn sub(self, rhs: Instant) -> Duration {
+        self.saturating_sub(rhs)
+    }
+}
 
 // =======================================================================
 // ICMP 类型与代码（RFC 792 / RFC 1122）
@@ -255,9 +287,9 @@ pub struct IcmpStats {
         }
     }
     /// 全局 ICMP 协议栈单例（`net://icmp` 通道后端）。
-    pub fn stack() -> &'static Mutex<IcmpStack> {
-        static STACK: OnceLock<Mutex<IcmpStack>> = OnceLock::new();
-        STACK.get_or_init(|| Mutex::new(Self::new()))
+    pub fn stack() -> &'static SpinLock<IcmpStack> {
+        static STACK: OnceLock<SpinLock<IcmpStack>> = OnceLock::new();
+        STACK.get_or_init(|| SpinLock::new(Self::new()))
     }
     /// 分配下一个 echo 标识符。
     fn next_id(&mut self) -> u16 {
@@ -441,7 +473,7 @@ fn extract_orig_dst(payload: &[u8]) -> Option<[u8; 4]> {
 // =======================================================================
 /// 查询 ICMP 状态快照（供 `sense net://icmp`）。
 pub fn icmp_sense_snapshot() -> String {
-    let st = IcmpStack::stack().lock().unwrap();
+    let st = IcmpStack::stack().lock();
     st.status()
 }
 /// 对 ICMP 通道执行行动（供 `act net://icmp`）。
@@ -451,7 +483,7 @@ pub fn icmp_act_raw(payload: &str) -> Result<String, String> {
     match it.next() {
         Some("stats") => Ok(icmp_sense_snapshot()),
         Some("pending") => {
-            let st = IcmpStack::stack().lock().unwrap();
+            let st = IcmpStack::stack().lock();
             if st.pending.is_empty() { Ok("无未解决的 ICMP Echo 查询".to_string()) } else {
                 let mut out = format!("未解决 Echo 查询 {} 条:\n", st.pending.len());
                 for ((id, seq), p) in &st.pending {
@@ -463,7 +495,7 @@ pub fn icmp_act_raw(payload: &str) -> Result<String, String> {
         }
         Some("ping") => {
             // 检查 CAP_NET_RAW（发送原始 ICMP 需该能力）。
-            if !caps::caps().lock().unwrap().has("CAP_NET_RAW") {
+            if !caps::caps().lock().has("CAP_NET_RAW") {
                 return Err("icmp ping 需要 CAP_NET_RAW 能力".to_string());
             }
             let ip_s = it.next().ok_or("用法: ping <ip> <id> <seq> <hexpayload>")?;
@@ -480,14 +512,14 @@ pub fn icmp_act_raw(payload: &str) -> Result<String, String> {
                 .map_err(|e: std::num::ParseIntError| e.to_string())?;
             let hex = it.next().unwrap_or("50696e67"); // 默认 "ping"
             let data = hex_decode(hex)?;
-            let mut st = IcmpStack::stack().lock().unwrap();
+            let mut st = IcmpStack::stack().lock();
             let bytes = st.echo_request(id, seq, &data);
             st.register_pending(id, seq, dst, &data);
-            let _ = net().lock().unwrap().send_ip(dst, IP_PROTO_ICMP, &bytes);
+            let _ = net().lock().send_ip(dst, IP_PROTO_ICMP, &bytes);
             Ok(format!("icmp ping {} id={} seq={} bytes={}", fmt_ip(dst), id, seq, data.len()))
         }
         Some("unreach") => {
-            if !caps::caps().lock().unwrap().has("CAP_NET_RAW") {
+            if !caps::caps().lock().has("CAP_NET_RAW") {
                 return Err("icmp unreach 需要 CAP_NET_RAW 能力".to_string());
             }
             let ip_s = it.next().ok_or("用法: unreach <dst_ip> <code>")?;
@@ -501,13 +533,13 @@ pub fn icmp_act_raw(payload: &str) -> Result<String, String> {
             let orig_hdr = [0x45, 0, 0, 20, 0, 0, 0, 0, 64, IP_PROTO_ICMP, 0, 0, 10, 0, 0, 2];
             let orig_data = b"original packet data";
             let bytes = IcmpStack::destination_unreachable([10, 0, 0, 2], dst, code, &orig_hdr, orig_data)?;
-            let mut st = IcmpStack::stack().lock().unwrap();
+            let mut st = IcmpStack::stack().lock();
             st.stats.unreachables_sent += 1;
-            let _ = net().lock().unwrap().send_ip(dst, IP_PROTO_ICMP, &bytes);
+            let _ = net().lock().send_ip(dst, IP_PROTO_ICMP, &bytes);
             Ok(format!("icmp destination_unreachable {} code={} bytes={}", fmt_ip(dst), code.as_u8(), bytes.len()))
         }
         Some("timeout") => {
-            if !caps::caps().lock().unwrap().has("CAP_NET_RAW") {
+            if !caps::caps().lock().has("CAP_NET_RAW") {
                 return Err("icmp timeout 需要 CAP_NET_RAW 能力".to_string());
             }
             let ip_s = it.next().ok_or("用法: timeout <dst_ip>")?;
@@ -516,9 +548,9 @@ pub fn icmp_act_raw(payload: &str) -> Result<String, String> {
             let orig_hdr = [0x45, 0, 0, 20, 0, 0, 0, 0, 64, IP_PROTO_ICMP, 0, 0, 10, 0, 0, 2];
             let orig_data = b"original packet data";
             let bytes = IcmpStack::time_exceeded([10, 0, 0, 2], dst, code, &orig_hdr, orig_data)?;
-            let mut st = IcmpStack::stack().lock().unwrap();
+            let mut st = IcmpStack::stack().lock();
             st.stats.time_exceeds_sent += 1;
-            let _ = net().lock().unwrap().send_ip(dst, IP_PROTO_ICMP, &bytes);
+            let _ = net().lock().send_ip(dst, IP_PROTO_ICMP, &bytes);
             Ok(format!("icmp time_exceeded {} ttl code={} bytes={}", fmt_ip(dst), code.as_u8(), bytes.len()))
         }
         _ => Err("用法: act net://icmp stats | pending | ping <ip> <id> <seq> <hex> | unreach <ip> <code> | timeout <ip>".to_string()),

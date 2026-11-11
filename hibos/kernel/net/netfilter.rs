@@ -12,8 +12,8 @@
 //! * NAT 简化版：SNAT / DNAT、连接跟踪表（conntrack）简化版
 //! * sense/act 通道：`netfilter://rules`
 
-use std::collections::{HashMap, VecDeque};
-use std::sync::{Mutex, OnceLock};
+use alloc::collections::{HashMap, VecDeque};
+use crate::ksync::{SpinLock, OnceLock};
 
 // =======================================================================
 // 网络地址与端口
@@ -314,9 +314,9 @@ impl Netfilter {
     }
 
     /// 全局 Netfilter 实例（`netfilter://rules` 通道后端）。
-    pub fn instance() -> &'static Mutex<Netfilter> {
-        static INST: OnceLock<Mutex<Netfilter>> = OnceLock::new();
-        INST.get_or_init(|| Mutex::new(Self::new()))
+    pub fn instance() -> &'static SpinLock<Netfilter> {
+        static INST: OnceLock<SpinLock<Netfilter>> = OnceLock::new();
+        INST.get_or_init(|| SpinLock::new(Self::new()))
     }
 
     // ------ 钩子注册 ------
@@ -468,7 +468,7 @@ impl Netfilter {
 
 /// 查询 Netfilter 状态快照（供 `sense netfilter://rules`）。
 pub fn netfilter_sense_snapshot() -> String {
-    let nf = Netfilter::instance().lock().unwrap();
+    let nf = Netfilter::instance().lock();
     let s = &nf.stats;
     format!(
         "netfilter packets={} accepted={} dropped={} queued={} natted={} conntrack={} nat={}",
@@ -484,7 +484,7 @@ pub fn netfilter_act_raw(payload: &str) -> Result<String, String> {
         Some("list") => {
             let hook_s = it.next().ok_or("用法: list <PREROUTING|INPUT|FORWARD|OUTPUT|POSTROUTING>")?;
             let hook = parse_hook(hook_s)?;
-            let nf = Netfilter::instance().lock().unwrap();
+            let nf = Netfilter::instance().lock();
             let rules = nf.list_rules(hook);
             let mut out = format!("{} 规则数={}", hook.name(), rules.len());
             for r in &rules {
@@ -493,7 +493,7 @@ pub fn netfilter_act_raw(payload: &str) -> Result<String, String> {
             Ok(out)
         }
         Some("log") => {
-            let nf = Netfilter::instance().lock().unwrap();
+            let nf = Netfilter::instance().lock();
             let logs = nf.recent_log();
             if logs.is_empty() { Ok("日志为空".to_string()) } else { Ok(logs.join("\n")) }
         }

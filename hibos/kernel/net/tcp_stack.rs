@@ -906,14 +906,14 @@ pub fn tcp_stack_act_raw(payload: &str) -> Result<String, String> {
                 .next()
                 .ok_or("用法: connect <local_port> <remote_ip> <remote_port>")?
                 .parse()
-                .map_err(|e: std::num::ParseIntError| e.to_string())?;
+                .map_err(|e: core::num::ParseIntError| e.to_string())?;
             let ip_s = it.next().ok_or("缺少 remote_ip")?;
             let ip = crate::net::parse_ip(ip_s);
             let rport: u16 = it
                 .next()
                 .ok_or("缺少 remote_port")?
                 .parse()
-                .map_err(|e: std::num::ParseIntError| e.to_string())?;
+                .map_err(|e: core::num::ParseIntError| e.to_string())?;
             let mut st = TcpStack::stack().lock();
             let segs = st.connect(1, port, ip, rport)?;
             let segs_len = segs.len();
@@ -937,7 +937,7 @@ pub fn tcp_stack_act_raw(payload: &str) -> Result<String, String> {
                 .next()
                 .ok_or("用法: send <local_port> <hex数据>")?
                 .parse()
-                .map_err(|e: std::num::ParseIntError| e.to_string())?;
+                .map_err(|e: core::num::ParseIntError| e.to_string())?;
             let hex = it.next().ok_or("缺少 hex 数据")?;
             let data = hex_decode(hex)?;
             let mut st = TcpStack::stack().lock();
@@ -956,7 +956,7 @@ pub fn tcp_stack_act_raw(payload: &str) -> Result<String, String> {
                 .next()
                 .ok_or("用法: close <local_port>")?
                 .parse()
-                .map_err(|e: std::num::ParseIntError| e.to_string())?;
+                .map_err(|e: core::num::ParseIntError| e.to_string())?;
             let mut st = TcpStack::stack().lock();
             let key = st.conns.iter().find(|(_, c)| c.key.local_port == port).map(|(k, _)| k.clone())
                 .ok_or_else(|| format!("端口 {} 无连接", port))?;

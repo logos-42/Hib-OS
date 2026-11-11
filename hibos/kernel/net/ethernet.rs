@@ -47,7 +47,7 @@ impl EthernetFrame {
         bytes.extend_from_slice(&self.header.ethertype.to_be_bytes());
         bytes.extend_from_slice(&self.payload);
         let pad = ETH_MIN_FRAME_LEN.saturating_sub(bytes.len());
-        bytes.extend(std::iter::repeat(0u8).take(pad));
+        bytes.extend(core::iter::repeat(0u8).take(pad));
         bytes
     }
 

@@ -10,8 +10,8 @@
 //! * DHCP 报文：DISCOVER/OFFER/REQUEST/ACK/NAK/RELEASE、XID 事务 ID、选项字段
 //! * sense/act 通道：`net://dhcp`
 
-use std::collections::VecDeque;
-use std::sync::{Mutex, OnceLock};
+use alloc::collections::VecDeque;
+use crate::ksync::{SpinLock, OnceLock};
 
 // =======================================================================
 // DHCP 报文类型与常量
@@ -199,9 +199,9 @@ impl DhcpClient {
     }
 
     /// 全局 DHCP 客户端实例（`net://dhcp` 通道后端，默认 eth0）。
-    pub fn client() -> &'static Mutex<DhcpClient> {
-        static CLIENT: OnceLock<Mutex<DhcpClient>> = OnceLock::new();
-        CLIENT.get_or_init(|| Mutex::new(Self::new("eth0", [0x02, 0x00, 0x00, 0x00, 0x00, 0x01])))
+    pub fn client() -> &'static SpinLock<DhcpClient> {
+        static CLIENT: OnceLock<SpinLock<DhcpClient>> = OnceLock::new();
+        CLIENT.get_or_init(|| SpinLock::new(Self::new("eth0", [0x02, 0x00, 0x00, 0x00, 0x00, 0x01])))
     }
 
     /// 绑定租约（由 ACK 完成）。
@@ -614,7 +614,7 @@ fn parse_ack(msg: &DhcpMessage) -> Result<([u8; 4], [u8; 4], [u8; 4], Vec<[u8; 4
 
 /// 查询 DHCP 状态快照（供 `sense net://dhcp`）。
 pub fn dhcp_sense_snapshot() -> String {
-    let c = DhcpClient::client().lock().unwrap();
+    let c = DhcpClient::client().lock();
     c.status()
 }
 
@@ -624,12 +624,12 @@ pub fn dhcp_act_raw(payload: &str) -> Result<String, String> {
     match it.next() {
         Some("stats") => Ok(dhcp_sense_snapshot()),
         Some("discover") => {
-            let mut c = DhcpClient::client().lock().unwrap();
+            let mut c = DhcpClient::client().lock();
             let msg = c.discover();
             Ok(format!("dhcp discover sent xid={} yiaddr={}.{}.{}.{} options={}B", msg.xid, msg.yiaddr[0], msg.yiaddr[1], msg.yiaddr[2], msg.yiaddr[3], msg.options.len()))
         }
         Some("request") => {
-            let mut c = DhcpClient::client().lock().unwrap();
+            let mut c = DhcpClient::client().lock();
             // 取第一个 offer；无 offer 则返回错误。
             if let Some(offer) = c.offers.front().cloned() {
                 let msg = c.request(&offer);
@@ -639,21 +639,21 @@ pub fn dhcp_act_raw(payload: &str) -> Result<String, String> {
             }
         }
         Some("renew") => {
-            let mut c = DhcpClient::client().lock().unwrap();
+            let mut c = DhcpClient::client().lock();
             let msg = c.renew();
             Ok(format!("dhcp renew sent xid={} ciaddr={}.{}.{}.{}", msg.xid, msg.ciaddr[0], msg.ciaddr[1], msg.ciaddr[2], msg.ciaddr[3]))
         }
         Some("release") => {
-            let mut c = DhcpClient::client().lock().unwrap();
+            let mut c = DhcpClient::client().lock();
             let msg = c.release();
             Ok(format!("dhcp release sent xid={}", msg.xid))
         }
         Some("bound") => {
-            let c = DhcpClient::client().lock().unwrap();
+            let c = DhcpClient::client().lock();
             Ok(format!("bound={} state={}", c.bound(), c.state_name()))
         }
         Some("lease") => {
-            let c = DhcpClient::client().lock().unwrap();
+            let c = DhcpClient::client().lock();
             Ok(c.lease.summary())
         }
         _ => Err("用法: act net://dhcp stats | discover | request | renew | release | bound | lease".to_string()),

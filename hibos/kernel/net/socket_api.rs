@@ -13,8 +13,8 @@
 //! * 阻塞/非阻模式简化版
 //! * sense/act 通道：`socket://tcp`（兼容现有）
 
-use std::collections::{HashMap, VecDeque};
-use std::sync::{Mutex, OnceLock};
+use alloc::collections::{HashMap, VecDeque};
+use crate::ksync::{SpinLock, OnceLock};
 
 // =======================================================================
 // 地址类型
@@ -239,9 +239,9 @@ impl SocketTable {
     pub fn contains(&self, fd: SocketFd) -> bool { self.sockets.contains_key(&fd) }
 
     /// 全局 socket 表实例（`socket://tcp` 通道后端）。
-    pub fn instance() -> &'static Mutex<SocketTable> {
-        static INST: OnceLock<Mutex<SocketTable>> = OnceLock::new();
-        INST.get_or_init(|| Mutex::new(Self::new()))
+    pub fn instance() -> &'static SpinLock<SocketTable> {
+        static INST: OnceLock<SpinLock<SocketTable>> = OnceLock::new();
+        INST.get_or_init(|| SpinLock::new(Self::new()))
     }
 }
 
@@ -251,7 +251,7 @@ impl SocketTable {
 
 /// 创建一个 socket，返回文件描述符。
 pub fn socket(domain: SocketDomain, ty: SocketType, protocol: u8) -> Result<SocketFd, String> {
-    let mut st = SocketTable::instance().lock().unwrap();
+    let mut st = SocketTable::instance().lock();
     let fd = st.alloc_fd();
     let entry = SocketEntry::new(fd, domain, ty, protocol);
     let _ = st.insert(entry);
@@ -260,7 +260,7 @@ pub fn socket(domain: SocketDomain, ty: SocketType, protocol: u8) -> Result<Sock
 
 /// 绑定本地地址。
 pub fn bind(fd: SocketFd, addr: &SockAddr) -> Result<(), String> {
-    let mut st = SocketTable::instance().lock().unwrap();
+    let mut st = SocketTable::instance().lock();
     let entry = st.get_mut(fd).ok_or_else(|| format!("fd {} 不存在", fd))?;
     if entry.state != SockState::Idle {
         return Err("socket 已绑定或已连接".to_string());
@@ -272,7 +272,7 @@ pub fn bind(fd: SocketFd, addr: &SockAddr) -> Result<(), String> {
 
 /// 监听（仅 STREAM）。
 pub fn listen(fd: SocketFd, backlog: u32) -> Result<(), String> {
-    let mut st = SocketTable::instance().lock().unwrap();
+    let mut st = SocketTable::instance().lock();
     let entry = st.get_mut(fd).ok_or_else(|| format!("fd {} 不存在", fd))?;
     if entry.ty != SocketType::SockStream {
         return Err("仅 SOCK_STREAM 可监听".to_string());
@@ -284,7 +284,7 @@ pub fn listen(fd: SocketFd, backlog: u32) -> Result<(), String> {
 
 /// 接受一个连接，返回 (新 fd, 对端地址)。
 pub fn accept(fd: SocketFd) -> Result<(SocketFd, SockAddr), String> {
-    let mut st = SocketTable::instance().lock().unwrap();
+    let mut st = SocketTable::instance().lock();
     let (domain, local) = {
         let entry = st.get(fd).ok_or_else(|| format!("fd {} 不存在", fd))?;
         if entry.state != SockState::Listening {
@@ -305,7 +305,7 @@ pub fn accept(fd: SocketFd) -> Result<(SocketFd, SockAddr), String> {
 
 /// 主动连接到远端。
 pub fn connect(fd: SocketFd, addr: &SockAddr) -> Result<(), String> {
-    let mut st = SocketTable::instance().lock().unwrap();
+    let mut st = SocketTable::instance().lock();
     let entry = st.get_mut(fd).ok_or_else(|| format!("fd {} 不存在", fd))?;
     entry.remote = Some(addr.clone());
     entry.state = SockState::Connected;
@@ -314,7 +314,7 @@ pub fn connect(fd: SocketFd, addr: &SockAddr) -> Result<(), String> {
 
 /// 发送数据（STREAM/Connected DGRAM，不指定目标）。
 pub fn send(fd: SocketFd, buf: &[u8]) -> Result<usize, String> {
-    let mut st = SocketTable::instance().lock().unwrap();
+    let mut st = SocketTable::instance().lock();
     let entry = st.get_mut(fd).ok_or_else(|| format!("fd {} 不存在", fd))?;
     if entry.state != SockState::Connected {
         return Err("socket 未连接".to_string());
@@ -325,7 +325,7 @@ pub fn send(fd: SocketFd, buf: &[u8]) -> Result<usize, String> {
 
 /// 接收数据。
 pub fn recv(fd: SocketFd, buf: &mut [u8]) -> Result<usize, String> {
-    let mut st = SocketTable::instance().lock().unwrap();
+    let mut st = SocketTable::instance().lock();
     let entry = st.get_mut(fd).ok_or_else(|| format!("fd {} 不存在", fd))?;
     if let Some(data) = entry.rx.pop_front() {
         let take = buf.len().min(data.len());
@@ -340,7 +340,7 @@ pub fn recv(fd: SocketFd, buf: &mut [u8]) -> Result<usize, String> {
 
 /// 向指定地址发送数据报（DGRAM/RAW）。
 pub fn sendto(fd: SocketFd, buf: &[u8], addr: &SockAddr) -> Result<usize, String> {
-    let mut st = SocketTable::instance().lock().unwrap();
+    let mut st = SocketTable::instance().lock();
     let entry = st.get_mut(fd).ok_or_else(|| format!("fd {} 不存在", fd))?;
     if entry.ty != SocketType::SockDgram && entry.ty != SocketType::SockRaw {
         return Err("仅 SOCK_DGRAM/SOCK_RAW 可用 sendto".to_string());
@@ -352,7 +352,7 @@ pub fn sendto(fd: SocketFd, buf: &[u8], addr: &SockAddr) -> Result<usize, String
 
 /// 从接收队列取一个数据报，返回 (字节数, 源地址)。
 pub fn recvfrom(fd: SocketFd, buf: &mut [u8]) -> Result<(usize, SockAddr), String> {
-    let mut st = SocketTable::instance().lock().unwrap();
+    let mut st = SocketTable::instance().lock();
     let entry = st.get_mut(fd).ok_or_else(|| format!("fd {} 不存在", fd))?;
     if let Some(data) = entry.rx.pop_front() {
         let src = entry.rx_src.pop_front().unwrap_or(SockAddr::Inet(InetAddr::new([0, 0, 0, 0], 0)));
@@ -368,7 +368,7 @@ pub fn recvfrom(fd: SocketFd, buf: &mut [u8]) -> Result<(usize, SockAddr), Strin
 
 /// 关闭 socket，释放 fd。
 pub fn close(fd: SocketFd) -> Result<(), String> {
-    let mut st = SocketTable::instance().lock().unwrap();
+    let mut st = SocketTable::instance().lock();
     let entry = st.get_mut(fd).ok_or_else(|| format!("fd {} 不存在", fd))?;
     entry.state = SockState::Closed;
     entry.dead = true;
@@ -380,7 +380,7 @@ pub fn close(fd: SocketFd) -> Result<(), String> {
 pub fn setsockopt(fd: SocketFd, level: i32, optname: i32, optval: &[u8]) -> Result<(), String> {
     let _ = optval;
     let (lvl, opt) = SockOpt::from_raw(level, optname).ok_or_else(|| "无效 socket 选项层/名称".to_string())?;
-    let mut st = SocketTable::instance().lock().unwrap();
+    let mut st = SocketTable::instance().lock();
     let entry = st.get_mut(fd).ok_or_else(|| format!("fd {} 不存在", fd))?;
     let _ = (entry, lvl, opt);
     Ok(())
@@ -389,14 +389,14 @@ pub fn setsockopt(fd: SocketFd, level: i32, optname: i32, optval: &[u8]) -> Resu
 /// 获取 socket 选项。
 pub fn getsockopt(_fd: SocketFd, level: i32, optname: i32) -> Result<Vec<u8>, String> {
     let (_lvl, _opt) = SockOpt::from_raw(level, optname).ok_or_else(|| "无效 socket 选项层/名称".to_string())?;
-    let _st = SocketTable::instance().lock().unwrap();
+    let _st = SocketTable::instance().lock();
     // 简化：返回空值。
     Ok(Vec::new())
 }
 
 /// 设置阻塞/非阻模式。
 pub fn set_blocking(fd: SocketFd, blocking: bool) -> Result<(), String> {
-    let mut st = SocketTable::instance().lock().unwrap();
+    let mut st = SocketTable::instance().lock();
     let entry = st.get_mut(fd).ok_or_else(|| format!("fd {} 不存在", fd))?;
     entry.blocking = blocking;
     Ok(())
@@ -404,13 +404,13 @@ pub fn set_blocking(fd: SocketFd, blocking: bool) -> Result<(), String> {
 
 /// 查询 socket 数量（供统计）。
 pub fn socket_count() -> usize {
-    let st = SocketTable::instance().lock().unwrap();
+    let st = SocketTable::instance().lock();
     st.len()
 }
 
 /// 查询 fd 是否存在。
 pub fn fd_exists(fd: SocketFd) -> bool {
-    let st = SocketTable::instance().lock().unwrap();
+    let st = SocketTable::instance().lock();
     st.contains(fd)
 }
 
@@ -420,7 +420,7 @@ pub fn fd_exists(fd: SocketFd) -> bool {
 
 /// 查询 socket 状态快照（供 `sense socket://tcp`）。
 pub fn socket_api_sense_snapshot() -> String {
-    let st = SocketTable::instance().lock().unwrap();
+    let st = SocketTable::instance().lock();
     format!("socket fds={}", st.len())
 }
 
@@ -430,7 +430,7 @@ pub fn socket_api_act_raw(payload: &str) -> Result<String, String> {
     match it.next() {
         Some("stats") => Ok(socket_api_sense_snapshot()),
         Some("list") => {
-            let st = SocketTable::instance().lock().unwrap();
+            let st = SocketTable::instance().lock();
             let mut out = String::new();
             for (fd, entry) in &st.sockets {
                 out.push_str(&format!("  fd={} ty={:?} state={:?} local={:?} remote={:?}\n", fd, entry.ty, entry.state, entry.local, entry.remote));

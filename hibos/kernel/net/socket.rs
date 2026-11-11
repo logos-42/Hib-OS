@@ -264,21 +264,20 @@ pub fn close(fd: SocketFd) -> Result<(), String> {
 mod tests {
     use super::*;
     use crate::net::{EthernetFrame, ETH_TYPE_IPV4, ICMP_ECHO_REPLY, IP_PROTO_ICMP, IcmpPacket, Ipv4Packet};
-    use std::sync::MutexGuard;
 
     fn test_ip() -> [u8; 4] { [10, 0, 0, 2] }
     fn peer_ip() -> [u8; 4] { [10, 0, 0, 3] }
 
     fn reset_stack() {
-        let mut st = net().lock().unwrap();
+        let mut st = net().lock();
         *st = NetStack::default();
         st.iface.ip = test_ip();
         st.iface.mask = [255, 255, 255, 0];
         st.iface.link_up = true;
     }
 
-    fn stack_guard() -> MutexGuard<'static, NetStack> {
-        net().lock().unwrap()
+    fn stack_guard() -> crate::ksync::SpinLockGuard<'static, NetStack> {
+        net().lock()
     }
 
     #[test]
