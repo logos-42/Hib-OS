@@ -12,6 +12,7 @@ use hibos::kernel::ai_os::*;
 // crate，`use ... as ai_os` 用于满足文件内部 `crate::ai_os::native::*` 的绝对路径。
 use hibos::kernel::ai_os as ai_os;
 
+#[allow(dead_code, unused_imports, unused_variables, unused_mut)]
 #[path = "../kernel/ai_os/perception.rs"]
 mod perception;
 

@@ -11,6 +11,7 @@ use hibos::kernel::ai_os::*;
 // 一旦 mod.rs 补上 `pub mod perception;`，删掉这两行、改回 `hibos::kernel::ai_os::perception` 即可。
 use hibos::kernel::ai_os as ai_os;
 
+#[allow(dead_code, unused_imports, unused_variables, unused_mut)]
 #[path = "../kernel/ai_os/perception.rs"]
 mod perception;
 
