@@ -3,7 +3,7 @@
 //! 建模为 `dev://pci/<bus>:<device>.<function>` 通道，
 //! 每个 PCI 设备一个通道，`sense` 可读取其配置空间快照。
 
-use alloc::collections::BTreeMap;
+use alloc::collections::BTreeMap; use alloc::string::String;
 use crate::ksync::{SpinLock, OnceLock};
 
 /// PCI 类代码（基类）。

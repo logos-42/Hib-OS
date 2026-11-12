@@ -7,8 +7,9 @@
 //!
 //! 中断处理器 = 高优先级执行体，绑定到 `irq://<设备>` 通道。
 
-use std::collections::BTreeMap;
-use std::sync::{Mutex, OnceLock};
+use alloc::collections::BTreeMap;
+use alloc::string::{String, ToString};
+use crate::ksync::{SpinLock, OnceLock};
 
 /// 中断处理器绑定：设备名 -> 处理该中断的 exec-id。
 struct IrqBinding {
@@ -23,11 +24,11 @@ struct IrqState {
     bindings: BTreeMap<String, IrqBinding>,
 }
 
-static IRQ: OnceLock<Mutex<IrqState>> = OnceLock::new();
+static IRQ: OnceLock<SpinLock<IrqState>> = OnceLock::new();
 
-fn irq_state() -> &'static Mutex<IrqState> {
+fn irq_state() -> &'static SpinLock<IrqState> {
     IRQ.get_or_init(|| {
-        Mutex::new(IrqState {
+        SpinLock::new(IrqState {
             bindings: BTreeMap::new(),
         })
     })
@@ -35,7 +36,7 @@ fn irq_state() -> &'static Mutex<IrqState> {
 
 /// 绑定一个中断处理器到设备。
 pub fn bind(device: &str, handler_exec_id: u64) {
-    let mut g = irq_state().lock().unwrap();
+    let mut g = irq_state().lock();
     g.bindings.insert(
         device.to_string(),
         IrqBinding {
@@ -48,22 +49,20 @@ pub fn bind(device: &str, handler_exec_id: u64) {
 
 /// 解绑设备的中断处理器。
 pub fn unbind(device: &str) {
-    let mut g = irq_state().lock().unwrap();
+    let mut g = irq_state().lock();
     g.bindings.remove(device);
 }
 
 /// 投递一个中断到设备：如果有绑定的处理器，向其等待的通道发 signal。
 pub fn fire(device: &str) -> u64 {
-    let mut g = irq_state().lock().unwrap();
+    let mut g = irq_state().lock();
     if let Some(b) = g.bindings.get_mut(device) {
         b.fire_count += 1;
         let handler = b.handler_exec_id;
         drop(g);
-        if let Some(eid) = handler {
-            let key = format!("irq://{}", device);
-            let n = crate::exec::signal(&key) as u64;
-            // 同时标记处理器为可运行（优先级抢占，中断最高优先级）。
-            crate::exec::boost_priority(eid, crate::scheduler::CpuPriority::Critical);
+        if let Some(_eid) = handler {
+            // no_std 环境下无 exec 调度器，signal/boost_priority 暂为空操作
+            let n = 0u64;
             n
         } else {
             0
@@ -75,7 +74,7 @@ pub fn fire(device: &str) -> u64 {
 
 /// 列出所有中断绑定。
 pub fn list() -> String {
-    let g = irq_state().lock().unwrap();
+    let g = irq_state().lock();
     if g.bindings.is_empty() {
         return "（无中断绑定）".to_string();
     }

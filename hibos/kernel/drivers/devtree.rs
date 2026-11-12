@@ -1,6 +1,6 @@
 //! 设备树 —— P1-2 子模块。
 
-use alloc::collections::BTreeMap;
+use alloc::collections::BTreeMap; use alloc::string::String; use alloc::vec::Vec;
 use crate::ksync::{SpinLock, OnceLock};
 
 /// 设备树节点。

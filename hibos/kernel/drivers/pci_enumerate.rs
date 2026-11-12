@@ -11,7 +11,7 @@
 //! * 设备枚举（总线/设备/功能）、BAR 大小探测
 //! * sense/act 通道：`drv://pci`
 
-use alloc::collections::BTreeMap;
+use alloc::collections::BTreeMap; use alloc::vec::Vec; use alloc::boxed::Box;
 use crate::ksync::{SpinLock, OnceLock};
 
 // =======================================================================

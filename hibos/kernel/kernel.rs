@@ -19,7 +19,13 @@ pub mod graphics;
 pub mod ksync;
 pub mod syscall_entry;
 pub mod time;
+pub mod irq;
+
 // pub mod mm;           // Phase 3: 内存管理
+
+/// 执行体标识（ExecId），与 kernel/exec.rs 的 `pub type ExecId = u64` 对齐，
+/// 供 no_std 驱动模块使用，避免依赖 std::thread 的 exec 模块。
+pub type ExecId = u64;
 
 // 全局堆分配器（bump allocator，供 alloc::collections::BTreeMap / String / Vec 使用）
 mod allocator;

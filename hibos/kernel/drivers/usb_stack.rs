@@ -11,7 +11,7 @@
 //! * 设备状态：附加/默认/地址/配置
 //! * sense/act 通道：`drv://usb`
 
-use alloc::collections::{BTreeMap, VecDeque};
+use alloc::collections::{BTreeMap, VecDeque}; use alloc::vec::Vec;
 use crate::ksync::{SpinLock, OnceLock};
 
 // =======================================================================
@@ -535,13 +535,13 @@ pub fn usb_act_raw(payload: &str) -> Result<String, String> {
         }
         Some("enumerate") => {
             let id_s = it.next().ok_or("用法: enumerate <dev_id>")?;
-            let id: u64 = id_s.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
+            let id: u64 = id_s.parse().map_err(|e: core::num::ParseIntError| e.to_string())?;
             let mut bus = UsbBus::bus().lock().unwrap();
             bus.enumerate(UsbDeviceId(id)).map(|()| format!("设备 {:?} 已枚举", id))
         }
         Some("state") => {
             let id_s = it.next().ok_or("用法: state <dev_id>")?;
-            let id: u64 = id_s.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
+            let id: u64 = id_s.parse().map_err(|e: core::num::ParseIntError| e.to_string())?;
             let bus = UsbBus::bus().lock();
             match bus.device_state(UsbDeviceId(id)) {
                 Some(s) => Ok(format!("设备 {:?} state={}", id, s.name())),

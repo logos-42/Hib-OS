@@ -12,7 +12,7 @@
 //! * 多队支持简化版、流量控制（XON/XOFF 简化）
 //! * sense/act 通道：`drv://net`
 
-use alloc::collections::{BTreeMap, VecDeque};
+use alloc::collections::{BTreeMap, VecDeque}; use alloc::vec::Vec;
 use core::sync::atomic::{AtomicU64, Ordering}; use crate::ksync::{SpinLock, OnceLock};
 
 // =======================================================================
@@ -451,13 +451,13 @@ pub fn net_driver_act_raw(payload: &str) -> Result<String, String> {
         }
         Some("remove") => {
             let id_s = it.next().ok_or("用法: remove <device_id>")?;
-            let id: u64 = id_s.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
+            let id: u64 = id_s.parse().map_err(|e: core::num::ParseIntError| e.to_string())?;
             let mut drv = NetDriver::driver().lock();
             drv.remove(DeviceId(id)).map(|()| format!("已移除设备 {:?}", id))
         }
         Some("mac") => {
             let id_s = it.next().ok_or("用法: mac <device_id> <xx:xx:xx:xx:xx:xx>")?;
-            let id: u64 = id_s.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
+            let id: u64 = id_s.parse().map_err(|e: core::num::ParseIntError| e.to_string())?;
             let mac_s = it.next().ok_or("缺少 mac")?;
             let mac = parse_mac_driver(mac_s)?;
             let mut drv = NetDriver::driver().lock();
@@ -465,7 +465,7 @@ pub fn net_driver_act_raw(payload: &str) -> Result<String, String> {
         }
         Some("link") => {
             let id_s = it.next().ok_or("用法: link <device_id> up|down")?;
-            let id: u64 = id_s.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
+            let id: u64 = id_s.parse().map_err(|e: core::num::ParseIntError| e.to_string())?;
             let state_s = it.next().ok_or("缺少 up/down")?;
             let state = match state_s { "up" => LinkState::Up, "down" => LinkState::Down, _ => return Err("用法: link <id> up|down".to_string()) };
             let mut drv = NetDriver::driver().lock();
@@ -473,7 +473,7 @@ pub fn net_driver_act_raw(payload: &str) -> Result<String, String> {
         }
         Some("irq") => {
             let id_s = it.next().ok_or("用法: irq <device_id>")?;
-            let id: u64 = id_s.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
+            let id: u64 = id_s.parse().map_err(|e: core::num::ParseIntError| e.to_string())?;
             let mut drv = NetDriver::driver().lock();
             drv.trigger_irq(DeviceId(id)).map(|()| format!("已向设备 {:?} 投递中断", id))
         }

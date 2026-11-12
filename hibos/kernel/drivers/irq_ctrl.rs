@@ -14,14 +14,13 @@
 //!
 //! 接口：`irq_handler_register(irq, handler)` / `irq_dispatch(irq)` / `idt_set_gate(...)` / `idt_load()`。
 
-use alloc::collections::BTreeMap;
+use alloc::collections::BTreeMap; use alloc::vec::Vec; use alloc::boxed::Box;
 use alloc::sync::Arc;
 use alloc::string::{String, ToString};
 use crate::ksync::{SpinLock, OnceLock};
 use crate::time::get_time_ns;
 
 use crate::caps;
-use crate::exec::ExecId;
 
 /// no_std 环境下的 Instant 替代：基于纳秒时间戳。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -215,7 +214,7 @@ pub struct IrqHandlerEntry {
     /// 处理器闭包。
     pub handler: IrqHandler,
     /// 绑定该处理器的执行体 ID。
-    pub owner: ExecId,
+    pub owner: u64,
     /// 优先级（数值越小越先执行）。
     pub priority: i32,
     /// 累计触发次数。
@@ -327,7 +326,7 @@ impl IrqController {
     /// * `priority`：优先级，数值越小越先执行。
     /// 需调用方持有 `CAP_SYS_RAWIO` 或等价能力（由上层 sense/act 校验，此处预留入口）。
     pub fn irq_handler_register(
-        &mut self, owner: ExecId, irq: IrqLine, handler: IrqHandler, priority: i32,
+        &mut self, owner: u64, irq: IrqLine, handler: IrqHandler, priority: i32,
     ) -> Result<(), String> {
         // 能力检查入口：注册底层中断处理器需 CAP_SYS_RAWIO。
         if !caps::caps().lock().has("CAP_SYS_RAWIO") {
@@ -345,7 +344,7 @@ impl IrqController {
     }
 
     /// 注销指定 owner 在指定中断线上的所有处理器。
-    pub fn irq_handler_unregister_owner(&mut self, owner: ExecId, irq: IrqLine) -> usize {
+    pub fn irq_handler_unregister_owner(&mut self, owner: u64, irq: IrqLine) -> usize {
         if let Some(list) = self.handlers.get_mut(&irq) {
             let before = list.len();
             list.retain(|e| e.owner != owner);
@@ -463,13 +462,13 @@ pub fn irq_ctrl_act_raw(payload: &str) -> Result<String, String> {
             Ok(c.status())
         }
         Some("mask") => {
-            let irq: u32 = it.next().ok_or("用法: mask <irq>")?.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
+            let irq: u32 = it.next().ok_or("用法: mask <irq>")?.parse().map_err(|e: core::num::ParseIntError| e.to_string())?;
             let mut c = IrqController::instance().lock();
             c.mask_irq(IrqLine(irq));
             Ok(format!("中断 {} 已屏蔽", irq))
         }
         Some("unmask") => {
-            let irq: u32 = it.next().ok_or("用法: unmask <irq>")?.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
+            let irq: u32 = it.next().ok_or("用法: unmask <irq>")?.parse().map_err(|e: core::num::ParseIntError| e.to_string())?;
             let mut c = IrqController::instance().lock();
             c.unmask_irq(IrqLine(irq));
             Ok(format!("中断 {} 已取消屏蔽", irq))
@@ -485,7 +484,7 @@ pub fn irq_ctrl_act_raw(payload: &str) -> Result<String, String> {
             Ok("中断已开启 (STI)".to_string())
         }
         Some("raise") => {
-            let irq: u32 = it.next().ok_or("用法: raise <irq>")?.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
+            let irq: u32 = it.next().ok_or("用法: raise <irq>")?.parse().map_err(|e: core::num::ParseIntError| e.to_string())?;
             let mut c = IrqController::instance().lock();
             let n = c.irq_dispatch(IrqLine(irq));
             Ok(format!("已触发中断 {}，调用处理器 {} 次", irq, n))
@@ -504,7 +503,7 @@ mod tests {
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
 
-    fn test_owner() -> ExecId { 1 }
+    fn test_owner() -> u64 { 1 }
 
     #[test]
     fn idt_entry_roundtrip() {

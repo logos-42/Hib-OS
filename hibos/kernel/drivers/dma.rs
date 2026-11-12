@@ -18,11 +18,11 @@
 use alloc::collections::{BTreeMap, VecDeque};
 use alloc::sync::Arc;
 use alloc::string::{String, ToString};
+use alloc::vec::Vec;
 use crate::ksync::{SpinLock, OnceLock};
 use crate::time::get_time_ns;
 
 use crate::caps;
-use crate::exec::ExecId;
 
 // =======================================================================
 // 散射聚合描述符
@@ -278,7 +278,7 @@ impl DmaEngine {
     /// 返回分配的 `DmaTransferId`。
     /// 需调用方持有 `CAP_SYS_RAWIO` 能力（由上层 sense/act 校验，此处预留入口）。
     pub fn dma_submit(
-        &mut self, owner: ExecId, channel: u8, direction: DmaDirection, sg: DmaSgList,
+        &mut self, owner: u64, channel: u8, direction: DmaDirection, sg: DmaSgList,
         completion_irq: Option<u32>,
     ) -> Result<DmaTransferId, String> {
         let _ = owner; // 租约由上层持有，此处仅做能力预留入口。
@@ -513,7 +513,7 @@ mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::Arc;
 
-    fn test_owner() -> ExecId { 7 }
+    fn test_owner() -> u64 { 7 }
 
     #[test]
     fn sg_list_push_and_total() {
