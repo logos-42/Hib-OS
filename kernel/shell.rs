@@ -20,6 +20,9 @@ use crate::syscall::AiSystemCall;
 use crate::syscall_handler::SyscallHandler;
 use crate::vfs::{NodeKind, Vfs};
 
+/// 闭环实例序号：每个 AI 意识实例（loop）分配一个独立 worktree。
+static LOOP_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
 /// 终端主题：极简 ANSI 配色（仅真实终端生效，管道/文件输出自动去色）。
 ///
 /// 让 "Linux 模式" 拥有更地道的外观：systemd 风彩色 `[  OK  ]` 启动行、经典彩色 prompt。
@@ -871,6 +874,20 @@ impl Shell {
         }
         let _ = self.vfs.mkdir("/worktrees");
         let _ = self.vfs.mkdir(&format!("/worktrees/{}", name));
+    }
+
+    /// 在 VFS 中建出指定的 worktree 根目录（含父目录），用于实例级工作区。
+    fn sync_worktree_root(&mut self, root: &str) {
+        let root = root.trim();
+        if root.is_empty() || root == "/" {
+            return;
+        }
+        if let Some(i) = root.rfind('/') {
+            if i > 0 {
+                let _ = self.vfs.mkdir(&root[..i]);
+            }
+        }
+        let _ = self.vfs.mkdir(root);
     }
 
     fn cmd_sense(&mut self, parts: &[&str]) {
@@ -1849,7 +1866,13 @@ impl Shell {
             catalog
         );
         let mut loop_ = crate::deepseek::ThoughtLoop::new(&system_prompt).with_limits(10, 8000);
+        // 每个闭环实例绑定独立的 worktree —— 意识实例级工作区隔离。
+        let seq = LOOP_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let wt_name = format!("loop-{}-{}", provider, seq);
+        let wt_root = crate::worktree::ensure_worktree(&wt_name, "ai-loop");
+        self.sync_worktree_root(&wt_root);
         tagged_out!("[hibos]", "AI 意识闭环已启动 (exit/quit 退出)");
+        tagged_out!("[worktree]", "本实例工作区: {} ({})", wt_root, wt_name);
         // 周期巡检间隔：默认 60s，可用环境变量 HIBOS_LLM_INTERVAL_SECS 调整。
         let interval_secs: u64 = std::env::var("HIBOS_LLM_INTERVAL_SECS")
             .ok()
@@ -1864,14 +1887,15 @@ impl Shell {
             let due = now.duration_since(last_cycle).as_secs() >= interval_secs;
             if due {
                 let perception = format!(
-                    "系统周期巡检: 已感知通道={} 当前目录={}",
+                    "系统周期巡检: 已感知通道={} 当前目录={} 工作区={}",
                     self.channels.len(),
-                    self.vfs.cwd_path()
+                    self.vfs.cwd_path(),
+                    wt_root
                 );
                 match loop_.cycle(&key, &perception, &mut self.handler.consciousness) {
                     Ok(reply) => {
                         // 人类阅读节奏：先显示执行（行动落地），再显示回复文本。
-                        self.execute_llm_actions(&reply);
+                        self.execute_llm_actions(&reply, &wt_root);
                         let concepts = self.handler.consciousness.concept_count();
                         tagged_out!("[llm]", "意识本体概念数: {}", concepts);
                         // 回复正文：剔除 ACTION 行，标识绿色、正文默认色。
@@ -1914,15 +1938,16 @@ impl Shell {
                     }
                     // 感知：把当前 shell 上下文（工作目录、通道数）作为感知输入
                     let perception = format!(
-                        "用户输入: {}\n当前目录: {}\n已感知通道: {} 个",
+                        "用户输入: {}\n当前目录: {}\n已感知通道: {} 个\n工作区: {}",
                         trimmed,
                         self.vfs.cwd_path(),
-                        self.channels.len()
+                        self.channels.len(),
+                        wt_root
                     );
                     match loop_.cycle(&key, &perception, &mut self.handler.consciousness) {
                         Ok(reply) => {
                             // 人类阅读节奏：先显示执行（行动落地），再显示回复文本。
-                            self.execute_llm_actions(&reply);
+                            self.execute_llm_actions(&reply, &wt_root);
                             let concepts = self.handler.consciousness.concept_count();
                             tagged_out!("[llm]", "意识本体概念数: {}", concepts);
                             // 回复正文：剔除 ACTION 行，标识绿色、正文默认色。
@@ -1971,7 +1996,7 @@ impl Shell {
     /// - `act <通道> <负载...>`   向通道写入（行动）—— 任何可写入的通道
     /// - 高级指令：`file` / `token` / `proc` / `run` / `desktop` / `module` / `concepts` / `stats`
     /// - 兼容旧式写法：`gpu://vram ...` / `net://eth0 ...` / `file://vfs ...` / `dev://disk ...`
-    fn execute_llm_actions(&mut self, reply: &str) {
+    fn execute_llm_actions(&mut self, reply: &str, root: &str) {
         let mut executed = 0usize;
         for line in reply.lines() {
             let line = line.trim();
@@ -2010,7 +2035,8 @@ impl Shell {
                             tagged_out!("[llm]", "用法: ACTION: file write <路径> <内容...>");
                             continue;
                         }
-                        let p = crate::worktree::resolve_path(args[1]);
+                        // 相对路径解析到本实例的隔离工作区。
+                        let p = crate::worktree::resolve_path_in(args[1], root);
                         format!("{} {} {}", args[0], p, args[2..].join(" "))
                     }
                     Some("mkdir") | Some("touch") | Some("rm") | Some("cat") | Some("ls")
@@ -2019,7 +2045,7 @@ impl Shell {
                             tagged_out!("[llm]", "用法: ACTION: file {} <路径>", args[0]);
                             continue;
                         }
-                        let p = crate::worktree::resolve_path(args[1]);
+                        let p = crate::worktree::resolve_path_in(args[1], root);
                         format!("{} {}", args[0], p)
                     }
                     _ => {

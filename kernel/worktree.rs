@@ -128,6 +128,44 @@ pub fn worktrees() -> &'static Mutex<WorktreeRegistry> {
     WORKTREES.get_or_init(|| Mutex::new(WorktreeRegistry::new()))
 }
 
+/// 相对路径解析到**指定** worktree 根下（绝对路径原样返回）。
+///
+/// 用于"每个意识实例绑定自己的工作区"：不同 loop 各自传入自己的 root，
+/// 文件操作互不干扰，不依赖全局激活状态。
+pub fn resolve_path_in(path: &str, root: &str) -> String {
+    let p = path.trim();
+    if p.is_empty() || p.starts_with('/') {
+        return p.to_string();
+    }
+    let root = root.trim();
+    if root.is_empty() || root == "/" {
+        return p.to_string();
+    }
+    format!(
+        "{}/{}",
+        root.trim_end_matches('/'),
+        p.trim_start_matches('/')
+    )
+}
+
+/// 确保某个 worktree 存在（幂等），返回其根路径。
+///
+/// 用于把工作区绑定到具体的意识实例：同一实例重复进入复用同一 worktree。
+pub fn ensure_worktree(name: &str, owner: &str) -> String {
+    let mut w = worktrees().lock().unwrap();
+    if let Some(t) = w.trees.get(name) {
+        return t.root.clone();
+    }
+    match w.create(name, owner) {
+        Ok(t) => t.root,
+        Err(_) => w
+            .trees
+            .get(name)
+            .map(|t| t.root.clone())
+            .unwrap_or_else(|| format!("/worktrees/{}", name)),
+    }
+}
+
 /// 当前激活 worktree 的根路径（未激活则为 "/"）。
 pub fn current_root() -> String {
     worktrees().lock().unwrap().current_root()
