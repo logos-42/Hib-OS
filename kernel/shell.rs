@@ -1944,7 +1944,7 @@ impl Shell {
         // 意识实例级工作区：**收到第一条用户命令时才绑定**。
         // 没有用户命令之前不创建 worktree、不发起任何模型调用（保持静默待命）。
         let mut wt: Option<(String, String)> = None;
-        tagged_out!("[hibos]", "AI 意识闭环已启动（等待你的第一条命令）");
+        tagged_out!("[hibos]", "AI OS 已启动（等待你的第一条命令）");
         // 周期巡检间隔：默认 60s，可用环境变量 HIBOS_LLM_INTERVAL_SECS 调整。
         let interval_secs: u64 = std::env::var("HIBOS_LLM_INTERVAL_SECS")
             .ok()
