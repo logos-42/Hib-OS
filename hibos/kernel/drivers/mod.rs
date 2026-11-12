@@ -16,4 +16,4 @@ pub mod pci_enumerator;
 
 // 向上层模块重导出常用中断类型，供 `crate::drivers::{IrqLine, IrqHandler}` 路径使用。
 pub use irq_ctrl::{IrqHandler, IrqLine};
-pub use pci::{PciDevice, PciClass};
+pub use pci::PciDevice;

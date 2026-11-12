@@ -2,7 +2,7 @@
 
 use crate::ksync::{SpinLock, OnceLock};
 
-use crate::drivers::pci::{PciDevice, PciClass};
+use crate::drivers::pci::PciDevice;
 
 /// PCI 设备注册表。
 struct PciRegistry {
@@ -26,7 +26,7 @@ pub fn pci_enumerate() -> Vec<PciDevice> {
                 function: 0,
                 vendor_id: 0x8086,
                 device_id: 0x1234,
-                class_code: PciClass::Storage,
+                class_code: crate::drivers::pci::CLASS_STORAGE,
                 irq_line: 11,
                 bar0: 0xF000_0000,
             },
@@ -36,7 +36,7 @@ pub fn pci_enumerate() -> Vec<PciDevice> {
                 function: 0,
                 vendor_id: 0x10DE,
                 device_id: 0x5678,
-                class_code: PciClass::Display,
+                class_code: crate::drivers::pci::CLASS_DISPLAY,
                 irq_line: 12,
                 bar0: 0xE000_0000,
             },
@@ -46,7 +46,7 @@ pub fn pci_enumerate() -> Vec<PciDevice> {
                 function: 0,
                 vendor_id: 0x8086,
                 device_id: 0x9ABC,
-                class_code: PciClass::Network,
+                class_code: crate::drivers::pci::CLASS_NETWORK,
                 irq_line: 13,
                 bar0: 0xD000_0000,
             },
@@ -71,7 +71,6 @@ pub fn pci_device_count() -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::drivers::PciClass;
 
     #[test]
     fn enumerate() {
@@ -83,7 +82,7 @@ mod tests {
     fn lookup() {
         let dev = pci_lookup(0x8086, 0x1234);
         assert!(dev.is_some());
-        assert_eq!(dev.unwrap().class_code, PciClass::Storage);
+        assert_eq!(dev.unwrap().class_code, crate::drivers::pci::CLASS_STORAGE);
     }
 
     #[test]

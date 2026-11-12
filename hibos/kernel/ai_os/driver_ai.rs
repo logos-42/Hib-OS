@@ -707,10 +707,10 @@ impl Default for DriverAI {
 // 全局单例
 // =====================================================================================
 
-static DRIVER_AI: OnceLock<Mutex<DriverAI>> = OnceLock::new();
+static DRIVER_AI: OnceLock<SpinLock<DriverAI>> = OnceLock::new();
 
-pub fn driver_ai() -> &'static Mutex<DriverAI> {
-    DRIVER_AI.get_or_init(|| Mutex::new(DriverAI::new()))
+pub fn driver_ai() -> &'static SpinLock<DriverAI> {
+    DRIVER_AI.get_or_init(|| SpinLock::new(DriverAI::new()))
 }
 
 // =====================================================================================
@@ -726,7 +726,7 @@ pub fn init() {
 // =====================================================================================
 
 pub fn status() -> String {
-    let eng = driver_ai().lock().unwrap();
+    let eng = driver_ai().lock();
     format!(
         "driver_ai: devices={} drivers={} pci_devices={} irq_handlers={} dma_regions={} device_tree_nodes={} hotplug_events={} operations={}",
         eng.device_count(),
@@ -767,7 +767,7 @@ pub fn driver_ai_act(payload: &str) -> Result<String, String> {
             let name = it.next().ok_or("缺少设备名")?;
             let vendor_id = it.next().and_then(|s| s.parse::<u16>().ok()).unwrap_or(0);
             let device_id = it.next().and_then(|s| s.parse::<u16>().ok()).unwrap_or(0);
-            let mut eng = driver_ai().lock().unwrap();
+            let mut eng = driver_ai().lock();
             let id = eng.register_device(r#type, name, vendor_id, device_id);
             Ok(format!("已注册设备 id={} 名称={} 类型={:?}", id, name, r#type))
         }
@@ -787,53 +787,53 @@ pub fn driver_ai_act(payload: &str) -> Result<String, String> {
             };
             let vendor_id = it.next().and_then(|s| s.parse::<u16>().ok()).unwrap_or(0);
             let device_id = it.next().and_then(|s| s.parse::<u16>().ok()).unwrap_or(0);
-            let mut eng = driver_ai().lock().unwrap();
+            let mut eng = driver_ai().lock();
             let id = eng.register_driver(name, r#type, vendor_id, device_id);
             Ok(format!("已注册驱动 id={} 名称={} 类型={:?}", id, name, r#type))
         }
         Some("load-driver") => {
             let id = it.next().and_then(|s| s.parse::<u64>().ok()).ok_or("缺少驱动id")?;
-            let mut eng = driver_ai().lock().unwrap();
+            let mut eng = driver_ai().lock();
             eng.load_driver(id)?;
             Ok(format!("已加载驱动 id={}", id))
         }
         Some("init-driver") => {
             let id = it.next().and_then(|s| s.parse::<u64>().ok()).ok_or("缺少驱动id")?;
-            let mut eng = driver_ai().lock().unwrap();
+            let mut eng = driver_ai().lock();
             eng.init_driver(id)?;
             Ok(format!("已初始化驱动 id={}", id))
         }
         Some("attach") => {
             let driver_id = it.next().and_then(|s| s.parse::<u64>().ok()).ok_or("缺少驱动id")?;
             let device_id = it.next().and_then(|s| s.parse::<u64>().ok()).ok_or("缺少设备id")?;
-            let mut eng = driver_ai().lock().unwrap();
+            let mut eng = driver_ai().lock();
             eng.attach_driver_to_device(driver_id, device_id)?;
             Ok(format!("已将驱动 {} 附加到设备 {}", driver_id, device_id))
         }
         Some("set-irq") => {
             let device_id = it.next().and_then(|s| s.parse::<u64>().ok()).ok_or("缺少设备id")?;
             let irq = it.next().and_then(|s| s.parse::<u32>().ok()).ok_or("缺少 IRQ")?;
-            let mut eng = driver_ai().lock().unwrap();
+            let mut eng = driver_ai().lock();
             eng.set_device_irq(device_id, irq)?;
             // 注入：激活 L1 中断控制器子系统，使 `sense dev://irq_ctrl` 可见。
-            let _ = IrqController::instance().lock().unwrap().idt_present_vectors();
+            let _ = IrqController::instance().lock().idt_present_vectors();
             Ok(format!("已为设备 {} 设置 IRQ {}", device_id, irq))
         }
         Some("alloc-dma") => {
             let device_id = it.next().and_then(|s| s.parse::<u64>().ok()).ok_or("缺少设备id")?;
             let size = it.next().and_then(|s| s.parse::<u64>().ok()).unwrap_or(4096);
-            let mut eng = driver_ai().lock().unwrap();
+            let mut eng = driver_ai().lock();
             let id = eng.allocate_dma(device_id, size)?;
             // 注入：激活 L1 DMA 引擎通道，使 `sense drv://dma` 可见。
-            let _ch = DmaEngine::engine().lock().unwrap().alloc_channel();
+            let _ch = DmaEngine::engine().lock().alloc_channel();
             Ok(format!("已为设备 {} 分配 DMA 区域 id={} 大小={}B", device_id, id, size))
         }
         Some("invoke-irq") => {
             let irq = it.next().and_then(|s| s.parse::<u32>().ok()).ok_or("缺少 IRQ")?;
-            let mut eng = driver_ai().lock().unwrap();
+            let mut eng = driver_ai().lock();
             let handled = eng.invoke_irq(irq);
             // 注入：激活 L1 中断控制器子系统，使 `sense dev://irq_ctrl` 可见。
-            let _ = IrqController::instance().lock().unwrap().idt_present_vectors();
+            let _ = IrqController::instance().lock().idt_present_vectors();
             Ok(format!("IRQ {} 处理结果: {}", irq, if handled { "已处理" } else { "未处理" }))
         }
         Some("pci-add") => {
@@ -843,7 +843,7 @@ pub fn driver_ai_act(payload: &str) -> Result<String, String> {
             let vendor_id = it.next().and_then(|s| s.parse::<u16>().ok()).unwrap_or(0);
             let device_id = it.next().and_then(|s| s.parse::<u16>().ok()).unwrap_or(0);
             let class_code = it.next().and_then(|s| s.parse::<u8>().ok()).unwrap_or(0);
-            let mut eng = driver_ai().lock().unwrap();
+            let mut eng = driver_ai().lock();
             eng.pci_bus.add_device(PCIDevice {
                 bus,
                 device,
@@ -863,7 +863,7 @@ pub fn driver_ai_act(payload: &str) -> Result<String, String> {
         }
         Some("device-tree-add") => {
             let name = it.next().ok_or("缺少节点名")?;
-            let mut eng = driver_ai().lock().unwrap();
+            let mut eng = driver_ai().lock();
             let id = eng.device_tree.add_node(name, None);
             // 注入：同步写入 L1 设备树，使 `sense dev://tree` 可见。
             let _ = devtree_insert(name, &format!("/{}", name), BTreeMap::new());
@@ -871,12 +871,12 @@ pub fn driver_ai_act(payload: &str) -> Result<String, String> {
         }
         Some("hotplug-add") => {
             let device_id = it.next().and_then(|s| s.parse::<u64>().ok()).ok_or("缺少设备id")?;
-            let mut eng = driver_ai().lock().unwrap();
+            let mut eng = driver_ai().lock();
             let id = eng.hotplug.add_device(device_id);
             Ok(format!("已添加热插拔事件 id={} 设备={}", id, device_id))
         }
         Some("hotplug-poll") => {
-            let mut eng = driver_ai().lock().unwrap();
+            let mut eng = driver_ai().lock();
             match eng.hotplug.poll() {
                 Some(event) => Ok(format!("热插拔事件 id={} 设备={} 类型={:?}", event.id, event.device_id, event.r#type)),
                 None => Ok("无热插拔事件".into()),
