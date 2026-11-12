@@ -1,4 +1,4 @@
-//! 轻量级 async 运行时（futures + reactor）。
+﻿//! 轻量级 async 运行时（futures + reactor）。
 //!
 //! 提供最小化的异步执行模型：
 //!
@@ -162,7 +162,7 @@ unsafe fn drop_waker(data: *const ()) {
 /// 直到没有任务可推进（stalled）。
 pub struct Reactor {
     /// 任务 ID -> 任务。
-    tasks: HashMap<u64, Task>,
+    tasks: BTreeMap<u64, Task>,
     /// 就绪队列：待 poll 的任务 ID。
     ready: VecDeque<u64>,
     /// 唤醒回调：将任务 ID 放回就绪队列。
@@ -179,7 +179,7 @@ impl Reactor {
     pub fn new() -> Self {
         let wake_cb: WakeCallback = Box::new(|_tid| {});
         Self {
-            tasks: HashMap::new(),
+            tasks: BTreeMap::new(),
             ready: VecDeque::new(),
             wake_cb: Arc::new(wake_cb),
             next_id: 1,
@@ -779,3 +779,5 @@ mod tests {
         assert!(s.contains("tasks="));
     }
 }
+
+

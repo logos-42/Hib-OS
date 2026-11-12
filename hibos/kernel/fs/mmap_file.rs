@@ -208,7 +208,7 @@ pub struct MmapManager {
     /// 所有映射区域（按 vaddr 排序）。
     regions: BTreeMap<VAddr, MmapRegion>,
     /// fd -> 区域 ID 列表（一个 fd 可被多次映射）。
-    fd_regions: HashMap<u64, Vec<MmapId>>,
+    fd_regions: BTreeMap<u64, Vec<MmapId>>,
     next_id: Mutex<u64>,
     /// 下一个可用虚拟地址起始（简化线性分配）。
     next_vaddr: Mutex<VAddr>,
@@ -221,7 +221,7 @@ impl MmapManager {
     pub fn new() -> Self {
         Self {
             regions: BTreeMap::new(),
-            fd_regions: HashMap::new(),
+            fd_regions: BTreeMap::new(),
             next_id: Mutex::new(1),
             next_vaddr: Mutex::new(0x1000_0000),
             base_vaddr: 0x1000_0000,
@@ -1041,4 +1041,5 @@ mod tests {
         assert!(r.contains("epoch="));
     }
 }
+
 

@@ -1,4 +1,4 @@
-//! 页缓存与脏页回写。
+﻿//! 页缓存与脏页回写。
 //!
 //! 以页（4 KiB）为单位缓存文件数据，标记脏页，支持回写到块设备
 //! 与缓存压力下的 LRU 回收。
@@ -39,7 +39,7 @@ type CacheKey = (u64, u64); // (inode, page_index)
 /// `lru` 尾部为最近使用，头部为最久未使用。容量满时优先驱逐干净页；
 /// 脏页须先回写才能被驱逐。
 pub struct PageCache {
-    pages: std::collections::HashMap<CacheKey, Page>,
+    pages: std::collections::BTreeMap<CacheKey, Page>,
     lru: Vec<CacheKey>,
     capacity: usize,
 }
@@ -47,7 +47,7 @@ pub struct PageCache {
 impl PageCache {
     pub fn new(capacity: usize) -> Self {
         Self {
-            pages: std::collections::HashMap::new(),
+            pages: std::collections::BTreeMap::new(),
             lru: Vec::new(),
             capacity: capacity.max(1),
         }
@@ -296,3 +296,4 @@ mod tests {
         assert_eq!(result.unwrap_err(), BlockError::IoError("disk full".into()));
     }
 }
+

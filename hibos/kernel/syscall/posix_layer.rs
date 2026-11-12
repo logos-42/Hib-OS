@@ -1,4 +1,4 @@
-//! POSIX 兼容层 —— 在 Hib OS 用户态宏内核上提供类 POSIX 系统调用。
+﻿//! POSIX 兼容层 —— 在 Hib OS 用户态宏内核上提供类 POSIX 系统调用。
 //!
 //! 本模块与 `kernel/syscall` 的 `AiSystemCall` **并行存在，不替换**现有系统调用。
 //! 所有操作都通过统一通道的 `sense`/`act` 抽象来暴露：打开文件、读写、进程
@@ -393,7 +393,7 @@ const SIG_IGN: usize = 1;
 /// POSIX 层全部可变状态。
 struct PosixState {
     /// 内存文件系统内容：路径 -> (元数据, 字节)。
-    fs: HashMap<PathBuf, (FileMeta, Vec<u8>)>,
+    fs: BTreeMap<PathBuf, (FileMeta, Vec<u8>)>,
     /// 打开的文件描述符表：fd -> FdEntry。
     fds: BTreeMap<i32, FdEntry>,
     /// 下一个可分配 fd。
@@ -413,7 +413,7 @@ struct PosixState {
 impl PosixState {
     fn new() -> Self {
         let root = PathBuf::from("/");
-        let mut fs = HashMap::new();
+        let mut fs = BTreeMap::new();
         fs.insert(
             root.clone(),
             (
@@ -1602,3 +1602,4 @@ mod tests {
         assert!(PosixLayer::handle(PosixSyscall::Symlink { target: "/linktarget".into(), link: "/linksoft".into() }, &[]).is_err());
     }
 }
+

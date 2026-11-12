@@ -1,4 +1,4 @@
-//! 页缓存与缓冲区缓存。
+﻿//! 页缓存与缓冲区缓存。
 //!
 //! 页缓存（PageCache）缓存由键（key）索引的页框，支持引用计数、脏页标记、
 //! LRU 淘汰与脏页刷写；缓冲区缓存（BufferCache）以扇区为单位缓存磁盘块，
@@ -135,13 +135,13 @@ pub struct PageCache {
     pub page_size: usize,
     pub max_pages: usize,
     /// key -> 页框索引（在 pages Vec 中）。
-    map: HashMap<PageKey, usize>,
+    map: BTreeMap<PageKey, usize>,
     /// 页框存储。
     pages: Vec<Option<PageHandle>>,
     /// LRU 列表：按最近访问顺序的页框索引队列。
     lru: VecDeque<usize>,
     /// 脏页集合：脏页框索引。
-    dirty_set: HashMap<usize, ()>,
+    dirty_set: BTreeMap<usize, ()>,
     /// 统计。
     hits: u64,
     misses: u64,
@@ -155,10 +155,10 @@ impl PageCache {
         Self {
             page_size,
             max_pages,
-            map: HashMap::new(),
+            map: BTreeMap::new(),
             pages: Vec::new(),
             lru: VecDeque::new(),
-            dirty_set: HashMap::new(),
+            dirty_set: BTreeMap::new(),
             hits: 0,
             misses: 0,
             evictions: 0,
@@ -421,15 +421,15 @@ pub struct BufferCache {
     pub block_size: usize,
     pub max_buffers: usize,
     /// sector -> 缓冲区索引。
-    map: HashMap<Sector, usize>,
+    map: BTreeMap<Sector, usize>,
     /// 缓冲区存储。
     buffers: Vec<Option<Buffer>>,
     /// LRU 队列。
     lru: VecDeque<usize>,
     /// 脏缓冲区集合。
-    dirty_set: HashMap<Sector, ()>,
+    dirty_set: BTreeMap<Sector, ()>,
     /// 锁定集合（正在 I/O 的缓冲区）。
-    locked_set: HashMap<Sector, ()>,
+    locked_set: BTreeMap<Sector, ()>,
     /// 统计。
     hits: u64,
     misses: u64,
@@ -443,11 +443,11 @@ impl BufferCache {
         Self {
             block_size,
             max_buffers,
-            map: HashMap::new(),
+            map: BTreeMap::new(),
             buffers: Vec::new(),
             lru: VecDeque::new(),
-            dirty_set: HashMap::new(),
-            locked_set: HashMap::new(),
+            dirty_set: BTreeMap::new(),
+            locked_set: BTreeMap::new(),
             hits: 0,
             misses: 0,
             syncs: 0,
@@ -770,7 +770,7 @@ pub struct ClockReplacer {
     /// 页框索引环形列表。
     frames: Vec<usize>,
     /// 使用位：frame -> 是否最近被使用。
-    use_bits: HashMap<usize, bool>,
+    use_bits: BTreeMap<usize, bool>,
     /// 当前时钟指针。
     hand: usize,
 }
@@ -779,7 +779,7 @@ impl ClockReplacer {
     pub fn new() -> Self {
         Self {
             frames: Vec::new(),
-            use_bits: HashMap::new(),
+            use_bits: BTreeMap::new(),
             hand: 0,
         }
     }
@@ -1060,3 +1060,5 @@ mod tests {
         assert!(cr.is_empty());
     }
 }
+
+

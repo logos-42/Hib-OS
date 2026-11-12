@@ -4,7 +4,6 @@
 //! 返回 `None` 表示该通道由 shell 层负责 (文件、上下文、行动等需要可变的会话状态)。
 
 use alloc::collections::BTreeSet;
-use alloc::path::PathBuf;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use core::time::Duration;

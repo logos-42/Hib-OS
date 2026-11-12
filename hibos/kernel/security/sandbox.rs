@@ -1,4 +1,4 @@
-//! 沙箱 —— 能力沙箱、系统调用过滤与文件/网络访问控制。
+﻿//! 沙箱 —— 能力沙箱、系统调用过滤与文件/网络访问控制。
 //!
 //! 为 Hib OS 用户态宏内核提供进程级沙箱。每个沙箱绑定一个 PID 与一组规则，
 //! 在系统调用、文件访问、网络访问与能力使用前进行拦截与校验。
@@ -458,14 +458,14 @@ struct CheckCacheEntry {
 /// 检查缓存：(sandbox_id, check_type, key) -> 结果。
 #[derive(Clone, Debug)]
 pub struct CheckCache {
-    entries: HashMap<(u64, String, String), CheckCacheEntry>,
+    entries: BTreeMap<(u64, String, String), CheckCacheEntry>,
     max_entries: usize,
 }
 
 impl CheckCache {
     fn new() -> Self {
         Self {
-            entries: HashMap::new(),
+            entries: BTreeMap::new(),
             max_entries: 1024,
         }
     }
@@ -506,7 +506,7 @@ impl CheckCache {
 #[derive(Clone, Debug)]
 pub struct SandboxManager {
     sandboxes: BTreeMap<SandboxId, Sandbox>,
-    pid_to_sandbox: HashMap<u32, SandboxId>,
+    pid_to_sandbox: BTreeMap<u32, SandboxId>,
     next_id: u64,
     cache: CheckCache,
 }
@@ -516,7 +516,7 @@ impl SandboxManager {
     pub fn new() -> Self {
         Self {
             sandboxes: BTreeMap::new(),
-            pid_to_sandbox: HashMap::new(),
+            pid_to_sandbox: BTreeMap::new(),
             next_id: 1,
             cache: CheckCache::new(),
         }
@@ -904,3 +904,4 @@ mod tests {
         f(sandbox);
     }
 }
+

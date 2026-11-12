@@ -1,4 +1,4 @@
-//! 多核调度模拟（CFS / EEVDF 简化版）。
+﻿//! 多核调度模拟（CFS / EEVDF 简化版）。
 //!
 //! 模拟多核系统的调度器：每个核心独立维护运行队列，支持 CFS（完全公平调度）
 //! 的虚拟运行时间 vruntime 与 nice 值权重，以及 EEVDF 简化版的截止时间排序。
@@ -126,7 +126,7 @@ pub struct CfsRunQueue {
     /// 按 vruntime 排序的任务（BTreeMap: vruntime -> 任务 ID 列表，支持同 vruntime 多任务）。
     tasks: BTreeMap<u64, Vec<TaskId>>,
     /// 任务 ID -> 任务（用于查询状态）。
-    task_map: HashMap<TaskId, Task>,
+    task_map: BTreeMap<TaskId, Task>,
     /// 当前运行任务。
     current: Option<TaskId>,
     /// 核心累计 vruntime（用于计算新任务的初始 vruntime）。
@@ -136,7 +136,7 @@ pub struct CfsRunQueue {
     pub fn new() -> Self {
         Self {
             tasks: BTreeMap::new(),
-            task_map: HashMap::new(),
+            task_map: BTreeMap::new(),
             current: None,
             min_vruntime: 0,
         }
@@ -292,14 +292,14 @@ pub struct CfsRunQueue {
 pub struct EevdfRunQueue {
     /// 按 deadline 排序的任务（BTreeMap: deadline -> 任务 ID 列表）。
     tasks: BTreeMap<u64, Vec<TaskId>>,
-    task_map: HashMap<TaskId, Task>,
+    task_map: BTreeMap<TaskId, Task>,
     current: Option<TaskId>,
 }
 impl EevdfRunQueue {
     pub fn new() -> Self {
         Self {
             tasks: BTreeMap::new(),
-            task_map: HashMap::new(),
+            task_map: BTreeMap::new(),
             current: None,
         }
     }
@@ -990,3 +990,4 @@ mod tests {
         assert_eq!(ms.task_state(tid), Some((CoreId(0), TaskState::Ready)));
     }
 }
+

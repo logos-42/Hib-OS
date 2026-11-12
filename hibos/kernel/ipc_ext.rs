@@ -1,4 +1,4 @@
-//! IPC 扩展：共享内存、消息队列、管道、Unix 套接字（简化版）。
+﻿//! IPC 扩展：共享内存、消息队列、管道、Unix 套接字（简化版）。
 //!
 //! 提供四种进程间通信原语，全部以宿主内存模拟，不依赖真实操作系统 IPC：
 //!
@@ -93,16 +93,16 @@ impl SharedMemory {
 
 /// 共享内存管理器。
 pub struct SharedMemoryManager {
-    segments: HashMap<String, SharedMemory>,
-    name_to_id: HashMap<String, ShmId>,
+    segments: BTreeMap<String, SharedMemory>,
+    name_to_id: BTreeMap<String, ShmId>,
     next_id: u64,
 }
 
 impl SharedMemoryManager {
     pub fn new() -> Self {
         Self {
-            segments: HashMap::new(),
-            name_to_id: HashMap::new(),
+            segments: BTreeMap::new(),
+            name_to_id: BTreeMap::new(),
             next_id: 1,
         }
     }
@@ -248,7 +248,7 @@ pub struct MessageQueue {
     /// 优先级堆：(priority, enqueue_seq, message id)。
     heap: BinaryHeap<(i32, u64, u64)>,
     /// 消息 id -> 消息。
-    messages: HashMap<u64, Message>,
+    messages: BTreeMap<u64, Message>,
     /// 当前消息数。
     count: usize,
     /// 下一个消息 id。
@@ -270,7 +270,7 @@ impl MessageQueue {
             max_msgs,
             max_msg_size,
             heap: BinaryHeap::new(),
-            messages: HashMap::new(),
+            messages: BTreeMap::new(),
             count: 0,
             next_msg_id: 1,
             next_seq: 0,
@@ -367,16 +367,16 @@ fn now_millis() -> u64 {
 // =====================================================================================
 
 pub struct MessageQueueManager {
-    queues: HashMap<String, MessageQueue>,
-    name_to_id: HashMap<String, MsgQId>,
+    queues: BTreeMap<String, MessageQueue>,
+    name_to_id: BTreeMap<String, MsgQId>,
     next_id: u64,
 }
 
 impl MessageQueueManager {
     pub fn new() -> Self {
         Self {
-            queues: HashMap::new(),
-            name_to_id: HashMap::new(),
+            queues: BTreeMap::new(),
+            name_to_id: BTreeMap::new(),
             next_id: 1,
         }
     }
@@ -540,14 +540,14 @@ impl Pipe {
 // =====================================================================================
 
 pub struct PipeManager {
-    pipes: HashMap<u64, Pipe>,
+    pipes: BTreeMap<u64, Pipe>,
     next_pipe_id: u64,
 }
 
 impl PipeManager {
     pub fn new() -> Self {
         Self {
-            pipes: HashMap::new(),
+            pipes: BTreeMap::new(),
             next_pipe_id: 1,
         }
     }
@@ -688,7 +688,7 @@ impl UnixSocketPair {
 static SHM_MGR: OnceLock<Mutex<SharedMemoryManager>> = OnceLock::new();
 static MSGQ_MGR: OnceLock<Mutex<MessageQueueManager>> = OnceLock::new();
 static PIPE_MGR: OnceLock<Mutex<PipeManager>> = OnceLock::new();
-static SOCKET_MGR: OnceLock<Mutex<HashMap<u64, UnixSocketPair>>> = OnceLock::new();
+static SOCKET_MGR: OnceLock<Mutex<BTreeMap<u64, UnixSocketPair>>> = OnceLock::new();
 static NEXT_SOCK_ID: OnceLock<Mutex<u64>> = OnceLock::new();
 
 fn shm_mgr() -> &'static Mutex<SharedMemoryManager> {
@@ -703,8 +703,8 @@ fn pipe_mgr() -> &'static Mutex<PipeManager> {
     PIPE_MGR.get_or_init(|| Mutex::new(PipeManager::new()))
 }
 
-fn socket_mgr() -> &'static Mutex<HashMap<u64, UnixSocketPair>> {
-    SOCKET_MGR.get_or_init(|| Mutex::new(HashMap::new()))
+fn socket_mgr() -> &'static Mutex<BTreeMap<u64, UnixSocketPair>> {
+    SOCKET_MGR.get_or_init(|| Mutex::new(BTreeMap::new()))
 }
 
 fn next_sock_id() -> &'static Mutex<u64> {
@@ -906,16 +906,16 @@ impl Semaphore {
 
 /// 信号量管理器。
 pub struct SemaphoreManager {
-    semaphores: HashMap<String, Semaphore>,
-    name_to_id: HashMap<String, SemId>,
+    semaphores: BTreeMap<String, Semaphore>,
+    name_to_id: BTreeMap<String, SemId>,
     next_id: u64,
 }
 
 impl SemaphoreManager {
     pub fn new() -> Self {
         Self {
-            semaphores: HashMap::new(),
-            name_to_id: HashMap::new(),
+            semaphores: BTreeMap::new(),
+            name_to_id: BTreeMap::new(),
             next_id: 1,
         }
     }
@@ -1222,3 +1222,5 @@ mod tests {
         assert!(s.contains("semaphores="));
     }
 }
+
+

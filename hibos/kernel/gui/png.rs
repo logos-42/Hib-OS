@@ -1,4 +1,4 @@
-//! PNG 解码 —— 零依赖，直接产出 32bpp `Surface`。
+﻿//! PNG 解码 —— 零依赖，直接产出 32bpp `Surface`。
 //!
 //! 项目一直坚持「图形格式自己解析」（BMP 手写、JSON 手写），PNG 也不破例：
 //! 手写 zlib/DEFLATE 解压 + PNG 行滤波 + 颜色类型展开，不引入 image/flate2。
@@ -200,7 +200,7 @@ impl<'a> BitReader<'a> {
 
 /// 规范 Huffman 表：(码长, 反转后的码) -> 符号，哈希查找避免大图逐位线性扫描。
 struct Huffman {
-    map: HashMap<(u8, u16), u16>,
+    map: BTreeMap<(u8, u16), u16>,
 }
 
 impl Huffman {
@@ -219,7 +219,7 @@ impl Huffman {
             code = (code + count[len - 1]) << 1;
             next[len] = code;
         }
-        let mut map = HashMap::new();
+        let mut map = BTreeMap::new();
         for (sym, &len) in lengths.iter().enumerate() {
             if len == 0 {
                 continue;
@@ -481,3 +481,5 @@ mod tests {
         assert_eq!(paeth(10, 20, 15), 15);
     }
 }
+
+

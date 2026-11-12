@@ -1,4 +1,4 @@
-//! 知识图谱 —— 三元组存储与图查询。
+﻿//! 知识图谱 —— 三元组存储与图查询。
 //!
 //! `KnowledgeGraph` 提供 `add_triple` / `remove_triple` / `query` /
 //! `query_by_subject` / `query_by_object` / `traverse` / `shortest_path`。
@@ -108,11 +108,11 @@ pub struct KnowledgeGraph {
     /// 三元组存储，按 key (s,p,o) 去重。
     triples: BTreeMap<(String, String, String), Triple>,
     /// subject ->  triple keys。
-    by_subject: HashMap<String, BTreeSet<(String, String, String)>>,
+    by_subject: BTreeMap<String, BTreeSet<(String, String, String)>>,
     /// predicate -> triple keys。
-    by_predicate: HashMap<String, BTreeSet<(String, String, String)>>,
+    by_predicate: BTreeMap<String, BTreeSet<(String, String, String)>>,
     /// object -> triple keys。
-    by_object: HashMap<String, BTreeSet<(String, String, String)>>,
+    by_object: BTreeMap<String, BTreeSet<(String, String, String)>>,
     /// 节点注册表。
     nodes: BTreeMap<String, Node>,
     /// 边注册表。
@@ -131,9 +131,9 @@ impl KnowledgeGraph {
     pub fn new() -> Self {
         Self {
             triples: BTreeMap::new(),
-            by_subject: HashMap::new(),
-            by_predicate: HashMap::new(),
-            by_object: HashMap::new(),
+            by_subject: BTreeMap::new(),
+            by_predicate: BTreeMap::new(),
+            by_object: BTreeMap::new(),
             nodes: BTreeMap::new(),
             edges: BTreeMap::new(),
             count: 0,
@@ -401,14 +401,14 @@ impl KnowledgeGraph {
 
     /// 简化社区发现：基于连通分量的并查集。
     pub fn communities(&self) -> Vec<Vec<String>> {
-        let mut parent: HashMap<String, String> = HashMap::new();
+        let mut parent: BTreeMap<String, String> = BTreeMap::new();
         for (s, _p, o) in self.triples.keys() {
             parent.entry(s.clone()).or_insert_with(|| s.clone());
             parent.entry(o.clone()).or_insert_with(|| o.clone());
             self.union(&mut parent, s, o);
         }
         let nodes: Vec<String> = parent.keys().cloned().collect();
-        let mut groups: HashMap<String, Vec<String>> = HashMap::new();
+        let mut groups: BTreeMap<String, Vec<String>> = BTreeMap::new();
         for node in nodes {
             let root = self.find(&mut parent, &node);
             groups.entry(root).or_default().push(node);
@@ -418,7 +418,7 @@ impl KnowledgeGraph {
         result
     }
 
-    fn find(&self, parent: &mut HashMap<String, String>, x: &str) -> String {
+    fn find(&self, parent: &mut BTreeMap<String, String>, x: &str) -> String {
         if parent.get(x) != Some(&x.to_string()) {
             let p = parent.get(x).unwrap().clone();
             let root = self.find(parent, &p);
@@ -429,7 +429,7 @@ impl KnowledgeGraph {
         }
     }
 
-    fn union(&self, parent: &mut HashMap<String, String>, x: &str, y: &str) {
+    fn union(&self, parent: &mut BTreeMap<String, String>, x: &str, y: &str) {
         let rx = self.find(parent, x);
         let ry = self.find(parent, y);
         if rx != ry {
@@ -648,3 +648,4 @@ mod tests {
         assert!(res.contains("社区"));
     }
 }
+

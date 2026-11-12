@@ -58,7 +58,7 @@ struct DentryKey {
 /// 目录项缓存：哈希表 + LRU + 引用计数。
 pub struct DentryCache {
     /// 按 (parent_ino, name) 索引的 dentry。
-    entries: Mutex<HashMap<DentryKey, Dentry>>,
+    entries: Mutex<BTreeMap<DentryKey, Dentry>>,
     /// LRU 链表：头部为最久未使用。
     lru: Mutex<VecDeque<DentryKey>>,
     /// 容量。
@@ -84,7 +84,7 @@ impl DentryCache {
     /// 创建容量为 `capacity` 的目录项缓存。
     pub fn new(capacity: usize) -> Self {
         Self {
-            entries: Mutex::new(HashMap::new()),
+            entries: Mutex::new(BTreeMap::new()),
             lru: Mutex::new(VecDeque::new()),
             capacity: capacity.max(1),
             stats: Mutex::new(DcacheStats::default()),
@@ -501,7 +501,7 @@ impl CachedInode {
 
 /// inode 缓存：按 inode 号缓存，支持引用计数与驱逐。
 pub struct InodeCache {
-    inodes: Mutex<HashMap<Ino, CachedInode>>,
+    inodes: Mutex<BTreeMap<Ino, CachedInode>>,
     lru: Mutex<VecDeque<Ino>>,
     capacity: usize,
     stats: Mutex<InodeCacheStats>,
@@ -521,7 +521,7 @@ pub struct InodeCacheStats {
 impl InodeCache {
     pub fn new(capacity: usize) -> Self {
         Self {
-            inodes: Mutex::new(HashMap::new()),
+            inodes: Mutex::new(BTreeMap::new()),
             lru: Mutex::new(VecDeque::new()),
             capacity: capacity.max(1),
             stats: Mutex::new(InodeCacheStats::default()),
@@ -895,4 +895,5 @@ fn now_nanos() -> u64 {
         .map(|d| d.as_nanos() as u64)
         .unwrap_or(0)
 }
+
 

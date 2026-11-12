@@ -1,4 +1,4 @@
-//! 信号机制。
+﻿//! 信号机制。
 //!
 //! 模拟类 Unix 信号：定义信号枚举（SIGKILL/SIGSTOP/SIGCONT/SIGTERM/SIGINT/
 //! SIGSEGV/SIGCHLD 等），支持为进程注册信号处理函数、发送信号、信号屏蔽
@@ -162,15 +162,15 @@ pub type Pid = u32;
 pub struct ProcessSignalState {
     pub pid: Pid,
     /// 信号 -> 处理方式。
-    actions: HashMap<Signal, SignalAction>,
+    actions: BTreeMap<Signal, SignalAction>,
     /// 信号屏蔽掩码（被屏蔽的信号集）。
     mask: HashSet<Signal>,
     /// 未决信号集（已发送但未投递的信号）。
     pending: HashSet<Signal>,
     /// 信号计数：每个信号被发送的次数。
-    sent_count: HashMap<Signal, u64>,
+    sent_count: BTreeMap<Signal, u64>,
     /// 信号投递次数。
-    delivered_count: HashMap<Signal, u64>,
+    delivered_count: BTreeMap<Signal, u64>,
     /// 进程是否已终止（由信号导致）。
     pub terminated: bool,
     /// 终止信号（若 terminated 为 true）。
@@ -181,11 +181,11 @@ impl ProcessSignalState {
     pub fn new(pid: Pid) -> Self {
         Self {
             pid,
-            actions: HashMap::new(),
+            actions: BTreeMap::new(),
             mask: HashSet::new(),
             pending: HashSet::new(),
-            sent_count: HashMap::new(),
-            delivered_count: HashMap::new(),
+            sent_count: BTreeMap::new(),
+            delivered_count: BTreeMap::new(),
             terminated: false,
             term_signal: None,
         }
@@ -352,9 +352,9 @@ impl ProcessSignalState {
 /// 屏蔽掩码、未决信号查询与投递接口。
 pub struct SignalHandler {
     /// pid -> 进程信号状态。
-    processes: HashMap<Pid, ProcessSignalState>,
+    processes: BTreeMap<Pid, ProcessSignalState>,
     /// 默认处理方式表（供未注册的进程使用）。
-    default_actions: HashMap<Signal, SignalAction>,
+    default_actions: BTreeMap<Signal, SignalAction>,
     /// 全局统计。
     total_sent: u64,
     total_delivered: u64,
@@ -362,7 +362,7 @@ pub struct SignalHandler {
 
 impl SignalHandler {
     pub fn new() -> Self {
-        let mut default_actions = HashMap::new();
+        let mut default_actions = BTreeMap::new();
         for sig in [
             Signal::SIGHUP,
             Signal::SIGINT,
@@ -385,7 +385,7 @@ impl SignalHandler {
             default_actions.insert(sig, SignalAction::default_for(sig));
         }
         Self {
-            processes: HashMap::new(),
+            processes: BTreeMap::new(),
             default_actions,
             total_sent: 0,
             total_delivered: 0,
@@ -902,5 +902,7 @@ mod tests {
         assert!(s.contains("count=1"));
     }
 }
+
+
 
 

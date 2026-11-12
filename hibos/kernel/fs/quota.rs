@@ -146,9 +146,9 @@ impl std::fmt::Display for QuotaError {
 /// 配额管理器：维护用户配额表与项目配额表，提供检查与扣费。
 pub struct QuotaManager {
     /// 用户 ID -> 配额。
-    quotas: Mutex<HashMap<Uid, QuotaInfo>>,
+    quotas: Mutex<BTreeMap<Uid, QuotaInfo>>,
     /// 项目 ID -> 项目配额。
-    projects: Mutex<HashMap<ProjId, ProjectQuota>>,
+    projects: Mutex<BTreeMap<ProjId, ProjectQuota>>,
     /// 全局默认块限制（未设置用户时）。
     default_block_limit: u64,
     /// 全局默认 inode 限制。
@@ -159,8 +159,8 @@ impl QuotaManager {
     /// 创建配额管理器。
     pub fn new() -> Self {
         Self {
-            quotas: Mutex::new(HashMap::new()),
-            projects: Mutex::new(HashMap::new()),
+            quotas: Mutex::new(BTreeMap::new()),
+            projects: Mutex::new(BTreeMap::new()),
             default_block_limit: 0,
             default_inode_limit: 0,
         }
@@ -842,4 +842,5 @@ mod tests {
         assert!(r.contains("epoch="));
     }
 }
+
 

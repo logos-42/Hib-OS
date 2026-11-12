@@ -1,4 +1,4 @@
-//! 通道元数据、订阅/通知、租约扩展 —— 为统一感知通道层提供元信息与事件总线。
+﻿//! 通道元数据、订阅/通知、租约扩展 —— 为统一感知通道层提供元信息与事件总线。
 //!
 //! 本模块在 `kernel/channels.rs` 的 `ChannelRegistry` 之上叠加三层能力：
 //!
@@ -173,7 +173,7 @@ pub struct ChannelNotifier {
     /// 下一个订阅者 ID。
     next_id: u64,
     /// 通道名 -> 订阅者回调列表。
-    subscribers: HashMap<String, Vec<Arc<ChannelSubscriber>>>,
+    subscribers: BTreeMap<String, Vec<Arc<ChannelSubscriber>>>,
 }
 
 impl ChannelNotifier {
@@ -181,7 +181,7 @@ impl ChannelNotifier {
     pub fn new() -> Self {
         Self {
             next_id: 1,
-            subscribers: HashMap::new(),
+            subscribers: BTreeMap::new(),
         }
     }
 
@@ -244,7 +244,7 @@ impl Default for ChannelNotifier {
 // =====================================================================================
 
 /// 通道元数据表：通道名 -> ChannelMeta。
-static META_TABLE: OnceLock<Mutex<HashMap<String, ChannelMeta>>> = OnceLock::new();
+static META_TABLE: OnceLock<Mutex<BTreeMap<String, ChannelMeta>>> = OnceLock::new();
 
 /// 通知器单例。
 static NOTIFIER: OnceLock<Mutex<ChannelNotifier>> = OnceLock::new();
@@ -252,8 +252,8 @@ static NOTIFIER: OnceLock<Mutex<ChannelNotifier>> = OnceLock::new();
 /// 下一个订阅者全局 ID（用于跨模块统一分配）。
 static NEXT_SUB_ID: OnceLock<Mutex<u64>> = OnceLock::new();
 
-fn meta_table() -> &'static Mutex<HashMap<String, ChannelMeta>> {
-    META_TABLE.get_or_init(|| Mutex::new(HashMap::new()))
+fn meta_table() -> &'static Mutex<BTreeMap<String, ChannelMeta>> {
+    META_TABLE.get_or_init(|| Mutex::new(BTreeMap::new()))
 }
 
 fn notifier() -> &'static Mutex<ChannelNotifier> {
@@ -277,7 +277,7 @@ pub struct ExtendedChannelRegistry {
     /// 底层通道注册表（sense/act/打开关闭）。
     base: Mutex<ChannelRegistry>,
     /// 通道名 -> ChannelMeta。
-    meta: Mutex<HashMap<String, ChannelMeta>>,
+    meta: Mutex<BTreeMap<String, ChannelMeta>>,
     /// 通知器。
     notifier: Mutex<ChannelNotifier>,
 }
@@ -287,7 +287,7 @@ impl ExtendedChannelRegistry {
     pub fn new() -> Self {
         Self {
             base: Mutex::new(ChannelRegistry::new()),
-            meta: Mutex::new(HashMap::new()),
+            meta: Mutex::new(BTreeMap::new()),
             notifier: Mutex::new(ChannelNotifier::new()),
         }
     }
@@ -727,10 +727,10 @@ impl Default for ChannelGroup {
 // 通道组全局注册表
 // =====================================================================================
 
-static CHANNEL_GROUPS: OnceLock<Mutex<HashMap<String, ChannelGroup>>> = OnceLock::new();
+static CHANNEL_GROUPS: OnceLock<Mutex<BTreeMap<String, ChannelGroup>>> = OnceLock::new();
 
-fn channel_groups() -> &'static Mutex<HashMap<String, ChannelGroup>> {
-    CHANNEL_GROUPS.get_or_init(|| Mutex::new(HashMap::new()))
+fn channel_groups() -> &'static Mutex<BTreeMap<String, ChannelGroup>> {
+    CHANNEL_GROUPS.get_or_init(|| Mutex::new(BTreeMap::new()))
 }
 
 /// 创建或获取通道组（全局）。
@@ -1003,3 +1003,5 @@ mod tests {
         assert!(group_list().contains(&"new_group".to_string()));
     }
 }
+
+

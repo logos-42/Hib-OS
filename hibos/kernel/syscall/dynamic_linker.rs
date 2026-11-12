@@ -1,4 +1,4 @@
-//! 动态链接器 —— 为 Hib OS 用户态宏内核提供共享库加载与符号绑定。
+﻿//! 动态链接器 —— 为 Hib OS 用户态宏内核提供共享库加载与符号绑定。
 //!
 //! 与 `kernel/syscall` 的 `AiSystemCall` 和 `PosixSyscall` 并行存在，不替换。
 //! 配合 `kernel/syscall/elf_loader.rs` 的 ELF 加载器，实现 `.so` 风格共享库的
@@ -178,7 +178,7 @@ pub struct DynamicLinker {
     /// 库 id -> SharedLibrary。
     libraries: BTreeMap<LibId, SharedLibrary>,
     /// 库路径 -> LibId（去重，避免重复加载同一文件）。
-    path_to_lib: HashMap<String, LibId>,
+    path_to_lib: BTreeMap<String, LibId>,
     /// 下一个可分配的库 id。
     next_id: u64,
     /// 库搜索路径列表（`load_library` 与 `search_path` 使用）。
@@ -192,7 +192,7 @@ impl DynamicLinker {
     pub fn new() -> Self {
         DynamicLinker {
             libraries: BTreeMap::new(),
-            path_to_lib: HashMap::new(),
+            path_to_lib: BTreeMap::new(),
             next_id: 1,
             search_paths: Vec::new(),
             load_order: Vec::new(),

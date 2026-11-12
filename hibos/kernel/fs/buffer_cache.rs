@@ -156,7 +156,7 @@ impl Drop for BufferHandle {
 /// 缓冲区缓存内部状态。
 struct BufferCacheInner {
     /// 按 (dev_id, sector) 索引的缓冲区。
-    buffers: HashMap<(u64, u64), Buffer>,
+    buffers: BTreeMap<(u64, u64), Buffer>,
     /// LRU 链表：头部为最久未使用，尾部为最近使用。
     lru: VecDeque<(u64, u64)>,
     /// 容量（最大缓冲区数）。
@@ -167,7 +167,7 @@ struct BufferCacheInner {
 impl BufferCacheInner {
     fn new(capacity: usize) -> Self {
         Self {
-            buffers: HashMap::new(),
+            buffers: BTreeMap::new(),
             lru: VecDeque::new(),
             capacity: capacity.max(1),
             stats: CacheStats::default(),
@@ -238,7 +238,7 @@ impl std::fmt::Display for BufferError {
 pub struct BufferCache {
     inner: Arc<Mutex<BufferCacheInner>>,
     /// 设备表：dev_id -> 块设备。
-    devices: Mutex<HashMap<u64, Box<dyn BlockDevice + Send>>>,
+    devices: Mutex<BTreeMap<u64, Box<dyn BlockDevice + Send>>>,
     next_dev_id: Mutex<u64>,
 }
 
@@ -247,7 +247,7 @@ impl BufferCache {
     pub fn new(max_buffers: usize) -> Self {
         Self {
             inner: Arc::new(Mutex::new(BufferCacheInner::new(max_buffers))),
-            devices: Mutex::new(HashMap::new()),
+            devices: Mutex::new(BTreeMap::new()),
             next_dev_id: Mutex::new(1),
         }
     }
@@ -990,4 +990,5 @@ fn write_sector_inner(cache: &BufferCacheLeased, dev_id: u64, sector: u64, byte:
     let mut data = [byte; BLOCK_SIZE];
     dev.write_at(sector, &data).unwrap();
 }
+
 

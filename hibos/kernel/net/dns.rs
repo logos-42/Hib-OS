@@ -747,3 +747,4 @@ mod tests {
         assert!(dns_act_raw("resolve_ipv4 ").is_err());
     }
 }
+

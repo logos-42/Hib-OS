@@ -202,3 +202,4 @@ mod tests {
         assert!(arp_resolve(&arp, [0, 0, 0, 0]) == ETH_BROADCAST);
     }
 }
+

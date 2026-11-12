@@ -1,4 +1,4 @@
-//! Slab 对象缓存分配器 (Slab Allocator)。
+﻿//! Slab 对象缓存分配器 (Slab Allocator)。
 //!
 //! 设计信条：内核里大量对象是同一尺寸的小块（如 inode、task_struct、skb）。
 //! 若每次都向伙伴系统要整页，碎片与开销巨大。Slab 把一页切成 N 个等尺寸
@@ -162,7 +162,7 @@ pub struct SlabHandle {
 pub struct SlabAllocator {
     caches: Vec<SlabCache>,
     /// 动态缓存：名 -> 索引（支持运行时注册自定义尺寸类缓存）。
-    named_caches: HashMap<String, usize>,
+    named_caches: BTreeMap<String, usize>,
     /// 总分配次数。
     total_allocs: u64,
     /// 总释放次数。
@@ -177,7 +177,7 @@ pub struct SlabAllocator {
         }
         Self {
             caches,
-            named_caches: HashMap::new(),
+            named_caches: BTreeMap::new(),
             total_allocs: 0,
             total_frees: 0,
         }
@@ -497,3 +497,4 @@ mod tests {
         );
     }
 }
+

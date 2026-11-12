@@ -1,4 +1,4 @@
-//! swap 区模拟（内存文件作为后端）。
+﻿//! swap 区模拟（内存文件作为后端）。
 //!
 //! 以宿主文件系统文件作为 swap 后端，模拟页交换进出：
 //!
@@ -90,7 +90,7 @@ pub struct SwapArea {
     /// 插槽 -> 物理页地址。
     slot_to_page: BTreeMap<usize, usize>,
     /// 物理页地址 -> 插槽索引。
-    page_to_slot: HashMap<usize, usize>,
+    page_to_slot: BTreeMap<usize, usize>,
     /// 空闲插槽索引栈。
     free_slots: Vec<usize>,
     /// 下一个尝试分配的插槽索引（顺序分配，免去栈空时的搜索）。
@@ -142,7 +142,7 @@ pub struct SwapArea {
             path,
             max_pages,
             slot_to_page: BTreeMap::new(),
-            page_to_slot: HashMap::new(),
+            page_to_slot: BTreeMap::new(),
             free_slots,
             next_slot: 0,
             swap_out_count: 0,
@@ -692,3 +692,4 @@ mod tests {
         );
     }
 }
+

@@ -1,4 +1,4 @@
-//! 推理引擎 —— 正向/逆向推导、规则事实、不一致检测与置信度传播。
+﻿//! 推理引擎 —— 正向/逆向推导、规则事实、不一致检测与置信度传播。
 //!
 //! `ReasoningEngine` 提供 `add_rule` / `add_fact` / `query` / `forward_chain` /
 //! `backward_chain` / `confidence`。
@@ -690,3 +690,4 @@ mod tests {
         assert_eq!(rules.len(), 2);
     }
 }
+

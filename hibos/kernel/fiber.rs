@@ -1,4 +1,4 @@
-//! 用户态纤程 —— 真正的多线程上下文切换（基于 Windows Fiber）。
+﻿//! 用户态纤程 —— 真正的多线程上下文切换（基于 Windows Fiber）。
 //!
 //! 每个纤程拥有独立的栈和寄存器上下文，`SwitchToFiber` 执行真正的
 //! 寄存器保存/恢复和栈切换，不依赖 OS 内核线程调度。
@@ -47,7 +47,7 @@ struct FiberScheduler {
     /// 就绪队列（FiberId 队列）。
     ready: VecDeque<FiberId>,
     /// 纤程句柄表。
-    fibers: HashMap<FiberId, Fiber>,
+    fibers: BTreeMap<FiberId, Fiber>,
     /// 当前运行的纤程。
     current: Option<FiberId>,
     /// 调度器自身的 Fiber 句柄（主纤程）。
@@ -73,7 +73,7 @@ fn scheduler() -> &'static Mutex<FiberScheduler> {
     FIBER_SCHEDULER.get_or_init(|| {
         Mutex::new(FiberScheduler {
             ready: VecDeque::new(),
-            fibers: HashMap::new(),
+            fibers: BTreeMap::new(),
             current: None,
             scheduler_fiber: std::ptr::null_mut(),
             next_id: 1,
@@ -467,3 +467,5 @@ extern "system" {
     #[allow(dead_code)]
     fn DeleteFiber(lpFiber: *mut c_void);
 }
+
+
