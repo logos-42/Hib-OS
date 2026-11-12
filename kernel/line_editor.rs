@@ -139,7 +139,9 @@ impl LineEditor {
                 b'\r' | b'\n' => {
                     writeln!(out)?;
                     out.flush()?;
+                    // 去掉可能存在的 UTF-8 BOM（管道/重定向输入常带 BOM）。
                     let line: String = buf.iter().collect();
+                    let line = line.trim_start_matches('\u{feff}').to_string();
                     self.add_history(&line);
                     return Ok(ReadOutcome::Line(line));
                 }

@@ -1978,7 +1978,6 @@ impl Shell {
             match outcome {
                 Ok(line_editor::ReadOutcome::Line(line)) => {
                     let trimmed = line.trim();
-                    tagged_out!("[llm]", "DEBUG 读到输入: {:?}", trimmed);
                     if trimmed.is_empty() {
                         continue;
                     }
