@@ -1,4 +1,3 @@
-#![allow(dead_code, unused_imports, unused_variables, unused_mut)]
 //! 多模态感知层 —— AI 原生 OS 的「感知系统」 (Multi-modal Perception)
 //!
 //! 本模块实现 AI 原生 OS 的多模态感知，对应传统 OS 中的「中断控制器 /
@@ -19,7 +18,7 @@
 //!
 //! 所有结构均为纯 Rust 原型，无硬件依赖，供内核统一核算与调度。
 
-#![allow(dead_code, unused_imports, unused_variables, unused_mut)]`r`nuse std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::{Mutex, OnceLock};
 
 // =====================================================================================

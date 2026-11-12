@@ -285,7 +285,8 @@ fn bench_gui_ai_window() {
 }
 
 fn main() {
-    println!("=== AI 原生 OS 基准测试 ===\n");
+    println!("=== AI 原生 OS 基准测试 ===
+");
     bench_model_load();
     bench_model_instantiate();
     bench_consciousness_tick();
@@ -306,5 +307,6 @@ fn main() {
     bench_driver_ai_register();
     bench_shell_ai_parse();
     bench_gui_ai_window();
-    println!("\n=== 基准测试完成 ===");
+    println!("
+=== 基准测试完成 ===");
 }
