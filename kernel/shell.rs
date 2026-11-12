@@ -843,6 +843,26 @@ impl Shell {
         );
     }
 
+    /// 自造插件通道按需注册：插件安装后，其 `plugin://<name>` 通道即可被感知/行动。
+    fn ensure_dynamic_channel(&mut self, name: &str) -> Option<ChannelKind> {
+        if !name.starts_with("plugin://") {
+            return None;
+        }
+        let installed = {
+            let reg = crate::plugin::plugins().lock().unwrap();
+            reg.plugin_of_channel(name).is_some()
+        };
+        if !installed {
+            return None;
+        }
+        let _ = self.channels.open(
+            ChannelKind::Plugin,
+            name,
+            crate::channels::Access::ReadWrite,
+        );
+        Some(ChannelKind::Plugin)
+    }
+
     fn cmd_sense(&mut self, parts: &[&str]) {
         let Some(name) = parts.get(1).copied() else {
             println!("用法: sense <通道>  (channels 查看全部通道)");
@@ -850,10 +870,13 @@ impl Shell {
         };
         let kind = match self.channels.sense(name) {
             Ok(k) => k,
-            Err(e) => {
-                println!("sense 失败: {}", e);
-                return;
-            }
+            Err(e) => match self.ensure_dynamic_channel(name) {
+                Some(k) => k,
+                None => {
+                    println!("sense 失败: {}", e);
+                    return;
+                }
+            },
         };
         let (probed, epoch) = crate::sense::probe_epoch(name);
         let text = probed.unwrap_or_else(|| self.sense_via_shell(kind, name));
@@ -941,10 +964,13 @@ impl Shell {
         let payload = parts[2..].join(" ");
         let kind = match self.channels.act(name) {
             Ok(k) => k,
-            Err(e) => {
-                println!("act 失败: {}", e);
-                return;
-            }
+            Err(e) => match self.ensure_dynamic_channel(name) {
+                Some(k) => k,
+                None => {
+                    println!("act 失败: {}", e);
+                    return;
+                }
+            },
         };
         if let Some(result) = crate::sense::act(name, &payload) {
             let ok = result.is_ok();
@@ -1780,6 +1806,11 @@ impl Shell {
                 ACTION: act fw://rules add|policy|del ...         防火墙规则\n\
                 ACTION: act cgroup://groups create|set|attach     控制组配额\n\
                 ACTION: act power://state suspend|reboot|wake     电源姿态\n\
+                ACTION: act worktree://trees create <名称> [归属]  创建隔离工作区 (隔离实例的文件操作)\n\
+                ACTION: act worktree://trees switch <名称>        切换当前工作区\n\
+                ACTION: act plugin://modules install <名称> [版本] [kind] [caps]  安装自造插件\n\
+                ACTION: act plugin://hotreload reload <名称>      热重载插件\n\
+                ACTION: act plugin://<插件名> <负载>               向自造插件投递行动\n\
                 规则：先用 sense 了解状态，再决定 act / 创建资源 / 操作文件；不要执行破坏性操作除非必要；用简体中文回答，并在需要时在末尾给出 ACTION。",
             catalog
         );
