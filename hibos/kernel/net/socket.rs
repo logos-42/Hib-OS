@@ -50,7 +50,7 @@ pub struct SocketTable {
     next_fd: SocketFd,
 }
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 impl SocketTable {
     pub fn new() -> Self {

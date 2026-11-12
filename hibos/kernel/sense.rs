@@ -11,7 +11,6 @@ use core::time::Duration;
 use crate::desktop;
 use crate::gpu::capabilities::{GpuCapability, GpuCapabilities};
 use crate::gpu::{iommu, vram, VramPartitionId};
-use crate::monitor::get_time_ns;
 use crate::net::ETH_NAME;
 use crate::vfs::Vfs;
 use crate::fs::{fs_act_dispatch, fs_sense_snapshot};

@@ -1,23 +1,23 @@
 //! PCI 枚举器 —— P1-2 子模块。
 
-use std::sync::{Mutex, OnceLock};
+use crate::ksync::{SpinLock, OnceLock};
 
-use crate::drivers::{PciDevice, PciClass};
+use crate::drivers::pci::{PciDevice, PciClass};
 
 /// PCI 设备注册表。
 struct PciRegistry {
     devices: Vec<PciDevice>,
 }
 
-static PCI_REG: OnceLock<Mutex<Option<PciRegistry>>> = OnceLock::new();
+static PCI_REG: OnceLock<SpinLock<Option<PciRegistry>>> = OnceLock::new();
 
-fn pci_reg() -> &'static Mutex<Option<PciRegistry>> {
-    PCI_REG.get_or_init(|| Mutex::new(None))
+fn pci_reg() -> &'static SpinLock<Option<PciRegistry>> {
+    PCI_REG.get_or_init(|| SpinLock::new(None))
 }
 
 /// 枚举 PCI 设备（模拟：返回一组预设设备）。
 pub fn pci_enumerate() -> Vec<PciDevice> {
-    let mut g = pci_reg().lock().unwrap();
+    let mut g = pci_reg().lock();
     if g.is_none() {
         let devices = vec![
             PciDevice {

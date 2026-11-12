@@ -2,7 +2,7 @@
 //!
 //! 主机协议栈（不做转发）：收到的包若目的地址不是本机即丢弃。
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use crate::net::{RouteEntry};
 use crate::net::tcp::TcpSegment;

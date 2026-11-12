@@ -858,7 +858,7 @@ pub fn driver_ai_act(payload: &str) -> Result<String, String> {
                 irq_line: 0,
             });
             // 注入：激活 L1 PCI 总线子系统，使 `sense drv://pci` 可见。
-            let _ = pci_enumerate();
+            let _ = crate::drivers::pci_enumerator::pci_enumerate();
             Ok(format!("已添加 PCI 设备 bus={} device={} function={}", bus, device, function))
         }
         Some("device-tree-add") => {

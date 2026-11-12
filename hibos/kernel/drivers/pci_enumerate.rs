@@ -11,8 +11,8 @@
 //! * 设备枚举（总线/设备/功能）、BAR 大小探测
 //! * sense/act 通道：`drv://pci`
 
-use std::collections::BTreeMap;
-use std::sync::{Mutex, OnceLock};
+use alloc::collections::BTreeMap;
+use crate::ksync::{SpinLock, OnceLock};
 
 // =======================================================================
 // PCI 常量

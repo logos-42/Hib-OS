@@ -14,9 +14,9 @@
 //!
 //! 接口：`irq_handler_register(irq, handler)` / `irq_dispatch(irq)` / `idt_set_gate(...)` / `idt_load()`。
 
-use alloc::collections::HashMap;
-use alloc::sync::Arc;
-use alloc::string::{String, ToString};
+use std::collections::HashMap;
+use std::sync::Arc;
+use std::string::{String, ToString};
 use crate::ksync::{SpinLock, OnceLock};
 use crate::time::get_time_ns;
 

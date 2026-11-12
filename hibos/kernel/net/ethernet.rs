@@ -3,7 +3,7 @@
 //! 提供以太网 II 帧的封装/解析、MAC 地址表示、ARP 请求/应答包的序列化，
 //! 以及协议栈共用的 ARP 表查询辅助（ARP 条目本身由 `NetStack` 持有，见 `mod.rs`）。
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 /// 以太网 II 帧头固定 14 字节。
 pub const ETH_HEADER_LEN: usize = 14;
