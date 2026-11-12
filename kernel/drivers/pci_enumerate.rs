@@ -463,7 +463,7 @@ mod tests {
     fn default_config_read_absent() {
         let bus = PciBus::new();
         // 无设备时读回 0xFFFFFFFF（模拟真实硬件 0xFFFF）。
-        assert_eq!(bus.read_config(0, 0, 0, 256), 0xFFFFFFFF);
+        assert_eq!(bus.read_config(0, 0, 0, 0), 0xFFFFFFFF);
         assert_eq!(bus.read_config(0, 0, 0, 255), 0xFFFFFFFF); // 对齐到 252，未写入
     }
 
