@@ -162,11 +162,30 @@ pub fn chat_with_context(api_key: &str, window: &ContextWindow) -> Result<String
         json_messages
     );
 
-    let resp = ureq::post(API_URL)
-        .set("Authorization", &format!("Bearer {}", api_key))
-        .set("Content-Type", "application/json")
-        .send_string(&body)
-        .map_err(|e| format!("DeepSeek 请求失败: {}", e))?;
+    let mut resp = None;
+    let mut last_err = String::from("DeepSeek 请求失败");
+    // API 调用带 30s 超时；超时则退避后重试一次（超时恢复）。
+    for attempt in 0..2 {
+        match ureq::post(API_URL)
+            .set("Authorization", &format!("Bearer {}", api_key))
+            .set("Content-Type", "application/json")
+            .timeout(std::time::Duration::from_secs(30))
+            .send_string(&body)
+        {
+            Ok(r) => {
+                resp = Some(r);
+                break;
+            }
+            Err(e) => {
+                last_err = format!("DeepSeek 请求失败: {}", e);
+                if attempt == 0 && e.to_string().to_lowercase().contains("timeout") {
+                    continue;
+                }
+                break;
+            }
+        }
+    }
+    let resp = resp.ok_or_else(|| last_err)?;
 
     let status = resp.status();
     if status != 200 {

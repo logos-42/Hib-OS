@@ -1691,15 +1691,25 @@ impl Shell {
                 };
                 match crate::deepseek::chat(&key, &message) {
                     Ok(reply) => {
-                        println!("[llm:{}] {}", provider, reply);
+                        // [llm] 前缀统一用绿色着色（theme::green）。
+                        println!(
+                            "{}",
+                            theme::green(&format!("[llm:{}] {}", provider, reply))
+                        );
                         // 把 AI 回复注入意识本体作为新的感知概念
                         let concept_name = format!("llm_reply_{}_{}", provider, self.handler.consciousness.concept_count());
                         self.handler
                             .consciousness
                             .add_perception_channel(&concept_name, crate::channels::ChannelKind::Text);
-                        println!("[llm] 回复已注入意识本体 (概念: {})", concept_name);
+                        println!(
+                            "[llm] 回复已注入意识本体 (概念: {})",
+                            concept_name
+                        );
                     }
-                    Err(e) => println!("[llm:{}] 对话失败: {}", provider, e),
+                    Err(e) => println!(
+                        "{}",
+                        theme::green(&format!("[llm:{}] 对话失败: {}", provider, e))
+                    ),
                 }
             }
             Some("loop") => {
@@ -1814,14 +1824,21 @@ impl Shell {
                                 .collect::<Vec<_>>()
                                 .join("\n");
                             if !text.is_empty() {
-                                println!("[llm:{}] {}", provider, text);
+                                // [llm] 前缀统一用绿色着色（theme::green）。
+                                println!(
+                                    "{}",
+                                    theme::green(&format!("[llm:{}] {}", provider, text))
+                                );
                             }
                             let concepts = self.handler.consciousness.concept_count();
                             println!("[llm] 意识本体概念数: {}", concepts);
                             // 自动执行 ACTION 指令
                             self.execute_llm_actions(&reply);
                         }
-                        Err(e) => println!("[llm:{}] 循环失败: {}", provider, e),
+                        Err(e) => println!(
+                            "{}",
+                            theme::green(&format!("[llm:{}] 循环失败: {}", provider, e))
+                        ),
                     }
                 }
                 Ok(line_editor::ReadOutcome::Cancelled) => {
