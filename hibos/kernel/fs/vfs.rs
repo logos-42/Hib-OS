@@ -3,7 +3,6 @@
 //! 每进程独立 fd 表；open/read/write/close/llseek 与简单文件系统
 //! 配合，为 `fs://` 通道提供 POSIX 风格的文件访问（no_std 内核版本）。
 
-use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::string::ToString;
 use alloc::vec::Vec;
@@ -13,13 +12,11 @@ use super::fd_table::{fd_alloc, fd_close, fd_count, fd_get, fd_registry, Access,
 use super::inode::{free_inode, get_inode, get_inode_mut, InodeType};
 
 /// 全局 VFS：按进程 ID 维护独立 fd 表。
-pub struct Vfs {
-    tables: BTreeMap<u64, FdTable>,
-}
+pub struct Vfs {}
 
 impl Vfs {
     pub fn new() -> Self {
-        Self { tables: BTreeMap::new() }
+        Self {}
     }
 
     /// open 系统调用：解析路径到 inode（不存在则创建文件），分配 fd。

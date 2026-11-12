@@ -10,7 +10,10 @@
 //! * `act net://interfaces mtu <网卡> <68-65535>`
 //! * `act net://interfaces add <网卡> [mac]` / `del <网卡>`
 
-use std::sync::{Mutex, OnceLock};
+use alloc::string::{String, ToString};
+use alloc::vec::Vec;
+
+use crate::ksync::{SpinLock, OnceLock};
 
 use crate::net::ETH_NAME;
 
@@ -101,7 +104,7 @@ impl IfaceTable {
         let iface = self.find_mut(name)?;
         iface.up = up;
         if name == ETH_NAME {
-            crate::net::net().lock().unwrap().iface.link_up = up;
+            crate::net::net().lock().iface.link_up = up;
         }
         Ok(format!(
             "{} 链路{}",
@@ -118,7 +121,7 @@ impl IfaceTable {
         iface.prefix = prefix;
         // eth0 与真实协议栈联动，ping/路由立即使用新地址。
         if name == ETH_NAME {
-            let mut st = crate::net::net().lock().unwrap();
+            let mut st = crate::net::net().lock();
             st.iface.ip = ip;
             st.iface.mask = mask_from_prefix(prefix);
         }
@@ -133,7 +136,7 @@ impl IfaceTable {
         let iface = self.find_mut(name)?;
         iface.mtu = mtu;
         if name == ETH_NAME {
-            crate::net::net().lock().unwrap().iface.mtu = mtu as u16;
+            crate::net::net().lock().iface.mtu = mtu as u16;
         }
         Ok(format!("{} MTU 已设为 {}", name, mtu))
     }
@@ -203,11 +206,11 @@ fn mask_from_prefix(prefix: u8) -> [u8; 4] {
     mask.to_be_bytes()
 }
 
-static IFACES: OnceLock<Mutex<IfaceTable>> = OnceLock::new();
+static IFACES: OnceLock<SpinLock<IfaceTable>> = OnceLock::new();
 
 /// 全局网卡资产表（`net://interfaces` 的实体）。
-pub fn ifaces() -> &'static Mutex<IfaceTable> {
-    IFACES.get_or_init(|| Mutex::new(IfaceTable::new()))
+pub fn ifaces() -> &'static SpinLock<IfaceTable> {
+    IFACES.get_or_init(|| SpinLock::new(IfaceTable::new()))
 }
 
 #[cfg(test)]
@@ -266,10 +269,10 @@ mod tests {
     fn eth0_addr_syncs_protocol_stack() {
         let mut t = table();
         t.set_addr(ETH_NAME, "10.0.0.9/24").unwrap();
-        assert_eq!(crate::net::net().lock().unwrap().iface.ip, [10, 0, 0, 9]);
-        assert_eq!(crate::net::net().lock().unwrap().iface.mask, [255, 255, 255, 0]);
+        assert_eq!(crate::net::net().lock().iface.ip, [10, 0, 0, 9]);
+        assert_eq!(crate::net::net().lock().iface.mask, [255, 255, 255, 0]);
         t.set_link(ETH_NAME, true).unwrap();
-        assert!(crate::net::net().lock().unwrap().iface.link_up);
+        assert!(crate::net::net().lock().iface.link_up);
     }
 
     #[test]

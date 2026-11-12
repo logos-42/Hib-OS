@@ -123,5 +123,5 @@ impl Write for VgaWriter {
 pub static mut VGA: VgaWriter = VgaWriter;
 
 pub fn writer() -> &'static mut VgaWriter {
-    unsafe { &mut VGA }
+    unsafe { &mut *&raw mut VGA }
 }

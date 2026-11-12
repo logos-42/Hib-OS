@@ -3,7 +3,11 @@
 //! `probe(name)` 返回该通道的实时快照；`act(name, payload)` 执行一次写操作。
 //! 返回 `None` 表示该通道由 shell 层负责 (文件、上下文、行动等需要可变的会话状态)。
 
-use std::io::IsTerminal;
+use alloc::collections::BTreeSet;
+use alloc::path::PathBuf;
+use alloc::string::{String, ToString};
+use alloc::vec::Vec;
+use core::time::Duration;
 
 use crate::desktop;
 use crate::gpu::capabilities::{GpuCapability, GpuCapabilities};
@@ -67,7 +71,7 @@ use crate::ai_token::TokenId;
 use crate::scheduler::CpuPriority;
 use exec::ExecId;
 use proc2::ProcId;
-use std::sync::{Mutex, OnceLock};
+use crate::ksync::{SpinLock, OnceLock};
 
 /// 感知一个硬件 / 系统通道，返回实时快照。
 pub fn probe(name: &str) -> Option<String> {

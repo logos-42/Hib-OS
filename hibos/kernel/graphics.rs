@@ -3,9 +3,6 @@
 //! 提供基本的像素操作和文本渲染，封装已有的 VGA 文本模式驱动。
 //! 后续可扩展为真实帧缓冲/GPU 输出。
 
-use alloc::string::String;
-use alloc::vec::Vec;
-
 use crate::drivers::vga_text::{self, Color as VgaColor, VgaChar, VGA_ADDR, WIDTH, HEIGHT};
 use crate::ksync::{SpinLock, OnceLock};
 

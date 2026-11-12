@@ -4,7 +4,6 @@
 //! 与 `kernel/fs/inode.rs`、`kernel/fs/dentry.rs` 配合，为 VFS 提供 POSIX 风格 fd 访问。
 
 use alloc::collections::BTreeMap;
-use alloc::string::String;
 
 use crate::ksync::{SpinLock, OnceLock};
 
@@ -75,7 +74,7 @@ impl FdTable {
 }
 
 /// 全局 fd 注册表：pid -> FdTable。
-pub(crate) struct FdRegistry {
+pub struct FdRegistry {
     pub(crate) tables: BTreeMap<u64, FdTable>,
 }
 

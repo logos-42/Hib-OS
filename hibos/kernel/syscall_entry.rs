@@ -6,9 +6,6 @@
 
 use alloc::string::String;
 use alloc::string::ToString;
-use alloc::vec::Vec;
-use core::fmt::Write;
-
 use crate::fs::{fs_act_dispatch, fs_sense_snapshot};
 use crate::ksync::{SpinLock, OnceLock};
 use crate::time::get_time_ns;

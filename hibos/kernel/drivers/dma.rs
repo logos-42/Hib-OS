@@ -15,9 +15,11 @@
 //! 接口：`dma_submit(sg_list) -> Result<DmaTransferId, String>` / `dma_poll()` /
 //! `dma_register_completion_callback(...)` / `dma_transfer_status(id)`。
 
-use std::collections::{HashMap, VecDeque};
-use std::sync::{Arc, Mutex, OnceLock};
-use std::time::Instant;
+use alloc::collections::{HashMap, VecDeque};
+use alloc::sync::Arc;
+use alloc::string::{String, ToString};
+use crate::ksync::{SpinLock, OnceLock};
+use crate::time::get_time_ns;
 
 use crate::caps;
 use crate::exec::ExecId;
@@ -139,8 +141,8 @@ pub struct DmaTransfer {
     pub direction: DmaDirection,
     pub sg: DmaSgList,
     pub state: DmaTransferState,
-    pub submitted_at: Instant,
-    pub completed_at: Option<Instant>,
+    pub submitted_at: u64,
+    pub completed_at: Option<u64>,
     pub bytes_transferred: u64,
     pub error: Option<String>,
     /// 完成回调（传输完成后调用）。
@@ -243,9 +245,9 @@ impl DmaEngine {
     }
 
     /// 全局 DMA 引擎单例（`drv://dma` 通道后端）。
-    pub fn engine() -> &'static Mutex<DmaEngine> {
-        static ENGINE: OnceLock<Mutex<DmaEngine>> = OnceLock::new();
-        ENGINE.get_or_init(|| Mutex::new(Self::new()))
+    pub fn engine() -> &'static SpinLock<DmaEngine> {
+        static ENGINE: OnceLock<SpinLock<DmaEngine>> = OnceLock::new();
+        ENGINE.get_or_init(|| SpinLock::new(Self::new()))
     }
 
     // ------ 通道管理 ------
@@ -294,7 +296,7 @@ impl DmaEngine {
         self.next_id = self.next_id.saturating_add(1);
         let transfer = DmaTransfer {
             id, channel, direction, sg: sg.clone(), state: DmaTransferState::Queued,
-            submitted_at: Instant::now(), completed_at: None, bytes_transferred: 0,
+            submitted_at: get_time_ns(), completed_at: None, bytes_transferred: 0,
             error: None, callback: None, completion_irq,
         };
         self.transfers.insert(id, transfer);
@@ -329,7 +331,7 @@ impl DmaEngine {
     /// 返回本轮完成的传输 ID 列表。
     pub fn dma_poll(&mut self) -> Vec<DmaTransferId> {
         let mut completed = Vec::new();
-        let now = Instant::now();
+        let now = get_time_ns();
         for (_ch_idx, ch) in self.channels.iter_mut() {
             if ch.state != DmaChannelState::Busy { continue; }
             let current_id = match ch.current { Some(id) => id, None => { ch.state = DmaChannelState::Idle; continue; } };
@@ -433,7 +435,7 @@ impl Default for DmaEngine {
 
 /// 查询 DMA 引擎状态快照（供 `sense drv://dma`）。
 pub fn dma_sense_snapshot() -> String {
-    let e = DmaEngine::engine().lock().unwrap();
+    let e = DmaEngine::engine().lock();
     e.status()
 }
 
@@ -444,12 +446,12 @@ pub fn dma_act_raw(payload: &str) -> Result<String, String> {
     match it.next() {
         Some("stats") => Ok(dma_sense_snapshot()),
         Some("list") => {
-            let e = DmaEngine::engine().lock().unwrap();
+            let e = DmaEngine::engine().lock();
             Ok(e.status())
         }
         Some("chan") => {
-            let idx: u8 = it.next().ok_or("用法: chan <index>")?.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
-            let e = DmaEngine::engine().lock().unwrap();
+            let idx: u8 = it.next().ok_or("用法: chan <index>")?.parse().map_err(|e| format!("{e}"))?;
+            let e = DmaEngine::engine().lock();
             match e.channels.get(&idx) {
                 Some(c) => Ok(format!("DMA 通道 {} state={} queued={} bytes={}", c.index, c.state.name(), c.queue.len(), c.bytes_transferred)),
                 None => Err(format!("DMA 通道 {} 不存在", idx)),
@@ -457,10 +459,10 @@ pub fn dma_act_raw(payload: &str) -> Result<String, String> {
         }
         Some("submit") => {
             // 检查 CAP_SYS_RAWIO（提交 DMA 传输需该能力）。
-            if !caps::caps().lock().unwrap().has("CAP_SYS_RAWIO") {
+            if !caps::caps().lock().has("CAP_SYS_RAWIO") {
                 return Err("dma submit 需要 CAP_SYS_RAWIO 能力".to_string());
             }
-            let channel: u8 = it.next().ok_or("用法: submit <channel> <dir> <addr:len[,...]> [irq]")?.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
+            let channel: u8 = it.next().ok_or("用法: submit <channel> <dir> <addr:len[,...]> [irq]")?.parse().map_err(|e| format!("{e}"))?;
             let dir_s = it.next().ok_or("缺少方向 (dev2mem|mem2dev)")?;
             let direction = match dir_s {
                 "dev2mem" => DmaDirection::DevToMem,
@@ -478,22 +480,22 @@ pub fn dma_act_raw(payload: &str) -> Result<String, String> {
             }
             let irq_s = it.next();
             let completion_irq = irq_s.and_then(|s| s.parse::<u32>().ok());
-            let mut e = DmaEngine::engine().lock().unwrap();
+            let mut e = DmaEngine::engine().lock();
             let id = e.dma_submit(1, channel, direction, sg, completion_irq)?;
             Ok(format!("DMA 传输已提交 {:?} ch={} dir={:?}", id, channel, direction))
         }
         Some("pause") => {
-            let ch: u8 = it.next().ok_or("用法: pause <channel>")?.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
-            let mut e = DmaEngine::engine().lock().unwrap();
+            let ch: u8 = it.next().ok_or("用法: pause <channel>")?.parse().map_err(|e| format!("{e}"))?;
+            let mut e = DmaEngine::engine().lock();
             e.dma_pause_channel(ch).map(|()| format!("DMA 通道 {} 已暂停", ch))
         }
         Some("resume") => {
-            let ch: u8 = it.next().ok_or("用法: resume <channel>")?.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
-            let mut e = DmaEngine::engine().lock().unwrap();
+            let ch: u8 = it.next().ok_or("用法: resume <channel>")?.parse().map_err(|e| format!("{e}"))?;
+            let mut e = DmaEngine::engine().lock();
             e.dma_resume_channel(ch).map(|()| format!("DMA 通道 {} 已恢复", ch))
         }
         Some("poll") => {
-            let mut e = DmaEngine::engine().lock().unwrap();
+            let mut e = DmaEngine::engine().lock();
             let completed = e.dma_poll();
             Ok(format!("DMA poll 完成 {} 个传输: {:?}", completed.len(), completed))
         }

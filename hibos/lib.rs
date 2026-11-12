@@ -6,6 +6,10 @@
 //!
 //! 为了让 `kernel` 模块内部的 `crate::fs` / `crate::net` 等绝对路径在库
 //! crate 中同样成立，根模块把 `kernel::*`（含全部子模块名）再导出一次。
+//!
+//! `alloc` crate 供内核 no_std 风格子模块（fs, net, caps 等）使用。
+
+extern crate alloc;
 
 pub mod kernel;
 

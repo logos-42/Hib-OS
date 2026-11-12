@@ -1,7 +1,6 @@
 //! inode 节点 —— P0-3 子模块（no_std 内核版本）。
 
 use alloc::collections::BTreeMap;
-use alloc::string::String;
 use alloc::vec::Vec;
 
 use crate::ksync::{SpinLock, OnceLock};

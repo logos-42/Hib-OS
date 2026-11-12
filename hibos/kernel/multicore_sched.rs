@@ -19,6 +19,7 @@
 //! * `load_balance()` —— 跨核负载均衡，迁移任务。
 
 use alloc::collections::{BTreeMap, HashMap};
+use alloc::string::ToString;
 use crate::ksync::{SpinLock, OnceLock};
 
 // =====================================================================================
@@ -29,17 +30,17 @@ use crate::ksync::{SpinLock, OnceLock};
 pub struct TaskId(pub u64);
 impl TaskId {
     pub fn new() -> Self {
-        Self(std::sync::atomic::AtomicU64::new(0).load(std::sync::atomic::Ordering::Relaxed) + 1)
+        Self(core::sync::atomic::AtomicU64::new(0).load(core::sync::atomic::Ordering::Relaxed) + 1)
     }
     /// 生成下一个全局唯一 ID（简化：由调用方保证单线程或使用全局计数器）。
     pub fn next() -> Self {
-        static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-        let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        static COUNTER: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
+        let n = COUNTER.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
         Self(n + 1)
     }
 }
-impl std::fmt::Display for TaskId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Display for TaskId {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(f, "task#{}", self.0)
     }
 }

@@ -5,7 +5,6 @@
 use alloc::collections::BTreeSet;
 use alloc::string::String;
 use alloc::string::ToString;
-use alloc::vec::Vec;
 
 use crate::ksync::{SpinLock, OnceLock};
 

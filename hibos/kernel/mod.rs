@@ -8,6 +8,9 @@
 //! 5. Unified Perception —— 上下文/行动/文件/智能体/桌面/路径/IO/网关/接口/硬件/文本/轨迹
 //!    都是同构的感知通道，统一走 sense/act 抽象
 
+// 在宿主 std 环境下编译，子模块用 `alloc::` 需要先导入 alloc crate。
+extern crate alloc;
+
 pub mod agent;
 pub mod ai_os;
 pub mod ai_token;
@@ -54,6 +57,7 @@ pub mod scheduler;
 pub mod scheduler_domains;
 pub mod security;
 pub mod fiber;
+pub mod ksync;
 pub mod sense;
 pub mod socket;
 pub mod sync;
@@ -95,6 +99,8 @@ pub mod simplefs;      // P0-4 简单文件系统
 // —— P1 路线图：重要组件 ——
 pub mod drivers;       // P1-2 设备驱动框架
 pub mod smp;           // P1-3 多核 SMP 支持
+pub mod graphics;      // P1-4 图形输出（GPU Primacy 基础）
+pub mod syscall_entry; // P1-5 系统调用入口（sense/act）
 
 use ai_token::{ActionProcess, AIConsciousness, ComputeGraph, GraphOpType, TokenCreateRequest};
 use scheduler::{CpuPriority, GpuScheduler};

@@ -9,6 +9,9 @@ name = "hibos_kernel"
 path = "kernel.rs"
 # 裸机内核入口，no_std，无 std 依赖
 
+[profile.dev]
+panic = "abort"
+
 [profile.release]
 opt-level = 2
 panic = "abort"
