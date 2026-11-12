@@ -2020,18 +2020,18 @@ impl Shell {
                         wt_root
                     );
                     // 多 provider 并行思考 → 逐个落地行动 → 呈现回复。
-                    let (mut total, mut mutating) =
+                    let (mut total, mut mutating, first_reply) =
                         self.run_cycle(&mut sessions, &perception, wt_root);
 
                     // react 续跑：本轮只有感知、没有落地行动时，基于感知结果自动再跑一轮，
                     // 避免 AI 只说"接下来要行动"却把行动停在承诺里。
                     // 上限与提示语均可通过环境变量覆盖：
-                    //   HIBOS_LLM_REACT_ROUNDS  —— 最多续跑轮数（默认 4，最小 1）
+                    //   HIBOS_LLM_REACT_ROUNDS  —— 最多续跑轮数（默认 200，最小 1）
                     //   HIBOS_LLM_REACT_PROMPT  —— 续跑时追加给 AI 的提示语
                     let max_react_rounds: usize = std::env::var("HIBOS_LLM_REACT_ROUNDS")
                         .ok()
                         .and_then(|v| v.trim().parse::<usize>().ok())
-                        .unwrap_or(4)
+                        .unwrap_or(200)
                         .max(1);
                     let react_prompt: String = std::env::var("HIBOS_LLM_REACT_PROMPT")
                         .ok()
@@ -2041,6 +2041,7 @@ impl Shell {
                         });
 
                     let mut round = 1usize;
+                    let mut prev_reply = first_reply;
                     while round < max_react_rounds && total > 0 && mutating == 0 {
                         round += 1;
                         tagged_out!(
@@ -2050,12 +2051,18 @@ impl Shell {
                             max_react_rounds
                         );
                         let cont_perception = format!("{}\n{}", perception, react_prompt);
-                        let (t, m) = self.run_cycle(&mut sessions, &cont_perception, wt_root);
+                        let (t, m, reply) = self.run_cycle(&mut sessions, &cont_perception, wt_root);
                         total += t;
                         mutating += m;
                         if t == 0 {
                             break;
                         }
+                        // 护栏：回复与上一轮完全相同 = 没有进展，停止续跑。
+                        if !reply.is_empty() && reply == prev_reply {
+                            tagged_out!("[llm]", "回复与上一轮一致（无进展），停止续跑");
+                            break;
+                        }
+                        prev_reply = reply;
                     }
                     if round > 1 {
                         tagged_out!(
@@ -2123,7 +2130,7 @@ impl Shell {
         sessions: &mut [(String, String, crate::llm::ThoughtLoop)],
         perception: &str,
         root: &str,
-    ) -> (usize, usize) {
+    ) -> (usize, usize, String) {
         // 并行思考：每个 provider 在自己的线程里调用模型，互不阻塞。
         let results: Vec<(String, Result<String, String>)> = std::thread::scope(|scope| {
             let mut handles = Vec::new();
@@ -2147,6 +2154,7 @@ impl Shell {
 
         let mut total = 0usize;
         let mut mutating = 0usize;
+        let mut replies = String::new();
         for (provider, res) in results {
             match res {
                 Ok(reply) => {
@@ -2169,6 +2177,8 @@ impl Shell {
                         .join("\n");
                     if !text.is_empty() {
                         tagged_out!(&format!("[llm:{}]", provider), "{}", text);
+                        replies.push_str(&text);
+                        replies.push('\n');
                     }
                 }
                 Err(e) => {
@@ -2180,7 +2190,7 @@ impl Shell {
                 }
             }
         }
-        (total, mutating)
+        (total, mutating, replies)
     }
 
     /// 从 AI 回复中解析并执行 ACTION 指令。
