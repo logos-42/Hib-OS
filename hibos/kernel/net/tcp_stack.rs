@@ -179,7 +179,7 @@ impl CongestionController {
                         self.cnt = self.cnt.saturating_add(acked_bytes);
                         if self.cnt >= self.cwnd {
                             self.cnt = self.cnt.saturating_sub(self.cwnd);
-                            let elapsed = self.cong_event_time.elapsed().as_millis() as f64;
+                            let elapsed = Instant::now().saturating_sub(self.cong_event_time).as_millis() as f64;
                             let k = self.cubic_k();
                             let t = elapsed / 1000.0; // 秒
                             let w_max = self.cwnd_before_cong.max(1);
@@ -556,7 +556,7 @@ impl TcpStack {
                     newly_acked_bytes = 1;
                     // 记录 RTT。
                     if let Some(start) = sock.rtt_start {
-                        sock.congest.record_rtt(start.elapsed().as_micros() as u32);
+                        sock.congest.record_rtt(Instant::now().saturating_sub(start).as_micros() as u32);
                         sock.rtt_seq = None;
                         sock.rtt_start = None;
                     }

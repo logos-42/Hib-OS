@@ -389,7 +389,7 @@ pub struct IcmpStats {
                 self.stats.echo_replies_received += 1;
                 let key = (pkt.identifier(), pkt.sequence());
                 let pending = self.pending.remove(&key);
-                let rtt_us = pending.map(|p| p.sent_at.elapsed().as_micros()).unwrap_or(0);
+                let rtt_us = pending.map(|p| Instant::now().saturating_sub(p.sent_at).as_micros()).unwrap_or(0);
                 IcmpEvent::EchoReply { src_ip, id: pkt.identifier(), seq: pkt.sequence(),
                                        payload: pkt.payload, rtt_us }
             }
@@ -422,7 +422,7 @@ pub struct IcmpStats {
     /// 清理过期的未解决查询（超过超时时间）。
     pub fn expire_pending(&mut self, timeout: Duration) {
         let now = Instant::now();
-        self.pending.retain(|_, p| now.duration_since(p.sent_at) <= timeout);
+        self.pending.retain(|_, p| now.saturating_sub(p.sent_at) <= timeout);
     }
     /// 未解决查询数量。
     pub fn pending_count(&self) -> usize { self.pending.len() }
@@ -488,7 +488,7 @@ pub fn icmp_act_raw(payload: &str) -> Result<String, String> {
                 let mut out = format!("未解决 Echo 查询 {} 条:\n", st.pending.len());
                 for ((id, seq), p) in &st.pending {
                     out.push_str(&format!("  id={} seq={} dst={} sent={}ms ago payload={}B\n",
-                        id, seq, fmt_ip(p.dst_ip), p.sent_at.elapsed().as_millis(), p.payload.len()));
+                        id, seq, fmt_ip(p.dst_ip), Instant::now().saturating_sub(p.sent_at).as_millis(), p.payload.len()));
                 }
                 Ok(out)
             }

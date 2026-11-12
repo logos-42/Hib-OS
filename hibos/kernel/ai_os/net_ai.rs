@@ -787,7 +787,7 @@ pub fn init() {
 // =====================================================================================
 
 pub fn status() -> String {
-    let eng = net_ai().lock().unwrap();
+    let eng = net_ai().lock();
     format!(
         "net_ai: packets={} bytes={} sockets={} routes={} topology_nodes={} topology_edges={} bandwidth_alloc={} utilization={:.2} avg_latency_ms={:.2} congestion={:?} firewall_accept={} firewall_drop={}",
         eng.packet_count(),
@@ -825,29 +825,29 @@ pub fn net_ai_act(payload: &str) -> Result<String, String> {
             if data.is_empty() {
                 return Err("缺少数据".into());
             }
-            let mut eng = net_ai().lock().unwrap();
+            let mut eng = net_ai().lock();
             let id = eng.send_packet(src, dst, &data, tag);
             // 注入：激活 L1 TCP/IP 协议栈，使 `sense net://eth0` 可见。
-            let _ = net().lock().unwrap().poll();
+            let _ = net().lock().poll();
             Ok(format!("已发送数据包 id={} 源={} 大小={}B", id, src, data.len()))
         }
         Some("socket") => {
             let agent = it.next().and_then(|s| s.parse::<u64>().ok()).ok_or("缺少代理")?;
             let port = it.next().and_then(|s| s.parse::<u16>().ok()).unwrap_or(8080);
-            let mut eng = net_ai().lock().unwrap();
+            let mut eng = net_ai().lock();
             let fd = eng.create_socket(agent, port);
             // 注入：激活 L1 网络统计，使 `sense net://eth0` 可见。
-            let _ = net().lock().unwrap().stats();
+            let _ = net().lock().stats();
             Ok(format!("已创建套接字 fd={} 代理={} 端口={}", fd, agent, port))
         }
         Some("connect") => {
             let fd = it.next().and_then(|s| s.parse::<u64>().ok()).ok_or("缺少 fd")?;
             let remote = it.next().and_then(|s| s.parse::<u64>().ok()).ok_or("缺少远程代理")?;
             let port = it.next().and_then(|s| s.parse::<u16>().ok()).unwrap_or(8080);
-            let mut eng = net_ai().lock().unwrap();
+            let mut eng = net_ai().lock();
             eng.connect_socket(fd, remote, port)?;
             // 注入：激活 L1 路由查询子系统，使 `sense net://eth0` 可见。
-            let _ = net().lock().unwrap().lookup_route(ETH_IP);
+            let _ = net().lock().lookup_route(ETH_IP);
             Ok(format!("套接字 {} 已连接到 {}:{}", fd, remote, port))
         }
         Some("sock-send") => {
@@ -856,17 +856,17 @@ pub fn net_ai_act(payload: &str) -> Result<String, String> {
             if data.is_empty() {
                 return Err("缺少数据".into());
             }
-            let mut eng = net_ai().lock().unwrap();
+            let mut eng = net_ai().lock();
             let n = eng.socket_send(fd, &data)?;
             // 注入：激活 L1 TCP/IP 协议栈，使 `sense net://eth0` 可见。
-            let _ = net().lock().unwrap().poll();
+            let _ = net().lock().poll();
             Ok(format!("套接字 {} 已发送 {} 字节", fd, n))
         }
         Some("sock-recv") => {
             let fd = it.next().and_then(|s| s.parse::<u64>().ok()).ok_or("缺少 fd")?;
-            let mut eng = net_ai().lock().unwrap();
+            let mut eng = net_ai().lock();
             // 注入：激活 L1 TCP/IP 协议栈，使 `sense net://eth0` 可见。
-            let _ = net().lock().unwrap().poll();
+            let _ = net().lock().poll();
             match eng.socket_recv(fd) {
                 Some(data) => Ok(format!("套接字 {} 已接收 {} 字节", fd, data.len())),
                 None => Ok("无数据".into()),
@@ -877,15 +877,15 @@ pub fn net_ai_act(payload: &str) -> Result<String, String> {
             let next_hop = it.next().and_then(|s| s.parse::<u64>().ok()).ok_or("缺少下一跳")?;
             let cost = it.next().and_then(|s| s.parse::<f32>().ok()).unwrap_or(1.0);
             let metric = it.next().unwrap_or("default");
-            let mut eng = net_ai().lock().unwrap();
+            let mut eng = net_ai().lock();
             eng.add_route(dst, next_hop, cost, metric);
             // 注入：激活 L1 路由查询子系统，使 `sense net://eth0` 可见。
-            let _ = net().lock().unwrap().lookup_route(ETH_IP);
+            let _ = net().lock().lookup_route(ETH_IP);
             Ok(format!("已添加路由 {} -> {} 代价={}", dst, next_hop, cost))
         }
         Some("route-intent") => {
             let intent = it.next().ok_or("缺少意图")?;
-            let eng = net_ai().lock().unwrap();
+            let eng = net_ai().lock();
             match eng.router.route_by_intent(intent) {
                 Some(dst) => Ok(format!("意图 {} 路由到代理 {}", intent, dst)),
                 None => Err(format!("意图 {} 无路由", intent)),
@@ -903,14 +903,14 @@ pub fn net_ai_act(payload: &str) -> Result<String, String> {
             };
             let bw = it.next().and_then(|s| s.parse::<f64>().ok()).unwrap_or(100.0);
             let lat = it.next().and_then(|s| s.parse::<f64>().ok()).unwrap_or(10.0);
-            let mut eng = net_ai().lock().unwrap();
+            let mut eng = net_ai().lock();
             eng.add_topology_edge(from, to, state, bw, lat);
             Ok(format!("已添加拓扑边 {} -> {} 带宽={}Mbps 延迟={}ms", from, to, bw, lat))
         }
         Some("bandwidth") => {
             let agent = it.next().and_then(|s| s.parse::<u64>().ok()).ok_or("缺少代理")?;
             let mbps = it.next().and_then(|s| s.parse::<f64>().ok()).unwrap_or(10.0);
-            let mut eng = net_ai().lock().unwrap();
+            let mut eng = net_ai().lock();
             if eng.allocate_bandwidth(agent, mbps) {
                 Ok(format!("已为代理 {} 分配带宽 {}Mbps", agent, mbps))
             } else {
@@ -921,7 +921,7 @@ pub fn net_ai_act(payload: &str) -> Result<String, String> {
             let src = it.next().and_then(|s| s.parse::<u64>().ok()).ok_or("缺少源")?;
             let dst = it.next().and_then(|s| s.parse::<u64>().ok()).ok_or("缺少目标")?;
             let ms = it.next().and_then(|s| s.parse::<f64>().ok()).unwrap_or(0.0);
-            let mut eng = net_ai().lock().unwrap();
+            let mut eng = net_ai().lock();
             eng.record_latency(src, dst, ms);
             Ok(format!("已记录延迟 {} -> {} {}ms", src, dst, ms))
         }
@@ -936,7 +936,7 @@ pub fn net_ai_act(payload: &str) -> Result<String, String> {
                 "reject" => FirewallAction::Reject,
                 _ => FirewallAction::Accept,
             };
-            let mut eng = net_ai().lock().unwrap();
+            let mut eng = net_ai().lock();
             let id = eng.firewall.add_rule(src, dst, tag.map(|s| s.to_string()), action);
             Ok(format!("已添加防火墙规则 id={}", id))
         }
@@ -2373,13 +2373,13 @@ pub fn net_service_act(payload: &str) -> Result<String, String> {
             let path = it.next().ok_or("缺少路径")?;
             let body: Vec<u8> = it.collect::<Vec<&str>>().join(" ").into_bytes();
             let client_ip = 1;
-            let mut eng = network_service_engine().lock().unwrap();
+            let mut eng = network_service_engine().lock();
             let id = eng.http_request(method, path, body, client_ip);
             Ok(format!("已发出 HTTP 请求 id={} 方法={:?} 路径={}", id, method, path))
         }
         Some("handle-http") => {
             let request_id = it.next().and_then(|s| s.parse::<u64>().ok()).ok_or("缺少请求id")?;
-            let mut eng = network_service_engine().lock().unwrap();
+            let mut eng = network_service_engine().lock();
             match eng.handle_http_request(request_id) {
                 Some(resp_id) => Ok(format!("已处理 HTTP 请求 响应id={}", resp_id)),
                 None => Err("请求不存在或无路由".into()),
@@ -2388,7 +2388,7 @@ pub fn net_service_act(payload: &str) -> Result<String, String> {
         Some("proxy") => {
             let client_ip = it.next().and_then(|s| s.parse::<u64>().ok()).unwrap_or(1);
             let size = it.next().and_then(|s| s.parse::<u64>().ok()).unwrap_or(1024);
-            let mut eng = network_service_engine().lock().unwrap();
+            let mut eng = network_service_engine().lock();
             match eng.proxy_request(client_ip, size) {
                 Some(backend) => Ok(format!("代理请求到 {}", backend)),
                 None => Err("无可用后端".into()),
@@ -2400,7 +2400,7 @@ pub fn net_service_act(payload: &str) -> Result<String, String> {
             if content.is_empty() {
                 return Err("缺少内容".into());
             }
-            let mut eng = network_service_engine().lock().unwrap();
+            let mut eng = network_service_engine().lock();
             let len = content.len();
             if eng.cdn_cache(key, content) {
                 Ok(format!("已缓存内容 键={} 大小={}B", key, len))
@@ -2410,7 +2410,7 @@ pub fn net_service_act(payload: &str) -> Result<String, String> {
         }
         Some("cdn-get") => {
             let key = it.next().ok_or("缺少键")?;
-            let mut eng = network_service_engine().lock().unwrap();
+            let mut eng = network_service_engine().lock();
             match eng.cdn_get(key) {
                 Some(content) => Ok(format!("CDN 命中 键={} 大小={}B", key, content.len())),
                 None => Ok("CDN 未命中".into()),
@@ -2419,7 +2419,7 @@ pub fn net_service_act(payload: &str) -> Result<String, String> {
         Some("ws-create") => {
             let client_id = it.next().and_then(|s| s.parse::<u64>().ok()).unwrap_or(1);
             let url = it.next().unwrap_or("ws://localhost");
-            let mut eng = network_service_engine().lock().unwrap();
+            let mut eng = network_service_engine().lock();
             let id = eng.create_websocket(client_id, url);
             Ok(format!("已创建 WebSocket 连接 id={} 客户端={} URL={}", id, client_id, url))
         }
@@ -2428,7 +2428,7 @@ pub fn net_service_act(payload: &str) -> Result<String, String> {
             if payload.is_empty() {
                 return Err("缺少载荷".into());
             }
-            let mut eng = network_service_engine().lock().unwrap();
+            let mut eng = network_service_engine().lock();
             let len = payload.len();
             let id = eng.ws_send(payload, WSFrameType::Text);
             Ok(format!("WebSocket 已发送 帧id={} 大小={}B", id, len))
@@ -2438,7 +2438,7 @@ pub fn net_service_act(payload: &str) -> Result<String, String> {
             if payload.is_empty() {
                 return Err("缺少载荷".into());
             }
-            let mut eng = network_service_engine().lock().unwrap();
+            let mut eng = network_service_engine().lock();
             let len = payload.len();
             let id = eng.ws_receive(payload, WSFrameType::Text);
             Ok(format!("WebSocket 已接收 帧id={} 大小={}B", id, len))
@@ -2447,12 +2447,12 @@ pub fn net_service_act(payload: &str) -> Result<String, String> {
             let name = it.next().ok_or("缺少名称")?;
             let endpoint = it.next().ok_or("缺少端点")?;
             let weight = it.next().and_then(|s| s.parse::<u32>().ok()).unwrap_or(1);
-            let mut eng = network_service_engine().lock().unwrap();
+            let mut eng = network_service_engine().lock();
             let id = eng.add_lb_backend(name, endpoint, weight);
             Ok(format!("已添加 LB 后端 id={} 名称={} 端点={}", id, name, endpoint))
         }
         Some("lb-select") => {
-            let mut eng = network_service_engine().lock().unwrap();
+            let mut eng = network_service_engine().lock();
             match eng.select_lb_backend() {
                 Some(id) => Ok(format!("已选择 LB 后端 id={}", id)),
                 None => Err("无可用后端".into()),
@@ -2460,12 +2460,12 @@ pub fn net_service_act(payload: &str) -> Result<String, String> {
         }
         Some("health-check") => {
             let now = it.next().and_then(|s| s.parse::<u128>().ok()).unwrap_or(0);
-            let mut eng = network_service_engine().lock().unwrap();
+            let mut eng = network_service_engine().lock();
             eng.health_check(now);
             Ok(format!("已执行健康检查 now={}", now))
         }
         Some("tick") => {
-            let mut eng = network_service_engine().lock().unwrap();
+            let mut eng = network_service_engine().lock();
             eng.tick();
             Ok("网络服务引擎已推进".into())
         }

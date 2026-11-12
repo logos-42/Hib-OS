@@ -10,7 +10,7 @@
 //!   若已设置则主动切换回调度器（准抢占式，Windows Fiber 无法从外部
 //!   线程强制切换，这是用户态纤程的最高可达抢占级别）。
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::ffi::c_void;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};

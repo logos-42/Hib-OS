@@ -14,9 +14,9 @@
 //!
 //! 接口：`irq_handler_register(irq, handler)` / `irq_dispatch(irq)` / `idt_set_gate(...)` / `idt_load()`。
 
-use std::collections::HashMap;
-use std::sync::Arc;
-use std::string::{String, ToString};
+use alloc::collections::BTreeMap;
+use alloc::sync::Arc;
+use alloc::string::{String, ToString};
 use crate::ksync::{SpinLock, OnceLock};
 use crate::time::get_time_ns;
 
@@ -254,9 +254,9 @@ impl IrqController {
     }
 
     /// 全局中断控制器单例（`drv://irq_ctrl` 通道后端）。
-    pub fn instance() -> &'static Mutex<IrqController> {
-        static INST: OnceLock<Mutex<IrqController>> = OnceLock::new();
-        INST.get_or_init(|| Mutex::new(Self::new()))
+    pub fn instance() -> &'static SpinLock<IrqController> {
+        static INST: OnceLock<SpinLock<IrqController>> = OnceLock::new();
+        INST.get_or_init(|| SpinLock::new(Self::new()))
     }
 
     // ------ IDT 操作 ------
@@ -330,7 +330,7 @@ impl IrqController {
         &mut self, owner: ExecId, irq: IrqLine, handler: IrqHandler, priority: i32,
     ) -> Result<(), String> {
         // 能力检查入口：注册底层中断处理器需 CAP_SYS_RAWIO。
-        if !caps::caps().lock().unwrap().has("CAP_SYS_RAWIO") {
+        if !caps::caps().lock().has("CAP_SYS_RAWIO") {
             return Err("irq_handler_register 需要 CAP_SYS_RAWIO 能力".to_string());
         }
         let entry = IrqHandlerEntry {
@@ -448,7 +448,7 @@ impl Default for IrqController {
 
 /// 查询中断控制器状态快照（供 `sense drv://irq_ctrl`）。
 pub fn irq_ctrl_sense_snapshot() -> String {
-    let c = IrqController::instance().lock().unwrap();
+    let c = IrqController::instance().lock();
     c.status()
 }
 
@@ -459,34 +459,34 @@ pub fn irq_ctrl_act_raw(payload: &str) -> Result<String, String> {
     match it.next() {
         Some("stats") => Ok(irq_ctrl_sense_snapshot()),
         Some("list") => {
-            let c = IrqController::instance().lock().unwrap();
+            let c = IrqController::instance().lock();
             Ok(c.status())
         }
         Some("mask") => {
             let irq: u32 = it.next().ok_or("用法: mask <irq>")?.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
-            let mut c = IrqController::instance().lock().unwrap();
+            let mut c = IrqController::instance().lock();
             c.mask_irq(IrqLine(irq));
             Ok(format!("中断 {} 已屏蔽", irq))
         }
         Some("unmask") => {
             let irq: u32 = it.next().ok_or("用法: unmask <irq>")?.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
-            let mut c = IrqController::instance().lock().unwrap();
+            let mut c = IrqController::instance().lock();
             c.unmask_irq(IrqLine(irq));
             Ok(format!("中断 {} 已取消屏蔽", irq))
         }
         Some("cli") => {
-            let mut c = IrqController::instance().lock().unwrap();
+            let mut c = IrqController::instance().lock();
             c.cli();
             Ok("中断已关闭 (CLI)".to_string())
         }
         Some("sti") => {
-            let mut c = IrqController::instance().lock().unwrap();
+            let mut c = IrqController::instance().lock();
             c.sti();
             Ok("中断已开启 (STI)".to_string())
         }
         Some("raise") => {
             let irq: u32 = it.next().ok_or("用法: raise <irq>")?.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
-            let mut c = IrqController::instance().lock().unwrap();
+            let mut c = IrqController::instance().lock();
             let n = c.irq_dispatch(IrqLine(irq));
             Ok(format!("已触发中断 {}，调用处理器 {} 次", irq, n))
         }

@@ -18,6 +18,7 @@
 
 use alloc::collections::{BTreeMap, BTreeSet, VecDeque};
 use crate::ksync::{SpinLock, OnceLock};
+use std::sync::Mutex;
 
 use crate::drivers::dma::DmaEngine;
 use crate::drivers::devtree::devtree_insert;

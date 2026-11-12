@@ -58,7 +58,7 @@ impl TcpState {
 }
 
 /// TCP 四元组键（本端端口 + 对端地址）。监听 socket 的对端为 0.0.0.0:0。
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Ord)]
 pub struct TcpConnKey {
     pub local_port: u16,
     pub remote_ip: [u8; 4],

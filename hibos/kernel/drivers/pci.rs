@@ -3,8 +3,8 @@
 //! 建模为 `dev://pci/<bus>:<device>.<function>` 通道，
 //! 每个 PCI 设备一个通道，`sense` 可读取其配置空间快照。
 
-use std::collections::BTreeMap;
-use std::sync::{Mutex, OnceLock};
+use alloc::collections::BTreeMap;
+use crate::ksync::{SpinLock, OnceLock};
 
 /// PCI 类代码（基类）。
 pub const CLASS_STORAGE: u8 = 0x01;
@@ -23,6 +23,7 @@ pub struct PciDevice {
     pub class_code: u8,
     pub subclass: u8,
     pub irq_line: u8,
+    pub bar0: u64,
 }
 
 impl PciDevice {
@@ -65,15 +66,15 @@ impl PciBus {
     }
 }
 
-static PCI_BUS: OnceLock<Mutex<PciBus>> = OnceLock::new();
+static PCI_BUS: OnceLock<SpinLock<PciBus>> = OnceLock::new();
 
-fn pci_bus() -> &'static Mutex<PciBus> {
-    PCI_BUS.get_or_init(|| Mutex::new(PciBus::new()))
+fn pci_bus() -> &'static SpinLock<PciBus> {
+    PCI_BUS.get_or_init(|| SpinLock::new(PciBus::new()))
 }
 
 /// 枚举 PCI 总线：扫描所有 bus/device/function，读取配置空间。
 pub fn enumerate_pci() -> Vec<PciDevice> {
-    let mut bus = pci_bus().lock().unwrap();
+    let mut bus = pci_bus().lock();
     // 原型阶段：注册若干代表性设备，供 sense/act 通道建模与测试使用。
     let samples = vec![
         PciDevice { bus: 0, device: 2, function: 0, vendor_id: 0x8086, device_id: 0x5916, class_code: CLASS_DISPLAY, subclass: 0x00, irq_line: 16 },
@@ -90,7 +91,7 @@ pub fn enumerate_pci() -> Vec<PciDevice> {
 
 /// 返回指定通道的 PCI 设备快照字符串（供 `sense dev://pci/...` 使用）。
 pub fn pci_channel(channel: &str) -> Option<String> {
-    let bus = pci_bus().lock().unwrap();
+    let bus = pci_bus().lock();
     bus.find(channel).map(|d| {
         format!(
             "bus={} dev={} func={} vendor={:04x} device={:04x} class={:02x} subclass={:02x} irq={}",
