@@ -7,6 +7,7 @@ use alloc::collections::BTreeSet;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use core::time::Duration;
+use std::io::IsTerminal;
 
 use crate::desktop;
 use crate::gpu::capabilities::{GpuCapability, GpuCapabilities};
@@ -75,7 +76,7 @@ use crate::ksync::{SpinLock, OnceLock};
 pub fn probe(name: &str) -> Option<String> {
     match name {
         "gpu://vram" => {
-            let v = vram().lock();
+            let v = vram().lock().unwrap();
             let total = v.total_vram();
             let free = v.available();
             Some(format!(
@@ -111,7 +112,7 @@ pub fn probe(name: &str) -> Option<String> {
             ))
         }
         "dev://iommu0" => {
-            let io = iommu().lock();
+            let io = iommu().lock().unwrap();
             Some(format!(
                 "domains={} mappings={}",
                 io.domain_count(),
@@ -135,7 +136,7 @@ pub fn probe(name: &str) -> Option<String> {
         }
         "dev://null" => Some("discard (写入即丢弃)".to_string()),
         "dev://gpu0" => {
-            let v = vram().lock();
+            let v = vram().lock().unwrap();
             Some(format!(
                 "gpu0 total={}GiB caps={} dev-id=0",
                 v.total_vram() / (1024 * 1024 * 1024),
@@ -147,10 +148,10 @@ pub fn probe(name: &str) -> Option<String> {
             Some(format!("uptime={}ns tasks={}", s.system_uptime_ns, s.total_tasks_completed))
         }
         "interface://abi" => Some("AiSystemCall 10 变体 / AiSystemCallResult".to_string()),
-        "gateway://net" => Some(gateway().lock().status()),
-        "browser://gateway" => Some(browser().lock().status()),
+        "gateway://net" => Some(gateway().lock().unwrap().status()),
+        "browser://gateway" => Some(browser().lock().unwrap().status()),
         "driver://gpu" => {
-            let v = vram().lock();
+            let v = vram().lock().unwrap();
             Some(format!(
                 "gpu-driver total={}GiB caps={} state=loaded",
                 v.total_vram() / (1024 * 1024 * 1024),
@@ -158,7 +159,7 @@ pub fn probe(name: &str) -> Option<String> {
             ))
         }
         "driver://iommu" => {
-            let io = iommu().lock();
+            let io = iommu().lock().unwrap();
             Some(format!(
                 "iommu-driver domains={} mappings={} state=loaded",
                 io.domain_count(),
@@ -218,48 +219,48 @@ pub fn probe(name: &str) -> Option<String> {
         }
         // —— AI 原生扩展通道：进程 / 内存 / 权限 / 身份 / 真实网络 ——
         "proc://manager" => {
-            let mut t = proctable().lock();
+            let mut t = proctable().lock().unwrap();
             Some(t.tree())
         }
-        "mem://ram" => Some(mem().lock().stats()),
-        "mem://mmap" => Some(mem().lock().regions()),
-        "fs://meta" => Some(fsmeta().lock().list()),
+        "mem://ram" => Some(mem().lock().unwrap().stats()),
+        "mem://mmap" => Some(mem().lock().unwrap().regions()),
+        "fs://meta" => Some(fsmeta().lock().unwrap().list()),
         "fs://vfs" => Some(fs_sense_snapshot()),
-        "user://db" => Some(userdb().lock().list()),
-        "socket://tcp" => Some(netio().lock().last.clone()),
-        "net://dns" => Some(netio().lock().last.clone()),
+        "user://db" => Some(userdb().lock().unwrap().list()),
+        "socket://tcp" => Some(netio().lock().unwrap().last.clone()),
+        "net://dns" => Some(netio().lock().unwrap().last.clone()),
         // —— IPC / 安全 / 设备 / init / 时间 / 包管理 / 作业控制 ——
-        "ipc://pipe" => Some(ipc().lock().pipes()),
-        "ipc://shm" => Some(ipc().lock().shm_list()),
-        "ipc://msgq" => Some(ipc().lock().msgq_list()),
-        "ipc://sem" => Some(ipc().lock().sem_list()),
+        "ipc://pipe" => Some(ipc().lock().unwrap().pipes()),
+        "ipc://shm" => Some(ipc().lock().unwrap().shm_list()),
+        "ipc://msgq" => Some(ipc().lock().unwrap().msgq_list()),
+        "ipc://sem" => Some(ipc().lock().unwrap().sem_list()),
         "sec://caps" => Some(caps().lock().list()),
-        "dev://tree" => Some(devtree().lock().list()),
-        "init://services" => Some(init_mgr().lock().list()),
+        "dev://tree" => Some(devtree().lock().unwrap().list()),
+        "init://services" => Some(init_mgr().lock().unwrap().list()),
         "time://clock" => Some(format!("{}ns", get_time_ns())),
         "time://cron" => Some("cron: 功能不可用".to_string()),
         "pkg://store" => Some(pkgstore().lock().list()),
         "tty://jobs" => {
-            let mut t = tty().lock();
+            let mut t = tty().lock().unwrap();
             Some(t.jobs())
         }
         // —— 系统设置类 ——
-        "sysctl://kernel" => Some(sysctl().lock().kernel_list()),
-        "config://system" => Some(sysctl().lock().identity_list()),
-        "env://process" => Some(envstore().lock().list()),
-        "limits://process" => Some(limits().lock().list()),
-        "fw://rules" => Some(firewall().lock().list()),
-        "cgroup://groups" => Some(cgroups().lock().list()),
-        "power://state" => Some(power().lock().status()),
+        "sysctl://kernel" => Some(sysctl().lock().unwrap().kernel_list()),
+        "config://system" => Some(sysctl().lock().unwrap().identity_list()),
+        "env://process" => Some(envstore().lock().unwrap().list()),
+        "limits://process" => Some(limits().lock().unwrap().list()),
+        "fw://rules" => Some(firewall().lock().unwrap().list()),
+        "cgroup://groups" => Some(cgroups().lock().unwrap().list()),
+        "power://state" => Some(power().lock().unwrap().status()),
         // —— 第二批系统模块 ——
-        "mount://table" => Some(mounts().lock().list()),
-        "proc://sysinfo" => Some(procfs().lock().snapshot()),
+        "mount://table" => Some(mounts().lock().unwrap().list()),
+        "proc://sysinfo" => Some(procfs().lock().unwrap().snapshot()),
         "net://interfaces" => Some(ifaces().lock().list()),
-        "dev://bus" => Some(bus().lock().list()),
+        "dev://bus" => Some(bus().lock().unwrap().list()),
         // —— 意志层：动机 / 信念 / 判断力 ——
-        "motive://self" => Some(motives().lock().status()),
-        "belief://self" => Some(beliefs().lock().status()),
-        "judgment://self" => Some(judgment().lock().status()),
+        "motive://self" => Some(motives().lock().unwrap().status()),
+        "belief://self" => Some(beliefs().lock().unwrap().status()),
+        "judgment://self" => Some(judgment().lock().unwrap().status()),
         // —— 执行体 / 同步 / 租约 / 子智能体（真机制，不是记账）——
         "exec://threads" => Some(format!(
             "{}\n{}",
@@ -295,17 +296,17 @@ pub fn probe(name: &str) -> Option<String> {
         // —— 本轮补齐：子意识 / 休眠 / 多域 / GPU 保护 / 身份空间 / 桌面外壳 ——
         "cell://self" => Some(cell::status()),
         "power://hibernate" => Some(hibernate::status()),
-        "domain://table" => Some(domain::table().lock().status()),
-        "gpu://domains" => Some(protection::protection().lock().status()),
-        "gpu://faults" => Some(protection::protection().lock().faults()),
+        "domain://table" => Some(domain::table().lock().unwrap().status()),
+        "gpu://domains" => Some(protection::protection().lock().unwrap().status()),
+        "gpu://faults" => Some(protection::protection().lock().unwrap().faults()),
         "sec://acl" | "realm://current" => Some(realm::realm_status()),
-        "gui://shell" => Some(gui::shell::desktop_shell().lock().status()),
-        "gui://wallpaper" => Some(gui::wallpaper::bank().lock().status()),
+        "gui://shell" => Some(gui::shell::desktop_shell().lock().unwrap().status()),
+        "gui://wallpaper" => Some(gui::wallpaper::bank().lock().unwrap().status()),
         // —— 多调度域 ——
         "sched://reflex" | "sched://perception" | "sched://deliberation" | "sched://memory" | "sched://governance" | "sched://domains" => {
             Some(crate::scheduler_domains::status_line())
         }
-        "sched://inspiration" => Some(crate::inspiration::core().lock().status()),
+        "sched://inspiration" => Some(crate::inspiration::core().lock().unwrap().status()),
         // —— Subagent-A 新增：内存与页表相关通道 ——
         "swap://area" => Some(swap_summary().unwrap_or_else(|_| "swap 未初始化".to_string())),
         "pagetable://walk" => Some(pt_summary()),
@@ -314,7 +315,7 @@ pub fn probe(name: &str) -> Option<String> {
         // —— AI 原生 OS 通道：模型 / 上下文窗口 / 记忆 / 工具 / 安全 / 死锁 / 容器 / 总控 ——
         "model://loader" => Some(model_status()),
         "model://instances" => {
-            let r = crate::ai_os::model::model_registry().lock();
+            let r = crate::ai_os::model::model_registry().lock().unwrap();
             Some(format!("{} instances", r.instances().len()))
         }
         "model://spec" => Some(model_status()),
@@ -332,29 +333,29 @@ pub fn probe(name: &str) -> Option<String> {
         // —— AI 原生意识层通道：意识原子 / 心智 / 注意力 / 语义空间 / 工作记忆 ——
         "native://qualia" => Some(crate::ai_os::native::factory_status()),
         "native://stream" => {
-            let eng = crate::ai_os::native::consciousness_engine().lock();
+            let eng = crate::ai_os::native::consciousness_engine().lock().unwrap();
             Some(format!("意识流 状态数={} 总推入={}", eng.stream.state_count(), eng.stream.total_states))
         }
         "native://status" => Some(crate::ai_os::native::native_status()),
         "mind://state" => Some(crate::ai_os::mind::mind_status()),
         "mind://goal" => {
-            let eng = crate::ai_os::mind::mind_engine().lock();
+            let eng = crate::ai_os::mind::mind_engine().lock().unwrap();
             match eng.goal_stack.active_goal() {
                 Some(g) => Some(format!("活跃目标[id={}]: {} 进度={:.0}%", g.id, g.description, g.progress * 100.0)),
                 None => Some("无活跃目标".to_string()),
             }
         }
         "mind://wm" => {
-            let eng = crate::ai_os::mind::mind_engine().lock();
+            let eng = crate::ai_os::mind::mind_engine().lock().unwrap();
             Some(format!("工作记忆 条目={} 使用率={:.2}", eng.working_memory.len(), eng.working_memory.usage_ratio()))
         }
         "mind://decide" => Some("决策引擎就绪，使用 act mind://decide <选项...>".to_string()),
         "attention://lens" => {
-            let eng = crate::ai_os::attention::attention_engine().lock();
+            let eng = crate::ai_os::attention::attention_engine().lock().unwrap();
             Some(format!("透镜模式={:?} 阈值={:.2} 通过率={:.2}", eng.lens.mode, eng.lens.threshold, eng.lens.pass_rate()))
         }
         "attention://saliency" => {
-            let eng = crate::ai_os::attention::attention_engine().lock();
+            let eng = crate::ai_os::attention::attention_engine().lock().unwrap();
             let top = eng.saliency.top_k(5);
             let mut out = String::from("显著性图 Top5:\n");
             for (ch, s) in top {
@@ -363,14 +364,14 @@ pub fn probe(name: &str) -> Option<String> {
             Some(out)
         }
         "attention://focus" => {
-            let eng = crate::ai_os::attention::attention_engine().lock();
+            let eng = crate::ai_os::attention::attention_engine().lock().unwrap();
             match eng.focus.current_name() {
                 Some(n) => Some(format!("当前焦点: {}", n)),
                 None => Some("无当前焦点".to_string()),
             }
         }
         "attention://cycle" => {
-            let eng = crate::ai_os::attention::attention_engine().lock();
+            let eng = crate::ai_os::attention::attention_engine().lock().unwrap();
             Some(format!("注意力周期值: {:.3}", eng.cycle_value()))
         }
         "semantic://index" => Some("语义索引就绪，使用 act semantic://index <文本>".to_string()),
@@ -379,27 +380,27 @@ pub fn probe(name: &str) -> Option<String> {
         "semantic://namespace" => Some("语义命名空间就绪，使用 act semantic://bind <路径> <文本>".to_string()),
         "memory://sensory" => Some("感觉缓冲就绪，使用 act memory://sensory-write <模态> <数据>".to_string()),
         "memory://wm" => {
-            let eng = crate::ai_os::memory_ws::memory_engine().lock();
+            let eng = crate::ai_os::memory_ws::memory_engine().lock().unwrap();
             Some(format!("工作记忆 条目={} 利用率={:.2}", eng.working.len(), eng.working.utilization()))
         }
         "memory://stm" => {
-            let eng = crate::ai_os::memory_ws::memory_engine().lock();
+            let eng = crate::ai_os::memory_ws::memory_engine().lock().unwrap();
             Some(format!("短时记忆 条目={} 平均重要性={:.2}", eng.short_term.len(), eng.short_term.avg_importance()))
         }
         "memory://ltm" => {
-            let eng = crate::ai_os::memory_ws::memory_engine().lock();
+            let eng = crate::ai_os::memory_ws::memory_engine().lock().unwrap();
             Some(format!("长时记忆 条目={} 平均强度={:.2}", eng.long_term.len(), eng.long_term.avg_strength()))
         }
         "memory://episode" => {
-            let eng = crate::ai_os::memory_ws::memory_engine().lock();
+            let eng = crate::ai_os::memory_ws::memory_engine().lock().unwrap();
             Some(format!("情景记忆 条目={}", eng.episodic.len()))
         }
         "memory://semantic" => {
-            let eng = crate::ai_os::memory_ws::memory_engine().lock();
+            let eng = crate::ai_os::memory_ws::memory_engine().lock().unwrap();
             Some(format!("语义记忆 事实={}", eng.semantic.len()))
         }
         "memory://skill" => {
-            let eng = crate::ai_os::memory_ws::memory_engine().lock();
+            let eng = crate::ai_os::memory_ws::memory_engine().lock().unwrap();
             Some(format!("程序记忆 技能={} 平均熟练度={:.2}", eng.procedural.len(), eng.procedural.avg_proficiency()))
         }
         _ => None,
@@ -410,7 +411,7 @@ pub fn probe(name: &str) -> Option<String> {
 fn power_wake_source_status() -> String {
     static WAKE_SOURCE: OnceLock<SpinLock<Option<String>>> = OnceLock::new();
     let ws = WAKE_SOURCE.get_or_init(|| SpinLock::new(None));
-    match ws.lock().as_deref() {
+    match ws.lock().unwrap().as_deref() {
         Some(ch) => format!("wake-source={}", ch),
         None => "wake-source=(none)".to_string(),
     }
@@ -420,14 +421,14 @@ fn power_wake_source_status() -> String {
 pub fn set_wake_source(channel: &str) {
     static WAKE_SOURCE: OnceLock<SpinLock<Option<String>>> = OnceLock::new();
     let ws = WAKE_SOURCE.get_or_init(|| SpinLock::new(None));
-    *ws.lock() = Some(channel.to_string());
+    *ws.lock().unwrap() = Some(channel.to_string());
 }
 
 /// 读取当前唤醒源。
 pub fn wake_source() -> Option<String> {
     static WAKE_SOURCE: OnceLock<SpinLock<Option<String>>> = OnceLock::new();
     let ws = WAKE_SOURCE.get_or_init(|| SpinLock::new(None));
-    ws.lock().clone()
+    ws.lock().unwrap().clone()
 }
 
 /// 感知一个通道，同时返回它当前的世界版本 (epoch)。
@@ -491,7 +492,7 @@ fn parse_if_epoch(payload: &str) -> (String, Option<u64>) {
 fn act_raw(name: &str, payload: &str) -> Option<Result<String, String>> {
     match name {
         "gpu://framebuffer" | "desktop://framebuffer" => {
-            let mut fb = desktop::framebuffer().lock();
+            let mut fb = desktop::framebuffer().lock().unwrap();
             fb.clear();
             let end = fb.draw_text(2, 2, payload);
             Some(Ok(format!(
@@ -518,7 +519,7 @@ fn act_raw(name: &str, payload: &str) -> Option<Result<String, String>> {
                     let owner_opt = p.next().and_then(|s| s.parse::<u64>().ok());
                     match (pid_opt, owner_opt) {
                         (Some(pid), Some(owner)) => {
-                            let mut v = vram().lock();
+                            let mut v = vram().lock().unwrap();
                             match v.acquire_gpu_lease(pid, owner) {
                                 Ok(epoch) => Some(Ok(format!(
                                     "已获得 GPU 分区 {} 写租约 owner={} epoch={}",
@@ -541,7 +542,7 @@ fn act_raw(name: &str, payload: &str) -> Option<Result<String, String>> {
                     let owner_opt = p.next().and_then(|s| s.parse::<u64>().ok());
                     match (pid_opt, owner_opt) {
                         (Some(pid), Some(owner)) => {
-                            let mut v = vram().lock();
+                            let mut v = vram().lock().unwrap();
                             if v.release_gpu_lease(pid, owner) {
                                 Some(Ok(format!(
                                     "已释放 GPU 分区 {} 的写租约 owner={}",
@@ -567,7 +568,7 @@ fn act_raw(name: &str, payload: &str) -> Option<Result<String, String>> {
                         .map(VramPartitionId);
                     match pid_opt {
                         Some(pid) => {
-                            let v = vram().lock();
+                            let v = vram().lock().unwrap();
                             match v.query_gpu_lease(pid) {
                                 Some((holder, epoch)) => Some(Ok(format!(
                                     "GPU 分区 {} 写租约 holder={} epoch={}",
@@ -593,7 +594,7 @@ fn act_raw(name: &str, payload: &str) -> Option<Result<String, String>> {
                     let data = p.next().unwrap_or("").as_bytes();
                     match (pid_opt, owner_opt, epoch_opt) {
                         (Some(pid), Some(owner), Some(expected_epoch)) => {
-                            let mut v = vram().lock();
+                            let mut v = vram().lock().unwrap();
                             match v.commit_gpu(pid, owner, expected_epoch, data) {
                                 Ok(new_epoch) => Some(Ok(format!(
                                     "GPU 分区 {} 已提交 owner={} 新epoch={}",
@@ -609,7 +610,7 @@ fn act_raw(name: &str, payload: &str) -> Option<Result<String, String>> {
                     }
                 }
                 _ => {
-                    let v = vram().lock();
+                    let v = vram().lock().unwrap();
                     Some(Ok(format!(
                         "显存通道 总={}MiB 可用={}MiB 分区={} 操作: acquire|release|query|commit",
                         v.total_vram() / (1024 * 1024),
@@ -856,7 +857,7 @@ fn act_raw(name: &str, payload: &str) -> Option<Result<String, String>> {
         "power://hibernate" => Some(act_hibernate(payload)),
         "domain://table" => Some(act_domain(payload)),
         "gpu://domains" => Some(act_protection(payload)),
-        "gpu://faults" => Some(Ok(protection::protection().lock().faults())),
+        "gpu://faults" => Some(Ok(protection::protection().lock().unwrap().faults())),
         "sec://acl" => Some(act_realm(payload)),
         "realm://current" => Some(Ok(realm::realm_status())),
         "gui://shell" => Some(act_gui_shell(payload)),
@@ -1035,37 +1036,37 @@ fn act_domain(payload: &str) -> Result<String, String> {
     match it.next() {
         Some("create") => {
             let n = it.next().ok_or("用法: create <域名>")?;
-            domain::table().lock().create(n)
+            domain::table().lock().unwrap().create(n)
         }
         Some("assign") => {
             let c = it.next().ok_or("用法: assign <cell> <域>")?;
             let d = it.next().ok_or("用法: assign <cell> <域>")?;
-            domain::table().lock().assign(c, d)
+            domain::table().lock().unwrap().assign(c, d)
         }
         Some("move") => {
             let c = it.next().ok_or("用法: move <cell> <域>")?;
             let d = it.next().ok_or("用法: move <cell> <域>")?;
-            domain::table().lock().migrate(c, d)
+            domain::table().lock().unwrap().migrate(c, d)
         }
         Some("tick") => {
             let d = it.next().ok_or("用法: tick <域>")?;
-            domain::table().lock().tick(d)
+            domain::table().lock().unwrap().tick(d)
         }
-        Some("balance") => domain::table().lock().balance(),
+        Some("balance") => domain::table().lock().unwrap().balance(),
         Some("quota") => {
             let d = it.next().ok_or("用法: quota <域> <n>")?;
             let n: u32 = it
                 .next()
                 .and_then(|s| s.parse().ok())
                 .ok_or("用法: quota <域> <n>")?;
-            domain::table().lock().set_quota(d, n)
+            domain::table().lock().unwrap().set_quota(d, n)
         }
-        _ => Ok(domain::table().lock().status()),
+        _ => Ok(domain::table().lock().unwrap().status()),
     }
 }
 
 fn act_protection(payload: &str) -> Result<String, String> {
-    let mut p = protection::protection().lock();
+    let mut p = protection::protection().lock().unwrap();
     let mut it = payload.split_whitespace();
     match it.next() {
         Some("create") => {
@@ -1109,14 +1110,14 @@ fn act_realm(payload: &str) -> Result<String, String> {
             let pattern = it.next().ok_or("用法: allow|deny <通道前缀> [r|w]")?;
             let verb = it.next().unwrap_or("w");
             realm::acl()
-                .lock()
+                .lock().unwrap()
                 .unwrap()
                 .add_rule(pattern, verb, sub == "allow")
         }
         "check" => {
             let ch = it.next().ok_or("用法: check <通道> <r|w>")?;
             let verb = it.next().unwrap_or("w");
-            realm::acl().lock().check(ch, verb)
+            realm::acl().lock().unwrap().check(ch, verb)
         }
         _ => Ok(realm::realm_status()),
     }
@@ -1128,7 +1129,7 @@ fn act_gui_shell(payload: &str) -> Result<String, String> {
         Some((a, b)) => (a, b.trim()),
         None => (text, ""),
     };
-    let mut s = gui::shell::desktop_shell().lock();
+    let mut s = gui::shell::desktop_shell().lock().unwrap();
     match sub {
         "launch" => s.launch(rest),
         "clipboard" => {
@@ -1268,7 +1269,7 @@ fn act_proc(payload: &str) -> Result<String, String> {
     let sub = it.next().unwrap_or("");
     let rest = it.next().unwrap_or("").trim();
     match sub {
-        "spawn" => proctable().lock().spawn(rest),
+        "spawn" => proctable().lock().unwrap().spawn(rest),
         "signal" | "kill" => {
             let mut a = rest.split_whitespace();
             let pid = a
@@ -1276,10 +1277,10 @@ fn act_proc(payload: &str) -> Result<String, String> {
                 .and_then(|s| s.parse::<u32>().ok())
                 .ok_or("用法: signal <pid> <sig>")?;
             let sig = a.next().unwrap_or(if sub == "kill" { "KILL" } else { "TERM" });
-            proctable().lock().signal(pid, sig)
+            proctable().lock().unwrap().signal(pid, sig)
         }
-        "tree" => Ok(proctable().lock().tree()),
-        "list" | "" => Ok(proctable().lock().list()),
+        "tree" => Ok(proctable().lock().unwrap().tree()),
+        "list" | "" => Ok(proctable().lock().unwrap().list()),
         _ => Err(
             "用法: act proc://manager spawn <命令> | signal <pid> <sig> | kill <pid> | tree | list"
                 .to_string(),
@@ -1290,8 +1291,8 @@ fn act_proc(payload: &str) -> Result<String, String> {
 fn act_ram(payload: &str) -> Result<String, String> {
     let mut it = payload.split_whitespace();
     match it.next() {
-        Some("alloc") => mem().lock().alloc(parse_mib(it.next().unwrap_or("0"))?),
-        Some("free") => mem().lock().free(parse_mib(it.next().unwrap_or("0"))?),
+        Some("alloc") => mem().lock().unwrap().alloc(parse_mib(it.next().unwrap_or("0"))?),
+        Some("free") => mem().lock().unwrap().free(parse_mib(it.next().unwrap_or("0"))?),
         _ => Err("用法: act mem://ram alloc|free <MiB>".to_string()),
     }
 }
@@ -1302,14 +1303,14 @@ fn act_mmap(payload: &str) -> Result<String, String> {
         Some("mmap") => {
             let bytes = parse_mib(it.next().unwrap_or("0"))?;
             let perms = it.next().unwrap_or("rw");
-            let uid = userdb().lock().current_uid;
-            mem().lock().mmap(bytes, perms, uid)
+            let uid = userdb().lock().unwrap().current_uid;
+            mem().lock().unwrap().mmap(bytes, perms, uid)
         }
         Some("munmap") => {
             let a = it.next().unwrap_or("0");
             let addr = u64::from_str_radix(a.trim_start_matches("0x"), 16)
                 .map_err(|_| format!("无效地址: {}", a))?;
-            mem().lock().munmap(addr)
+            mem().lock().unwrap().munmap(addr)
         }
         _ => Err("用法: act mem://mmap mmap <MiB> [perms] | munmap <addr>".to_string()),
     }
@@ -1323,23 +1324,23 @@ fn act_fsmeta(payload: &str) -> Result<String, String> {
             let path = it.next().ok_or("用法: chmod <mode> <路径>")?;
             let mode =
                 u16::from_str_radix(mode_s, 8).map_err(|_| format!("无效 mode: {}", mode_s))?;
-            Ok(fsmeta().lock().chmod(mode, path))
+            Ok(fsmeta().lock().unwrap().chmod(mode, path))
         }
         Some("chown") => {
             let uid = it.next().and_then(|s| s.parse().ok()).ok_or("用法: chown <uid> <gid> <路径>")?;
             let gid = it.next().and_then(|s| s.parse().ok()).ok_or("用法: chown <uid> <gid> <路径>")?;
             let path = it.next().ok_or("用法: chown <uid> <gid> <路径>")?;
-            Ok(fsmeta().lock().chown(uid, gid, path))
+            Ok(fsmeta().lock().unwrap().chown(uid, gid, path))
         }
         Some("ln") => {
             let target = it.next().ok_or("用法: ln <目标> <链接>")?;
             let link = it.next().ok_or("用法: ln <目标> <链接>")?;
-            Ok(fsmeta().lock().ln(target, link))
+            Ok(fsmeta().lock().unwrap().ln(target, link))
         }
         Some("mount") => {
             let src = it.next().ok_or("用法: mount <源> <目标>")?;
             let dst = it.next().ok_or("用法: mount <源> <目标>")?;
-            Ok(fsmeta().lock().mount(src, dst))
+            Ok(fsmeta().lock().unwrap().mount(src, dst))
         }
         _ => Err("用法: act fs://meta chmod <mode> <路径> | chown <uid> <gid> <路径> | ln <目标> <链接> | mount <源> <目标>".to_string()),
     }
@@ -1350,15 +1351,15 @@ fn act_user(payload: &str) -> Result<String, String> {
     match it.next() {
         Some("adduser") | Some("useradd") => {
             let name = it.next().ok_or("用法: adduser <名称>")?;
-            let uid = userdb().lock().adduser(name)?;
+            let uid = userdb().lock().unwrap().adduser(name)?;
             Ok(format!("已创建用户 {} uid={}", name, uid))
         }
         Some("su") => {
             let who = it.next().ok_or("用法: su <名称|uid>")?;
-            userdb().lock().su(who)
+            userdb().lock().unwrap().su(who)
         }
-        Some("sudo") => Ok(userdb().lock().sudo()),
-        Some("whoami") | Some("") | None => Ok(userdb().lock().whoami()),
+        Some("sudo") => Ok(userdb().lock().unwrap().sudo()),
+        Some("whoami") | Some("") | None => Ok(userdb().lock().unwrap().whoami()),
         _ => Err("用法: act user://db adduser <名> | su <名|uid> | sudo | whoami".to_string()),
     }
 }
@@ -1369,7 +1370,7 @@ fn act_socket(payload: &str) -> Result<String, String> {
         Some("connect") => {
             let hostport = it.next().ok_or("用法: connect <host:port> [数据]")?;
             let data = it.next();
-            netio().lock().connect(hostport, data)
+            netio().lock().unwrap().connect(hostport, data)
         }
         _ => Err("用法: act socket://tcp connect <host:port> [数据]".to_string()),
     }
@@ -1380,7 +1381,7 @@ fn act_dns(payload: &str) -> Result<String, String> {
     match it.next() {
         Some("resolve") => {
             let host = it.next().ok_or("用法: resolve <域名>")?;
-            netio().lock().resolve(host)
+            netio().lock().unwrap().resolve(host)
         }
         _ => Err("用法: act net://dns resolve <域名>".to_string()),
     }
@@ -1389,15 +1390,15 @@ fn act_dns(payload: &str) -> Result<String, String> {
 fn act_ipc_pipe(payload: &str) -> Result<String, String> {
     let mut it = payload.splitn(3, ' ');
     match it.next() {
-        Some("create") | None | Some("") => Ok(ipc().lock().pipe_create()),
+        Some("create") | None | Some("") => Ok(ipc().lock().unwrap().pipe_create()),
         Some("write") => {
             let id = it.next().and_then(|s| s.parse().ok()).ok_or("用法: write <id> <data>")?;
             let data = it.next().unwrap_or("");
-            ipc().lock().pipe_write(id, data)
+            ipc().lock().unwrap().pipe_write(id, data)
         }
         Some("read") => {
             let id = it.next().and_then(|s| s.parse().ok()).ok_or("用法: read <id>")?;
-            ipc().lock().pipe_read(id)
+            ipc().lock().unwrap().pipe_read(id)
         }
         _ => Err("用法: act ipc://pipe create | write <id> <data> | read <id>".to_string()),
     }
@@ -1409,16 +1410,16 @@ fn act_ipc_shm(payload: &str) -> Result<String, String> {
         Some("create") => {
             let name = it.next().ok_or("用法: create <name> <size>")?;
             let size = it.next().and_then(|s| s.parse::<usize>().ok()).unwrap_or(4096);
-            Ok(ipc().lock().shm_create(name, size))
+            Ok(ipc().lock().unwrap().shm_create(name, size))
         }
         Some("write") => {
             let name = it.next().ok_or("用法: write <name> <data>")?;
             let data = it.next().unwrap_or("");
-            ipc().lock().shm_write(name, data)
+            ipc().lock().unwrap().shm_write(name, data)
         }
         Some("read") => {
             let name = it.next().ok_or("用法: read <name>")?;
-            ipc().lock().shm_read(name)
+            ipc().lock().unwrap().shm_read(name)
         }
         _ => Err("用法: act ipc://shm create <name> <size> | write <name> <data> | read <name>".to_string()),
     }
@@ -1430,11 +1431,11 @@ fn act_ipc_msgq(payload: &str) -> Result<String, String> {
         Some("send") => {
             let name = it.next().ok_or("用法: send <name> <msg>")?;
             let msg = it.next().unwrap_or("");
-            ipc().lock().msgq_send(name, msg)
+            ipc().lock().unwrap().msgq_send(name, msg)
         }
         Some("recv") => {
             let name = it.next().ok_or("用法: recv <name>")?;
-            ipc().lock().msgq_recv(name)
+            ipc().lock().unwrap().msgq_recv(name)
         }
         _ => Err("用法: act ipc://msgq send <name> <msg> | recv <name>".to_string()),
     }
@@ -1446,15 +1447,15 @@ fn act_ipc_sem(payload: &str) -> Result<String, String> {
         Some("init") => {
             let name = it.next().ok_or("用法: init <name> <n>")?;
             let n = it.next().and_then(|s| s.parse::<i64>().ok()).unwrap_or(1);
-            Ok(ipc().lock().sem_init(name, n))
+            Ok(ipc().lock().unwrap().sem_init(name, n))
         }
         Some("post") => {
             let name = it.next().ok_or("用法: post <name>")?;
-            ipc().lock().sem_post(name)
+            ipc().lock().unwrap().sem_post(name)
         }
         Some("wait") => {
             let name = it.next().ok_or("用法: wait <name>")?;
-            ipc().lock().sem_wait(name)
+            ipc().lock().unwrap().sem_wait(name)
         }
         _ => Err("用法: act ipc://sem init <name> <n> | post <name> | wait <name>".to_string()),
     }
@@ -1484,13 +1485,13 @@ fn act_dev(payload: &str) -> Result<String, String> {
     match it.next() {
         Some("attach") => {
             let name = it.next().ok_or("用法: attach <name>")?;
-            devtree().lock().attach(name)
+            devtree().lock().unwrap().attach(name)
         }
         Some("detach") => {
             let name = it.next().ok_or("用法: detach <name>")?;
-            devtree().lock().detach(name)
+            devtree().lock().unwrap().detach(name)
         }
-        _ => Ok(devtree().lock().list()),
+        _ => Ok(devtree().lock().unwrap().list()),
     }
 }
 
@@ -1499,21 +1500,21 @@ fn act_init(payload: &str) -> Result<String, String> {
     match it.next() {
         Some("start") => {
             let n = it.next().ok_or("用法: start <name>")?;
-            init_mgr().lock().start(n)
+            init_mgr().lock().unwrap().start(n)
         }
         Some("stop") => {
             let n = it.next().ok_or("用法: stop <name>")?;
-            init_mgr().lock().stop(n)
+            init_mgr().lock().unwrap().stop(n)
         }
         Some("enable") => {
             let n = it.next().ok_or("用法: enable <name>")?;
-            init_mgr().lock().enable(n)
+            init_mgr().lock().unwrap().enable(n)
         }
         Some("disable") => {
             let n = it.next().ok_or("用法: disable <name>")?;
-            init_mgr().lock().disable(n)
+            init_mgr().lock().unwrap().disable(n)
         }
-        _ => Ok(init_mgr().lock().list()),
+        _ => Ok(init_mgr().lock().unwrap().list()),
     }
 }
 
@@ -1561,18 +1562,18 @@ fn act_tty(payload: &str) -> Result<String, String> {
     match it.next() {
         Some("fg") => {
             let pid = it.next().and_then(|s| s.parse().ok()).ok_or("用法: fg <pid>")?;
-            Ok(tty().lock().fg(pid))
+            Ok(tty().lock().unwrap().fg(pid))
         }
         Some("bg") => {
             let pid = it.next().and_then(|s| s.parse().ok()).ok_or("用法: bg <pid>")?;
-            Ok(tty().lock().bg(pid))
+            Ok(tty().lock().unwrap().bg(pid))
         }
         Some("kill") => {
             let pid = it.next().and_then(|s| s.parse().ok()).ok_or("用法: kill <pid>")?;
-            tty().lock().kill(pid)
+            tty().lock().unwrap().kill(pid)
         }
         _ => {
-            let mut t = tty().lock();
+            let mut t = tty().lock().unwrap();
             Ok(t.jobs())
         }
     }
@@ -1585,16 +1586,16 @@ fn act_sysctl(payload: &str, kernel: bool) -> Result<String, String> {
             let k = it.next().ok_or("用法: set <key> <value>")?;
             let v = it.next().ok_or("用法: set <key> <value>")?;
             if kernel {
-                sysctl().lock().set_kernel(k, v)
+                sysctl().lock().unwrap().set_kernel(k, v)
             } else {
-                sysctl().lock().set_identity(k, v)
+                sysctl().lock().unwrap().set_identity(k, v)
             }
         }
         _ => {
             if kernel {
-                Ok(sysctl().lock().kernel_list())
+                Ok(sysctl().lock().unwrap().kernel_list())
             } else {
-                Ok(sysctl().lock().identity_list())
+                Ok(sysctl().lock().unwrap().identity_list())
             }
         }
     }
@@ -1606,17 +1607,17 @@ fn act_env(payload: &str) -> Result<String, String> {
         Some("set") => {
             let k = it.next().ok_or("用法: set <key> <value>")?;
             let v = it.next().ok_or("用法: set <key> <value>")?;
-            Ok(envstore().lock().set(k, v))
+            Ok(envstore().lock().unwrap().set(k, v))
         }
         Some("get") => {
             let k = it.next().ok_or("用法: get <key>")?;
-            Ok(envstore().lock().get(k))
+            Ok(envstore().lock().unwrap().get(k))
         }
         Some("unset") => {
             let k = it.next().ok_or("用法: unset <key>")?;
-            Ok(envstore().lock().unset(k))
+            Ok(envstore().lock().unwrap().unset(k))
         }
-        _ => Ok(envstore().lock().list()),
+        _ => Ok(envstore().lock().unwrap().list()),
     }
 }
 
@@ -1629,13 +1630,13 @@ fn act_limits(payload: &str) -> Result<String, String> {
                 .next()
                 .and_then(|s| s.parse::<u64>().ok())
                 .ok_or("用法: set <key> <value>")?;
-            limits().lock().set(k, v)
+            limits().lock().unwrap().set(k, v)
         }
         Some("get") => {
             let k = it.next().ok_or("用法: get <key>")?;
-            Ok(limits().lock().get(k))
+            Ok(limits().lock().unwrap().get(k))
         }
-        _ => Ok(limits().lock().list()),
+        _ => Ok(limits().lock().unwrap().list()),
     }
 }
 
@@ -1647,17 +1648,17 @@ fn act_fw(payload: &str) -> Result<String, String> {
             let proto = it.next().ok_or("用法: add <allow|deny> <proto> <port> [src]")?;
             let port = it.next().ok_or("用法: add <allow|deny> <proto> <port> [src]")?;
             let src = it.next().unwrap_or("any");
-            Ok(firewall().lock().add(action, proto, port, src))
+            Ok(firewall().lock().unwrap().add(action, proto, port, src))
         }
         Some("del") => {
             let id = it.next().and_then(|s| s.parse::<u64>().ok()).ok_or("用法: del <id>")?;
-            firewall().lock().del(id)
+            firewall().lock().unwrap().del(id)
         }
         Some("policy") => {
             let p = it.next().ok_or("用法: policy <ACCEPT|DROP>")?;
-            firewall().lock().set_policy(p)
+            firewall().lock().unwrap().set_policy(p)
         }
-        _ => Ok(firewall().lock().list()),
+        _ => Ok(firewall().lock().unwrap().list()),
     }
 }
 
@@ -1666,35 +1667,35 @@ fn act_cgroup(payload: &str) -> Result<String, String> {
     match it.next() {
         Some("create") => {
             let n = it.next().ok_or("用法: create <name>")?;
-            cgroups().lock().create(n)
+            cgroups().lock().unwrap().create(n)
         }
         Some("del") => {
             let n = it.next().ok_or("用法: del <name>")?;
-            cgroups().lock().delete(n)
+            cgroups().lock().unwrap().delete(n)
         }
         Some("set") => {
             let n = it.next().ok_or("用法: set <name> <cpu%> <memMiB>")?;
             let cpu = it.next().and_then(|s| s.parse().ok()).ok_or("用法: set <name> <cpu%> <memMiB>")?;
             let mem = it.next().and_then(|s| s.parse().ok()).ok_or("用法: set <name> <cpu%> <memMiB>")?;
-            cgroups().lock().set_limit(n, cpu, mem)
+            cgroups().lock().unwrap().set_limit(n, cpu, mem)
         }
         Some("attach") => {
             let n = it.next().ok_or("用法: attach <name> <pid>")?;
             let pid = it.next().and_then(|s| s.parse().ok()).ok_or("用法: attach <name> <pid>")?;
-            cgroups().lock().attach(n, pid)
+            cgroups().lock().unwrap().attach(n, pid)
         }
-        _ => Ok(cgroups().lock().list()),
+        _ => Ok(cgroups().lock().unwrap().list()),
     }
 }
 
 fn act_power(payload: &str) -> Result<String, String> {
     let mut it = payload.split_whitespace();
     match it.next() {
-        Some("suspend") => power().lock().set("suspend"),
-        Some("reboot") => power().lock().set("reboot"),
-        Some("shutdown") => power().lock().set("shutdown"),
-        Some("wake") => Ok(power().lock().wake()),
-        _ => Ok(power().lock().status()),
+        Some("suspend") => power().lock().unwrap().set("suspend"),
+        Some("reboot") => power().lock().unwrap().set("reboot"),
+        Some("shutdown") => power().lock().unwrap().set("shutdown"),
+        Some("wake") => Ok(power().lock().unwrap().wake()),
+        _ => Ok(power().lock().unwrap().status()),
     }
 }
 
@@ -1713,11 +1714,11 @@ fn act_mount(payload: &str) -> Result<String, String> {
                     other => fstype = other,
                 }
             }
-            mounts().lock().mount(src, target, fstype, ro)
+            mounts().lock().unwrap().mount(src, target, fstype, ro)
         }
         Some("umount") | Some("unmount") => {
             let target = it.next().ok_or("用法: umount <目标>")?;
-            mounts().lock().umount(target)
+            mounts().lock().unwrap().umount(target)
         }
         Some("remount") => {
             let target = it.next().ok_or("用法: remount <目标> <ro|rw>")?;
@@ -1727,16 +1728,16 @@ fn act_mount(payload: &str) -> Result<String, String> {
                 "rw" => false,
                 _ => return Err("用法: remount <目标> <ro|rw>".to_string()),
             };
-            mounts().lock().remount(target, ro)
+            mounts().lock().unwrap().remount(target, ro)
         }
-        _ => Ok(mounts().lock().list()),
+        _ => Ok(mounts().lock().unwrap().list()),
     }
 }
 
 fn act_procfs(payload: &str) -> Result<String, String> {
     match payload.trim() {
-        "" | "snapshot" | "read" => Ok(procfs().lock().snapshot()),
-        "refresh" => Ok(procfs().lock().refresh()),
+        "" | "snapshot" | "read" => Ok(procfs().lock().unwrap().snapshot()),
+        "refresh" => Ok(procfs().lock().unwrap().refresh()),
         _ => Err("用法: act proc://sysinfo refresh|snapshot".to_string()),
     }
 }
@@ -1784,25 +1785,25 @@ fn act_bus(payload: &str) -> Result<String, String> {
         Some("bind") => {
             let addr = it.next().ok_or("用法: bind <地址> <驱动>")?;
             let driver = it.next().ok_or("用法: bind <地址> <驱动>")?;
-            bus().lock().bind(addr, driver)
+            bus().lock().unwrap().bind(addr, driver)
         }
         Some("unbind") => {
             let addr = it.next().ok_or("用法: unbind <地址>")?;
-            bus().lock().unbind(addr)
+            bus().lock().unwrap().unbind(addr)
         }
-        Some("rescan") => bus().lock().rescan(),
+        Some("rescan") => bus().lock().unwrap().rescan(),
         Some("add") => {
             let addr = it.next().ok_or("用法: add <地址> <vendor:device> <类别> [驱动]")?;
             let id = it.next().ok_or("用法: add <地址> <vendor:device> <类别> [驱动]")?;
             let class = it.next().unwrap_or("misc");
             let driver = it.next();
-            bus().lock().add(addr, id, class, driver)
+            bus().lock().unwrap().add(addr, id, class, driver)
         }
         Some("remove") | Some("del") => {
             let addr = it.next().ok_or("用法: remove <地址>")?;
-            bus().lock().remove(addr)
+            bus().lock().unwrap().remove(addr)
         }
-        _ => Ok(bus().lock().list()),
+        _ => Ok(bus().lock().unwrap().list()),
     }
 }
 
@@ -1811,32 +1812,32 @@ fn act_gateway(payload: &str) -> Result<String, String> {
     match it.next() {
         Some("policy") => {
             let p = it.next().ok_or("用法: policy <allow|deny>")?;
-            gateway().lock().set_policy(p)
+            gateway().lock().unwrap().set_policy(p)
         }
         Some("upstream") => {
             let u = it.next().ok_or("用法: upstream <direct|http(s)://...>")?;
-            gateway().lock().set_upstream(u)
+            gateway().lock().unwrap().set_upstream(u)
         }
         Some("allow") => {
             let d = it.next().ok_or("用法: allow <域名>")?;
-            gateway().lock().add_rule(d, true)
+            gateway().lock().unwrap().add_rule(d, true)
         }
         Some("deny") => {
             let d = it.next().ok_or("用法: deny <域名>")?;
-            gateway().lock().add_rule(d, false)
+            gateway().lock().unwrap().add_rule(d, false)
         }
         Some("del") | Some("remove") => {
             let d = it.next().ok_or("用法: del <域名>")?;
-            gateway().lock().del_rule(d)
+            gateway().lock().unwrap().del_rule(d)
         }
         Some("check") => {
             let h = it.next().ok_or("用法: check <域名>")?;
-            let mut g = gateway().lock();
+            let mut g = gateway().lock().unwrap();
             let ok = g.check(h);
             g.record(h, ok, 0);
             Ok(format!("{} -> {}", h, if ok { "allow" } else { "deny" }))
         }
-        _ => Ok(gateway().lock().status()),
+        _ => Ok(gateway().lock().unwrap().status()),
     }
 }
 
@@ -1851,13 +1852,13 @@ fn act_browser(payload: &str) -> Result<String, String> {
             if rest.is_empty() {
                 return Err("用法: act browser://gateway open <url>".to_string());
             }
-            browser().lock().open(rest)
+            browser().lock().unwrap().open(rest)
         }
         "text" => {
             let n = rest.parse::<usize>().unwrap_or(200);
-            Ok(browser().lock().text(n))
+            Ok(browser().lock().unwrap().text(n))
         }
-        "history" | "" => Ok(browser().lock().status()),
+        "history" | "" => Ok(browser().lock().unwrap().status()),
         _ => Err("用法: act browser://gateway open <url> | text [n] | history".to_string()),
     }
 }
@@ -1871,7 +1872,7 @@ fn act_motive(payload: &str) -> Result<String, String> {
                 .next()
                 .and_then(|s| s.parse().ok())
                 .ok_or("用法: urge <动机> <±增量>")?;
-            motives().lock().urge(n, d)
+            motives().lock().unwrap().urge(n, d)
         }
         Some("set") => {
             let n = it.next().ok_or("用法: set <动机> <0-100>")?;
@@ -1879,10 +1880,10 @@ fn act_motive(payload: &str) -> Result<String, String> {
                 .next()
                 .and_then(|s| s.parse().ok())
                 .ok_or("用法: set <动机> <0-100>")?;
-            motives().lock().set(n, v)
+            motives().lock().unwrap().set(n, v)
         }
-        Some("reset") => Ok(motives().lock().reset()),
-        _ => Ok(motives().lock().status()),
+        Some("reset") => Ok(motives().lock().unwrap().reset()),
+        _ => Ok(motives().lock().unwrap().status()),
     }
 }
 
@@ -1899,7 +1900,7 @@ fn act_belief(payload: &str) -> Result<String, String> {
                 .trim()
                 .parse()
                 .map_err(|_| "置信度需为 0-100 整数".to_string())?;
-            beliefs().lock().believe(prop.trim(), conf)
+            beliefs().lock().unwrap().believe(prop.trim(), conf)
         }
         "observe" => {
             let rest = text[sub.len()..].trim();
@@ -1910,14 +1911,14 @@ fn act_belief(payload: &str) -> Result<String, String> {
                 .trim()
                 .parse()
                 .map_err(|_| "增量需为整数".to_string())?;
-            beliefs().lock().observe(prop.trim(), delta)
+            beliefs().lock().unwrap().observe(prop.trim(), delta)
         }
         "retract" => {
             let rest = text[sub.len()..].trim();
             if rest.is_empty() {
                 return Err("用法: retract <命题>".to_string());
             }
-            beliefs().lock().retract(rest)
+            beliefs().lock().unwrap().retract(rest)
         }
         "weak" => {
             let threshold: u8 = text
@@ -1925,7 +1926,7 @@ fn act_belief(payload: &str) -> Result<String, String> {
                 .nth(1)
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(50);
-            let list = beliefs().lock().below(threshold);
+            let list = beliefs().lock().unwrap().below(threshold);
             if list.is_empty() {
                 Ok(format!("无置信度 < {}% 的信念", threshold))
             } else {
@@ -1936,7 +1937,7 @@ fn act_belief(payload: &str) -> Result<String, String> {
                     .join("\n"))
             }
         }
-        _ => Ok(beliefs().lock().status()),
+        _ => Ok(beliefs().lock().unwrap().status()),
     }
 }
 
@@ -1946,14 +1947,14 @@ fn act_judgment(payload: &str) -> Result<String, String> {
     match sub {
         "judge" => {
             let rest = text[sub.len()..].trim();
-            judgment().lock().judge(if rest.is_empty() {
+            judgment().lock().unwrap().judge(if rest.is_empty() {
                 None
             } else {
                 Some(rest)
             })
         }
-        "decide" => judgment().lock().decide(),
-        _ => Ok(judgment().lock().status()),
+        "decide" => judgment().lock().unwrap().decide(),
+        _ => Ok(judgment().lock().unwrap().status()),
     }
 }
 
@@ -2197,14 +2198,14 @@ fn act_mem_fault(payload: &str) -> Result<String, String> {
             let bytes: u64 = rest
                 .parse()
                 .map_err(|_| "用法: act mem://fault alloc <字节>".to_string())?;
-            let _ = mem().lock().alloc(bytes);
+            let _ = mem().lock().unwrap().alloc(bytes);
             Ok(format!("已模拟页故障分配 {} 字节", bytes))
         }
         "free" => {
             let addr: u64 = rest
                 .parse()
                 .map_err(|_| "用法: act mem://fault free <地址>".to_string())?;
-            let _ = mem().lock().free(addr);
+            let _ = mem().lock().unwrap().free(addr);
             Ok(format!("已释放页 {} ", addr))
         }
         "stats" | "" => Ok(crate::mm::fault::stats()),
