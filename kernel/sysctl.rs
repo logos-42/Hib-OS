@@ -18,7 +18,7 @@ impl Sysctl {
             ("kernel.domainname", "localdomain"),
             ("kernel.panic", "0"),
             ("kernel.ostype", "HibOS"),
-            ("kernel.osrelease", "0.1.0-hibos"),
+            ("kernel.osrelease", "0.2.0-hibos"),
             ("vm.overcommit_memory", "0"),
             ("vm.swappiness", "60"),
             ("net.ipv4.ip_forward", "0"),
@@ -34,7 +34,7 @@ impl Sysctl {
             ("timezone", "UTC"),
             ("locale", "zh_CN.UTF-8"),
             ("shell", "/bin/hibsh"),
-            ("kernel.version", "Hib OS 0.1.0 (AI-native)"),
+            ("kernel.version", "Hib OS 0.2.0 (AI-native)"),
         ] {
             identity.insert(k.to_string(), v.to_string());
         }

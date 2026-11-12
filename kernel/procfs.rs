@@ -50,7 +50,7 @@ impl ProcFs {
         let uptime_ns = stats.system_uptime_ns;
 
         format!(
-            "version: Hib OS 0.1.0 (GPU-Centric macro-kernel)\n\
+            "version: Hib OS 0.2.0 (GPU-Centric macro-kernel)\n\
              uptime: {}ms ({}ns)\n\
              loadavg: {} {} {} (procs={}, running={})\n\
              meminfo: total={}MiB used={}MiB free={}MiB\n\

@@ -48,7 +48,7 @@ pub extern "C" fn kernel_main() -> ! {
     // 初始化 VGA 文本模式（屏幕可见）。
     drivers::vga_text::init();
     graphics::init();
-    vga_println!("Hib OS 0.1.0");
+    vga_println!("Hib OS 0.2.0");
     vga_println!("Booting on x86_64 (GPU-primed macro-kernel prototype)");
 
     // 初始化 GDT + IDT（最小中断基座，防止三重错误重启）。

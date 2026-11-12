@@ -130,7 +130,7 @@ impl Vfs {
             "hibos.toml".into(),
             Node::file(
                 "hibos.toml",
-                "version = \"0.1.0\"\ntime_slice_ns = 10000000\ngpu_centric = true\n",
+                "version = \"0.2.0\"\ntime_slice_ns = 10000000\ngpu_centric = true\n",
             ),
         );
         etc.children.insert(

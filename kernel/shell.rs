@@ -181,7 +181,7 @@ impl Shell {
     ///
     /// 极简 Linux 风启动画面（彩色；管道下自动去色）。
     fn linux_boot(&self) {
-        println!("{}", theme::bold("Hib OS 0.1.0 (linux)"));
+        println!("{}", theme::bold("Hib OS 0.2.0 (linux)"));
         println!(
             "{} hibos: GPU-Centric macro-kernel (by logos-42, MIT)",
             theme::grey("[    0.000000 ]")
@@ -209,12 +209,12 @@ impl Shell {
         // 把挂载表物化进目录树：/proc、/sys、/dev/gpu 等在 ls 里可见。
         self.materialize_all_mounts();
 
-        let provider = self.active_provider();
+        let providers = self.configured_providers();
 
-        if let Some(provider) = provider {
+        if !providers.is_empty() {
             // 极简启动（无大横幅、无子系统噪声日志）。
             println!("Hib OS — AI 意识本体闭环已就绪 (exit 退出)");
-            self.run_llm_loop(&provider);
+            self.run_llm_loop(&providers);
             return;
         }
 
@@ -853,16 +853,20 @@ impl Shell {
         );
     }
 
-    /// 选一个已配置 API Key 的 provider（优先 deepseek，其次第一个已配置的）。
-    fn active_provider(&self) -> Option<String> {
+    /// 已配置 API Key 的 provider 列表（deepseek 优先，其余按配置顺序）。
+    /// 多个 provider 会**同时**运行各自的模型。
+    fn configured_providers(&self) -> Vec<String> {
         let keys = self.handler.consciousness.api_keys();
-        if keys.is_empty() {
-            return None;
-        }
+        let mut out: Vec<String> = Vec::new();
         if let Some((p, _)) = keys.iter().find(|(p, _)| p == "deepseek") {
-            return Some(p.clone());
+            out.push(p.clone());
         }
-        keys.first().map(|(p, _)| p.clone())
+        for (p, _) in &keys {
+            if p != "deepseek" {
+                out.push(p.clone());
+            }
+        }
+        out
     }
 
     /// 自造插件通道按需注册：插件安装后，其 `plugin://<name>` 通道即可被感知/行动。
@@ -1811,28 +1815,44 @@ impl Shell {
             Some("loop") => {
                 let provider = parts.get(2).copied().unwrap_or("");
                 if provider.is_empty() {
-                    println!("用法: llm loop <provider>");
+                    println!("用法: llm loop <provider|all>");
                     return;
                 }
-                self.run_llm_loop(provider);
+                if provider == "all" {
+                    // 全部已配置 provider 同时运行。
+                    let providers = self.configured_providers();
+                    if providers.is_empty() {
+                        tagged_out!("[llm]", "未配置任何 Provider API Key");
+                        return;
+                    }
+                    self.run_llm_loop(&providers);
+                } else {
+                    self.run_llm_loop(&[provider.to_string()]);
+                }
             }
-            _ => println!("用法: llm [status|key [list|set <provider> <key>|del <provider>|show <provider>]|chat <provider> <消息>|loop <provider>]"),
+            _ => println!("用法: llm [status|providers|key [list|set <provider> <key>|del <provider>|show <provider>]|chat <provider> <消息>|loop <provider>]"),
         }
     }
 
     /// 运行 LLM 闭环循环 (感知→思考→行动→感知)。
-    /// 默认模式：AI 自动感知系统、思考并执行 ACTION 行动。
-    pub fn run_llm_loop(&mut self, provider: &str) {
-        let key = match self.handler.consciousness.api_key(provider) {
-            Some(k) => k.clone(),
-            None => {
-                tagged_out!(
-                    &format!("[llm:{}]", provider),
+    ///
+    /// 支持**多 provider 同时运行**：每个 provider 持有独立上下文窗口，
+    /// 同一份感知并行发给各模型，行动统一落地，回复按 provider 分别呈现。
+    pub fn run_llm_loop(&mut self, providers: &[String]) {
+        // 1. 解析可用 provider（必须有 API Key）
+        let mut available: Vec<(String, String)> = Vec::new();
+        for p in providers {
+            match self.handler.consciousness.api_key(p) {
+                Some(k) => available.push((p.clone(), k.clone())),
+                None => tagged_out!(
+                    &format!("[llm:{}]", p),
                     "未配置 API Key (先用 `llm key set <provider> <key>`)"
-                );
-                return;
+                ),
             }
-        };
+        }
+        if available.is_empty() {
+            return;
+        }
         // 动态生成“已注册通道”清单，让 AI 知道自己能 sense / act 哪些通道。
         let channel_lines: Vec<String> = self
             .channels
@@ -1901,7 +1921,26 @@ impl Shell {
                 规则：先用 sense 了解状态，再决定 act / 创建资源 / 操作文件；不要执行破坏性操作除非必要；用简体中文回答，并在需要时在末尾给出 ACTION。",
             catalog
         );
-        let mut loop_ = crate::llm::ThoughtLoop::new(&system_prompt).with_limits(10, 8000);
+        // 每个 provider 一个独立上下文窗口：多模型同时运行、互不串味。
+        let mut sessions: Vec<(String, String, crate::llm::ThoughtLoop)> = available
+            .into_iter()
+            .map(|(p, k)| {
+                let lp = crate::llm::ThoughtLoop::new(&system_prompt).with_limits(10, 8000);
+                (p, k, lp)
+            })
+            .collect();
+        let provider = sessions[0].0.clone();
+        if sessions.len() > 1 {
+            tagged_out!(
+                "[llm]",
+                "多 provider 并行: {}",
+                sessions
+                    .iter()
+                    .map(|(p, _, _)| p.clone())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+        }
         // 每个闭环实例绑定独立的 worktree —— 意识实例级工作区隔离。
         let seq = LOOP_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let wt_name = format!("loop-{}-{}", provider, seq);
@@ -1928,30 +1967,9 @@ impl Shell {
                     self.vfs.cwd_path(),
                     wt_root
                 );
-                match loop_.cycle(provider, &key, &perception, &mut self.handler.consciousness) {
-                    Ok(reply) => {
-                        // 人类阅读节奏：先显示执行（行动落地），再显示回复文本。
-                        self.execute_llm_actions(&reply, &wt_root);
-                        let concepts = self.handler.consciousness.concept_count();
-                        tagged_out!("[llm]", "意识本体概念数: {}", concepts);
-                        // 回复正文：剔除 ACTION 行，标识绿色、正文默认色。
-                        let text = reply
-                            .lines()
-                            .map(|l| l.trim())
-                            .filter(|l| !l.is_empty() && !l.trim_start().starts_with("ACTION:"))
-                            .collect::<Vec<_>>()
-                            .join("\n");
-                        if !text.is_empty() {
-                            tagged_out!(&format!("[llm:{}]", provider), "{}", text);
-                        }
-                    }
-                    Err(e) => {
-                        tagged_out!(&format!("[llm:{}]", provider), "循环失败: {}", e);
-                        loop_.reset();
-                    }
-                }
-                last_cycle = now;
-            }
+                // 多 provider 并行思考 → 逐个落地行动 → 呈现回复。
+                self.run_cycle(&mut sessions, &perception, &wt_root);
+                last_cycle = now;            }
 
             // — 外部输入驱动 —
             let prompt = theme::prompt("~");
@@ -1968,7 +1986,7 @@ impl Shell {
                         tagged_out!(
                             &format!("[llm:{}]", provider),
                             "闭环循环结束，共 {} 轮。",
-                            loop_.turn()
+                            Shell::total_turns(&sessions)
                         );
                         break;
                     }
@@ -1980,36 +1998,15 @@ impl Shell {
                         self.channels.len(),
                         wt_root
                     );
-                    match loop_.cycle(provider, &key, &perception, &mut self.handler.consciousness) {
-                        Ok(reply) => {
-                            // 人类阅读节奏：先显示执行（行动落地），再显示回复文本。
-                            self.execute_llm_actions(&reply, &wt_root);
-                            let concepts = self.handler.consciousness.concept_count();
-                            tagged_out!("[llm]", "意识本体概念数: {}", concepts);
-                            // 回复正文：剔除 ACTION 行，标识绿色、正文默认色。
-                            let text = reply
-                                .lines()
-                                .map(|l| l.trim())
-                                .filter(|l| !l.is_empty() && !l.trim_start().starts_with("ACTION:"))
-                                .collect::<Vec<_>>()
-                                .join("\n");
-                            if !text.is_empty() {
-                                tagged_out!(&format!("[llm:{}]", provider), "{}", text);
-                            }
-                        }
-                        Err(e) => {
-                            tagged_out!(&format!("[llm:{}]", provider), "循环失败: {}", e);
-                            // 错误恢复：失败后清空上下文窗口，避免脏上下文卡死后续循环。
-                            loop_.reset();
-                        }
-                    }
+                    // 多 provider 并行思考 → 逐个落地行动 → 呈现回复。
+                    self.run_cycle(&mut sessions, &perception, &wt_root);
                 }
                 Ok(line_editor::ReadOutcome::Cancelled) => {
                     // Ctrl+C：退出闭环循环（原先仅取消本行、继续 REPL，导致 Ctrl+C 无法退出）
                     tagged_out!(
                         &format!("[llm:{}]", provider),
                         "闭环循环已由 Ctrl+C 中断，共 {} 轮。",
-                        loop_.turn()
+                        Shell::total_turns(&sessions)
                     );
                     break;
                 }
@@ -2017,9 +2014,76 @@ impl Shell {
                     tagged_out!(
                         &format!("[llm:{}]", provider),
                         "闭环循环结束，共 {} 轮。",
-                        loop_.turn()
+                        Shell::total_turns(&sessions)
                     );
                     break;
+                }
+            }
+        }
+    }
+
+    /// 各 provider 已完成轮次之和（用于闭环统计）。
+    fn total_turns(sessions: &[(String, String, crate::llm::ThoughtLoop)]) -> usize {
+        sessions.iter().map(|(_, _, lp)| lp.turn()).sum()
+    }
+
+    /// 一轮闭环：把同一份感知**并行**发给所有 provider，
+    /// 逐个落地行动，再按 provider 呈现回复（先执行、后回复）。
+    fn run_cycle(
+        &mut self,
+        sessions: &mut [(String, String, crate::llm::ThoughtLoop)],
+        perception: &str,
+        root: &str,
+    ) {
+        // 并行思考：每个 provider 在自己的线程里调用模型，互不阻塞。
+        let results: Vec<(String, Result<String, String>)> = std::thread::scope(|scope| {
+            let mut handles = Vec::new();
+            for (provider, key, lp) in sessions.iter_mut() {
+                let p = provider.clone();
+                handles.push((
+                    p,
+                    scope.spawn(move || lp.think(provider.as_str(), key.as_str(), perception)),
+                ));
+            }
+            handles
+                .into_iter()
+                .map(|(p, h)| {
+                    let r = h
+                        .join()
+                        .unwrap_or_else(|_| Err("provider 线程异常".to_string()));
+                    (p, r)
+                })
+                .collect()
+        });
+
+        for (provider, res) in results {
+            match res {
+                Ok(reply) => {
+                    // 行动注入意识本体
+                    if let Some((_, _, lp)) = sessions.iter_mut().find(|(p, _, _)| *p == provider) {
+                        lp.apply_actions(&reply, &mut self.handler.consciousness);
+                    }
+                    // 人类阅读节奏：先显示执行（行动落地），再显示回复文本。
+                    self.execute_llm_actions(&reply, root);
+                    let concepts = self.handler.consciousness.concept_count();
+                    tagged_out!("[llm]", "意识本体概念数: {}", concepts);
+                    // 回复正文：剔除 ACTION 行，标识绿色、正文默认色。
+                    let text = reply
+                        .lines()
+                        .map(|l| l.trim())
+                        .filter(|l| !l.is_empty() && !l.trim_start().starts_with("ACTION:"))
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    if !text.is_empty() {
+                        tagged_out!(&format!("[llm:{}]", provider), "{}", text);
+                    }
+                }
+                Err(e) => {
+                    tagged_out!(&format!("[llm:{}]", provider), "循环失败: {}", e);
+                    // 错误恢复：失败后清空该 provider 的上下文窗口。
+                    if let Some((_, _, lp)) = sessions.iter_mut().find(|(p, _, _)| *p == provider) {
+                        lp.reset();
+                    }
                 }
             }
         }
@@ -2212,8 +2276,8 @@ pub fn usage_line(cmd: &str) -> Option<&'static str> {
         "load" => "load",
         "resetfs" => "resetfs",
         "wallpaper" => "wallpaper [list|set <name>|current]  (同时切换字符与像素桌面)",
-        "deepseek" => "llm [status|key [list|set <provider> <key>|del <provider>|show <provider>]|chat <provider> <消息>|loop <provider>]",
-        "llm" => "llm [status|key [list|set <provider> <key>|del <provider>|show <provider>]|chat <provider> <消息>|loop <provider>]",
+        "deepseek" => "llm [status|providers|key [list|set <provider> <key>|del <provider>|show <provider>]|chat <provider> <消息>|loop <provider>]",
+        "llm" => "llm [status|providers|key [list|set <provider> <key>|del <provider>|show <provider>]|chat <provider> <消息>|loop <provider>]",
         "modules" => "modules",
         "modload" => "modload <名称>",
         "modunload" => "modunload <名称>",
@@ -2257,7 +2321,7 @@ pub fn describe(cmd: &str) -> Option<&'static str> {
         "resetfs" => "恢复默认目录树",
         "wallpaper" => "设置桌面壁纸 (default/hibos/deepseek/ai/consciousness + sunset/aurora/circuit/nebula/grid/solid)",
         "deepseek" => "llm 命令别名，配置多提供商 LLM API Key 与对话",
-        "llm" => "配置多提供商 LLM API Key (deepseek 等)，支持单轮对话与闭环循环对话",
+        "llm" => "配置多提供商 LLM API Key (deepseek/openai/moonshot/qwen/zhipu/groq/ollama)，支持单轮对话与闭环循环对话",
         "modules" => "列出已加载内核模块",
         "modload" => "加载演示内核模块",
         "modunload" => "卸载内核模块",

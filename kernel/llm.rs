@@ -416,6 +416,22 @@ impl ThoughtLoop {
         perception: &str,
         consciousness: &mut AIConsciousness,
     ) -> Result<String, String> {
+        let reply = self.think(provider, api_key, perception)?;
+        // 行动：解析回复中的 ACTION 指令，注入意识本体。
+        self.apply_actions(&reply, consciousness);
+        Ok(reply)
+    }
+
+    /// 只做"思考"：调用模型并把回复压入上下文（**不**解析 ACTION、不触碰意识本体）。
+    ///
+    /// 多 provider 并行时使用：每个 provider 持有自己的上下文窗口，
+    /// 在各自线程里独立思考，主线程再统一落地行动。
+    pub fn think(
+        &mut self,
+        provider: &str,
+        api_key: &str,
+        perception: &str,
+    ) -> Result<String, String> {
         self.turn += 1;
 
         // 1. 感知：把当前感知作为 user 消息压入窗口
@@ -424,16 +440,17 @@ impl ThoughtLoop {
         // 2. 上下文压缩（如有需要）
         self.window.compress();
 
-        // 3. 思考：调用 LLM
+        // 3. 思考：调用模型
         let reply = chat_with_context(provider, api_key, &self.window)?;
 
         // 4. 把回复压入窗口（作为 assistant 轮次）
         self.window.push_assistant(&reply);
-
-        // 5. 行动：解析回复中的 ACTION: 指令，注入意识本体
-        self.extract_actions(&reply, consciousness);
-
         Ok(reply)
+    }
+
+    /// 把回复中的 `ACTION:` 指令解析出来并注入意识本体。
+    pub fn apply_actions(&self, reply: &str, consciousness: &mut AIConsciousness) {
+        self.extract_actions(reply, consciousness);
     }
 
     /// 错误恢复：清空上下文窗口（丢弃损坏/半截对话），为下一次循环做准备。
