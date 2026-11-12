@@ -714,7 +714,7 @@ impl TcpStack {
             if let Some(seq) = sock.rtt_seq {
                 if ack > seq || ack.wrapping_sub(seq) < (u32::MAX >> 1) {
                     if let Some(start) = sock.rtt_start.take() {
-                        sock.congest.record_rtt(start.elapsed().as_micros() as u32);
+                        sock.congest.record_rtt(Instant::now().saturating_sub(start).as_micros() as u32);
                         sock.rtt_seq = None;
                     }
                 }

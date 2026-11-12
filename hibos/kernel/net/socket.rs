@@ -85,16 +85,16 @@ impl NetStack {
     pub fn sock_bind(&mut self, fd: SocketFd, addr: &SocketAddr) -> Result<(), String> {
         let our_ip = self.iface.ip;
         match self.sockets.sockets.get_mut(&fd).ok_or_else(|| "socket 不存在".to_string())? {
-            SockEntry::Tcp { mut key } => {
+            SockEntry::Tcp { key } => {
                 if key.local_port != 0 { return Err("已绑定".to_string()); }
                 self.tcp.bind(our_ip, addr.port)?;
-                key = TcpConnKey { local_port: addr.port, remote_ip: [0, 0, 0, 0], remote_port: 0 };
+                *key = TcpConnKey { local_port: addr.port, remote_ip: [0, 0, 0, 0], remote_port: 0 };
                 Ok(())
             }
-            SockEntry::Udp { mut port, .. } => {
-                if port != 0 { return Err("已绑定".to_string()); }
+            SockEntry::Udp { port, .. } => {
+                if *port != 0 { return Err("已绑定".to_string()); }
                 self.udp.bind(addr.port)?;
-                port = addr.port;
+                *port = addr.port;
                 Ok(())
             }
         }
@@ -140,9 +140,9 @@ impl NetStack {
     /// UDP connect：限定对端（后续 send/recv 仅与该对端）。
     pub fn sock_udp_connect(&mut self, fd: SocketFd, addr: &SocketAddr) -> Result<(), String> {
         match self.sockets.sockets.get_mut(&fd).ok_or_else(|| "socket 不存在".to_string())? {
-            SockEntry::Udp { mut port, mut connected } => {
-                if port == 0 { return Err("未绑定本地端口".to_string()); }
-                connected = Some(addr.clone());
+            SockEntry::Udp { port, connected } => {
+                if *port == 0 { return Err("未绑定本地端口".to_string()); }
+                *connected = Some(addr.clone());
                 Ok(())
             }
             SockEntry::Tcp { .. } => Err("TCP 请用 sock_connect".to_string()),

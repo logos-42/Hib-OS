@@ -2373,13 +2373,13 @@ pub fn net_service_act(payload: &str) -> Result<String, String> {
             let path = it.next().ok_or("缺少路径")?;
             let body: Vec<u8> = it.collect::<Vec<&str>>().join(" ").into_bytes();
             let client_ip = 1;
-            let mut eng = network_service_engine().lock();
+            let mut eng = network_service_engine().lock().unwrap();
             let id = eng.http_request(method, path, body, client_ip);
             Ok(format!("已发出 HTTP 请求 id={} 方法={:?} 路径={}", id, method, path))
         }
         Some("handle-http") => {
             let request_id = it.next().and_then(|s| s.parse::<u64>().ok()).ok_or("缺少请求id")?;
-            let mut eng = network_service_engine().lock();
+            let mut eng = network_service_engine().lock().unwrap();
             match eng.handle_http_request(request_id) {
                 Some(resp_id) => Ok(format!("已处理 HTTP 请求 响应id={}", resp_id)),
                 None => Err("请求不存在或无路由".into()),
@@ -2388,7 +2388,7 @@ pub fn net_service_act(payload: &str) -> Result<String, String> {
         Some("proxy") => {
             let client_ip = it.next().and_then(|s| s.parse::<u64>().ok()).unwrap_or(1);
             let size = it.next().and_then(|s| s.parse::<u64>().ok()).unwrap_or(1024);
-            let mut eng = network_service_engine().lock();
+            let mut eng = network_service_engine().lock().unwrap();
             match eng.proxy_request(client_ip, size) {
                 Some(backend) => Ok(format!("代理请求到 {}", backend)),
                 None => Err("无可用后端".into()),
@@ -2400,7 +2400,7 @@ pub fn net_service_act(payload: &str) -> Result<String, String> {
             if content.is_empty() {
                 return Err("缺少内容".into());
             }
-            let mut eng = network_service_engine().lock();
+            let mut eng = network_service_engine().lock().unwrap();
             let len = content.len();
             if eng.cdn_cache(key, content) {
                 Ok(format!("已缓存内容 键={} 大小={}B", key, len))
@@ -2410,7 +2410,7 @@ pub fn net_service_act(payload: &str) -> Result<String, String> {
         }
         Some("cdn-get") => {
             let key = it.next().ok_or("缺少键")?;
-            let mut eng = network_service_engine().lock();
+            let mut eng = network_service_engine().lock().unwrap();
             match eng.cdn_get(key) {
                 Some(content) => Ok(format!("CDN 命中 键={} 大小={}B", key, content.len())),
                 None => Ok("CDN 未命中".into()),
@@ -2419,7 +2419,7 @@ pub fn net_service_act(payload: &str) -> Result<String, String> {
         Some("ws-create") => {
             let client_id = it.next().and_then(|s| s.parse::<u64>().ok()).unwrap_or(1);
             let url = it.next().unwrap_or("ws://localhost");
-            let mut eng = network_service_engine().lock();
+            let mut eng = network_service_engine().lock().unwrap();
             let id = eng.create_websocket(client_id, url);
             Ok(format!("已创建 WebSocket 连接 id={} 客户端={} URL={}", id, client_id, url))
         }
@@ -2428,7 +2428,7 @@ pub fn net_service_act(payload: &str) -> Result<String, String> {
             if payload.is_empty() {
                 return Err("缺少载荷".into());
             }
-            let mut eng = network_service_engine().lock();
+            let mut eng = network_service_engine().lock().unwrap();
             let len = payload.len();
             let id = eng.ws_send(payload, WSFrameType::Text);
             Ok(format!("WebSocket 已发送 帧id={} 大小={}B", id, len))
@@ -2438,7 +2438,7 @@ pub fn net_service_act(payload: &str) -> Result<String, String> {
             if payload.is_empty() {
                 return Err("缺少载荷".into());
             }
-            let mut eng = network_service_engine().lock();
+            let mut eng = network_service_engine().lock().unwrap();
             let len = payload.len();
             let id = eng.ws_receive(payload, WSFrameType::Text);
             Ok(format!("WebSocket 已接收 帧id={} 大小={}B", id, len))
@@ -2447,12 +2447,12 @@ pub fn net_service_act(payload: &str) -> Result<String, String> {
             let name = it.next().ok_or("缺少名称")?;
             let endpoint = it.next().ok_or("缺少端点")?;
             let weight = it.next().and_then(|s| s.parse::<u32>().ok()).unwrap_or(1);
-            let mut eng = network_service_engine().lock();
+            let mut eng = network_service_engine().lock().unwrap();
             let id = eng.add_lb_backend(name, endpoint, weight);
             Ok(format!("已添加 LB 后端 id={} 名称={} 端点={}", id, name, endpoint))
         }
         Some("lb-select") => {
-            let mut eng = network_service_engine().lock();
+            let mut eng = network_service_engine().lock().unwrap();
             match eng.select_lb_backend() {
                 Some(id) => Ok(format!("已选择 LB 后端 id={}", id)),
                 None => Err("无可用后端".into()),
@@ -2460,12 +2460,12 @@ pub fn net_service_act(payload: &str) -> Result<String, String> {
         }
         Some("health-check") => {
             let now = it.next().and_then(|s| s.parse::<u128>().ok()).unwrap_or(0);
-            let mut eng = network_service_engine().lock();
+            let mut eng = network_service_engine().lock().unwrap();
             eng.health_check(now);
             Ok(format!("已执行健康检查 now={}", now))
         }
         Some("tick") => {
-            let mut eng = network_service_engine().lock();
+            let mut eng = network_service_engine().lock().unwrap();
             eng.tick();
             Ok("网络服务引擎已推进".into())
         }
