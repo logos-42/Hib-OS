@@ -243,6 +243,13 @@ impl ThoughtLoop {
         Ok(reply)
     }
 
+    /// 错误恢复：清空上下文窗口（丢弃损坏/半截对话），为下一次循环做准备。
+    pub fn reset(&mut self) {
+        self.turn = 0;
+        self.window.turns.clear();
+        self.window.summary = None;
+    }
+
     /// 从 AI 回复中解析行动指令，格式：`ACTION: <通道名> <参数>`，
     /// 并把对应的通道注册为意识本体概念。
     fn extract_actions(&self, reply: &str, consciousness: &mut AIConsciousness) {

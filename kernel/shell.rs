@@ -1835,10 +1835,14 @@ impl Shell {
                             // 自动执行 ACTION 指令
                             self.execute_llm_actions(&reply);
                         }
-                        Err(e) => println!(
-                            "{}",
-                            theme::green(&format!("[llm:{}] 循环失败: {}", provider, e))
-                        ),
+                        Err(e) => {
+                            println!(
+                                "{}",
+                                theme::green(&format!("[llm:{}] 循环失败: {}", provider, e))
+                            );
+                            // 错误恢复：失败后清空上下文窗口，避免脏上下文卡死后续循环。
+                            loop_.reset();
+                        }
                     }
                 }
                 Ok(line_editor::ReadOutcome::Cancelled) => {
