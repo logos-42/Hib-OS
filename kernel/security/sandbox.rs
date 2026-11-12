@@ -766,7 +766,7 @@ mod tests {
             SandboxRule::syscall_allow(0, "read"),
             SandboxRule::syscall_deny(1, "write"),
         ];
-        let id = m.create_sandbox(300, rules);
+        let _id = m.create_sandbox(300, rules);
         assert!(m.check_syscall(300, 0));
         assert!(!m.check_syscall(300, 1));
         // 默认拒绝：未列出的 syscall 被拒绝。
@@ -803,7 +803,7 @@ mod tests {
     #[test]
     fn root_dir_redirect() {
         let mut m = SandboxManager::new();
-        let id = m.create_sandbox(500, Vec::new());
+        let _id = m.create_sandbox(500, Vec::new());
         sandbox_mut_for_test(&mut m, 500, |s| {
             s.set_default_action(RuleAction::Allow);
             s.set_root_dir(PathBuf::from("/jail"));

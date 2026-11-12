@@ -745,7 +745,7 @@ mod tests {
         assert!(res.contains("按下"));
         let res = gesture_act("recognize").unwrap();
         assert!(res.contains("无手势") || res.contains("识别手势"));
-        let res = gesture_act("list").unwrap();
+        let _res = gesture_act("list").unwrap();
         assert!(sense.contains("config.tap_max_distance="));
     }
 }

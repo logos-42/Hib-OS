@@ -1767,7 +1767,7 @@ mod tests {
     #[test]
     fn inference_engine_submit_tick() {
         let mut eng = InferenceEngine::new();
-        let id = eng.submit(InstanceId(1), vec![1, 2, 3], 4);
+        let _id = eng.submit(InstanceId(1), vec![1, 2, 3], 4);
         assert_eq!(eng.requests.len(), 1);
         eng.tick(1_000_000);
         // 超过 max_new 后仍完成（占位逻辑）
@@ -2634,7 +2634,7 @@ mod advanced_tests {
         assert!(result.scale > 0.0);
         assert_eq!(cal.result_count(), 1);
         cal.set_method(CalibrationMethod::Histogram);
-        let result2 = cal.calibrate("weight2", -2.0, 2.0);
+        let _result2 = cal.calibrate("weight2", -2.0, 2.0);
         assert_eq!(cal.result_count(), 2);
     }
 

@@ -659,7 +659,7 @@ mod tests {
         config.interfaces.push(iface);
         bus.add_config(id, config);
         bus.enumerate(id).unwrap();
-        let mut data = vec![0xAA; 100];
+        let data = vec![0xAA; 100];
         let res = bus.transfer(id, 0x02, &data, TransferDirection::Out);
         assert!(res.is_success());
         assert_eq!(res.bytes(), 100);

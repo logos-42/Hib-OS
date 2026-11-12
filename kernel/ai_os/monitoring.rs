@@ -1471,7 +1471,7 @@ mod monitoring_tests {
         eng.collect_log(LogLevel::Info, "system started".into(), "kernel".into(), BTreeMap::new());
         let sid = eng.start_span(1, None, "request".into(), SpanKind::Server);
         assert!(eng.end_span(sid));
-        let slo_id = eng.add_slo_target("availability".into(), "uptime".into(), 99.9, 86_400_000_000_000, ">=");
+        let _slo_id = eng.add_slo_target("availability".into(), "uptime".into(), 99.9, 86_400_000_000_000, ">=");
         eng.evaluate_slo("availability".into(), 99.95, 0);
         let agg_id = eng.add_aggregation_rule("cpu_usage".into(), "cpu_avg".into(), AggregationFunction::Avg, 60_000_000_000);
         eng.aggregate(agg_id, &[50.0, 60.0, 70.0], 0).unwrap();

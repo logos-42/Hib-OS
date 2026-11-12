@@ -1417,7 +1417,7 @@ mod advanced_tests {
 
     #[test]
     fn sparse_attention_local() {
-        let mut sa = SparseAttention::new(SparsePattern::Local, 4, 1);
+        let sa = SparseAttention::new(SparsePattern::Local, 4, 1);
         let mask = sa.get_attention_mask(10, 5);
         // 位置 5 的窗口是 [3, 4, 5, 6, 7]
         assert!(mask[3]);
@@ -1431,7 +1431,7 @@ mod advanced_tests {
 
     #[test]
     fn sparse_attention_global() {
-        let mut sa = SparseAttention::new(SparsePattern::Global, 4, 1);
+        let sa = SparseAttention::new(SparsePattern::Global, 4, 1);
         let mask = sa.get_attention_mask(5, 2);
         for m in &mask {
             assert!(*m);
@@ -1440,7 +1440,7 @@ mod advanced_tests {
 
     #[test]
     fn sparse_attention_strided() {
-        let mut sa = SparseAttention::new(SparsePattern::Strided, 4, 2);
+        let sa = SparseAttention::new(SparsePattern::Strided, 4, 2);
         let mask = sa.get_attention_mask(10, 0);
         assert!(mask[0]);
         assert!(mask[2]);

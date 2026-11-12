@@ -1449,7 +1449,7 @@ mod tests {
     #[test]
     fn exit_changes_state() {
         PosixLayer::init();
-        PosixLayer::handle(PosixSyscall::Exit { status: 42 }, &[]);
+        let _ = PosixLayer::handle(PosixSyscall::Exit { status: 42 }, &[]);
         // 退出后再次 Getpid 应仍能读（单进程原型不真正销毁）。
         assert!(PosixLayer::handle(PosixSyscall::Getpid, &[]).is_ok());
     }

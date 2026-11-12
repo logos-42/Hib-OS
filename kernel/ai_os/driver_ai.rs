@@ -900,7 +900,7 @@ mod tests {
 
     #[test]
     fn device_creation() {
-        let mut dev = AIDevice::new(1, DeviceType::GPU, "gpu0", 0x1234, 0x5678);
+        let dev = AIDevice::new(1, DeviceType::GPU, "gpu0", 0x1234, 0x5678);
         assert_eq!(dev.id, 1);
         assert_eq!(dev.name, "gpu0");
         assert!(dev.online);

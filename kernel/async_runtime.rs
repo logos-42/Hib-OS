@@ -591,7 +591,7 @@ impl Default for RuntimeExt {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::{AtomicU64, Ordering};
+    
 
     #[test]
     fn poll_ready_pending() {

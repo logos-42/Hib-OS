@@ -444,7 +444,7 @@ mod tests {
     fn total_stats_consistency() {
         let mut s = SlabAllocator::new();
         let h1 = s.alloc(32).unwrap();
-        let h2 = s.alloc(64).unwrap();
+        let _h2 = s.alloc(64).unwrap();
         assert_eq!(s.total_used(), 2);
         assert_eq!(s.total_allocs(), 2);
         s.free(h1).unwrap();

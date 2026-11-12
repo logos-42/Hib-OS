@@ -1439,7 +1439,7 @@ mod tests {
     #[test]
     fn widget_state_colors() {
         let colors = WidgetColors::default_theme();
-        let (bg, fg, border) = state_color(&colors, WidgetState::Normal);
+        let (bg, _fg, _border) = state_color(&colors, WidgetState::Normal);
         assert_eq!(bg, palette::SURFACE0);
         let hc = WidgetColors::high_contrast();
         let (bg2, _, _) = state_color(&hc, WidgetState::Focused);

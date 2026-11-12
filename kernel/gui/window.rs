@@ -503,7 +503,7 @@ pub fn cols_of(win: &Window) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::gui::surface::{blue_of, green_of, red_of};
+    use crate::gui::surface::{green_of, red_of};
 
     #[test]
     fn hit_test_regions() {

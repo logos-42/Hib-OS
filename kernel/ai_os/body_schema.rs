@@ -933,7 +933,7 @@ mod tests {
     fn body_schema_remove_part() {
         let mut schema = BodySchema::new();
         let id1 = schema.add_part(BodyPartType::Torso, "躯干", None);
-        let id2 = schema.add_part(BodyPartType::LeftArm, "左臂", Some(id1));
+        let _id2 = schema.add_part(BodyPartType::LeftArm, "左臂", Some(id1));
         assert!(schema.remove_part(id1).is_some());
         assert_eq!(schema.part_count(), 0);
     }

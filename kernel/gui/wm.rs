@@ -1090,7 +1090,7 @@ mod tests {
     fn wm_z_order() {
         let mut mgr = WindowManager::new(960, 600);
         let a = mgr.create_window(Rect::new(0, 0, 100, 100), "a", WindowFlags::all());
-        let b = mgr.create_window(Rect::new(10, 10, 100, 100), "b", WindowFlags::all());
+        let _b = mgr.create_window(Rect::new(10, 10, 100, 100), "b", WindowFlags::all());
         assert!(mgr.z_order(a, 100));
         assert_eq!(mgr.window(a).unwrap().z_level, 100);
         assert!(!mgr.z_order(99999, 1));
@@ -1173,7 +1173,7 @@ mod tests {
         assert!(sense.contains(&format!("#{}", id)));
         let res = wm_act(&format!("focus {}", id)).unwrap();
         assert!(res.contains("聚焦"));
-        let res = wm_act("list").unwrap();
+        let _res = wm_act("list").unwrap();
         assert!(sense.contains("windows="));
         let err = wm_act("focus 99999").unwrap_err();
         assert!(err.contains("不存在"));

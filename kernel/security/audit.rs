@@ -630,7 +630,7 @@ mod tests {
             logger.flush().unwrap();
         }
         // 新建日志器应能重新加载已落盘记录。
-        let mut logger2 = AuditLogger::new(&path);
+        let logger2 = AuditLogger::new(&path);
         assert_eq!(logger2.len(), 1);
         assert_eq!(logger2.stats().total, 1);
         let _ = fs::remove_file(&path);

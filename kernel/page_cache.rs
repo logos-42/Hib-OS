@@ -1035,7 +1035,7 @@ mod tests {
         cr.touch(10);
         cr.touch(20);
         cr.touch(30);
-        let evicted = cr.evict().unwrap();
+        let _evicted = cr.evict().unwrap();
         // 10 的使用位被清，hand 移到 20
         assert!(cr.evict().is_some());
         cr.remove(20);

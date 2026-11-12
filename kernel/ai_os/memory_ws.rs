@@ -1285,7 +1285,7 @@ mod tests {
         assert_eq!(eng.wm_retrieve(wid), Some("active info".into()));
         let sid = eng.stm_encode("encoded fact".into(), 0.7);
         assert_eq!(eng.stm_access(sid), Some("encoded fact".into()));
-        let lid = eng.ltm_store(LTMType::Semantic, "k", "v", 0.5);
+        let _lid = eng.ltm_store(LTMType::Semantic, "k", "v", 0.5);
         assert_eq!(eng.ltm_retrieve("k"), Some("v".into()));
         let eid = eng.episode_record("t", "d", 0, &[], None, 0.0, 0.5);
         assert!(eid > 0);
@@ -1298,7 +1298,7 @@ mod tests {
         let res = eng.skill_execute("skill1");
         assert!(res.is_some());
         let consolidated = eng.consolidate_wm_to_ltm();
-        assert!(consolidated >= 0);
+        let _ = consolidated;
         eng.tick(1_000_000_000);
     }
 

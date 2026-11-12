@@ -442,7 +442,7 @@ mod tests {
     fn allocated_block_count() {
         let mut b = BuddyAllocator::new(64, 0);
         let f1 = b.alloc_frames(1).unwrap();
-        let f2 = b.alloc_frames(1).unwrap();
+        let _f2 = b.alloc_frames(1).unwrap();
         assert_eq!(b.allocated_block_count(), 2);
         b.free(f1, 0).unwrap();
         assert_eq!(b.allocated_block_count(), 1);

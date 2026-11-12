@@ -829,7 +829,7 @@ mod tests {
     #[test]
     fn cfs_update_vruntime() {
         let mut rq = CfsRunQueue::new();
-        let mut t = Task::new("t", 0);
+        let t = Task::new("t", 0);
         let tid = t.id;
         rq.enqueue(t);
         rq.update_vruntime(tid, 1000);
@@ -839,7 +839,7 @@ mod tests {
     #[test]
     fn cfs_block_and_complete() {
         let mut rq = CfsRunQueue::new();
-        let mut t = Task::new("t", 0);
+        let t = Task::new("t", 0);
         let tid = t.id;
         rq.enqueue(t);
         assert_eq!(rq.ready_count(), 1);
@@ -852,7 +852,7 @@ mod tests {
     #[test]
     fn cfs_yield_task() {
         let mut rq = CfsRunQueue::new();
-        let mut t = Task::new("t", 0);
+        let t = Task::new("t", 0);
         let tid = t.id;
         rq.enqueue(t);
         let _ = rq.pick_next(); // 变成 Running
@@ -875,7 +875,7 @@ mod tests {
     #[test]
     fn core_scheduler_enqueue_pick() {
         let mut core = CoreScheduler::new(CoreId(0));
-        let mut t = Task::new("core-t", 0);
+        let t = Task::new("core-t", 0);
         let tid = t.id;
         core.enqueue(t, false);
         let next = core.pick_next(false).unwrap();
@@ -885,7 +885,7 @@ mod tests {
     #[test]
     fn core_scheduler_tick_updates_vruntime() {
         let mut core = CoreScheduler::new(CoreId(0));
-        let mut t = Task::new("tick-t", 0);
+        let t = Task::new("tick-t", 0);
         let tid = t.id;
         core.enqueue(t, false);
         core.pick_next(false);
@@ -897,7 +897,7 @@ mod tests {
     #[test]
     fn core_scheduler_yield_count() {
         let mut core = CoreScheduler::new(CoreId(0));
-        let mut t = Task::new("yield-t", 0);
+        let t = Task::new("yield-t", 0);
         let tid = t.id;
         core.enqueue(t, false);
         core.pick_next(false);
@@ -921,12 +921,12 @@ mod tests {
         let mut ms = MulticoreScheduler::new(2);
         ms.set_balance_threshold(0); // 任何差异都触发
         // 向 core 0 入队高权重任务
-        let mut heavy = Task::new("heavy", -20);
+        let heavy = Task::new("heavy", -20);
         let heavy_tid = heavy.id;
         ms.enqueue(0, heavy, false);
         // 向 core 1 入队低权重任务
-        let mut light = Task::new("light", 19);
-        let light_tid = light.id;
+        let light = Task::new("light", 19);
+        let _light_tid = light.id;
         ms.enqueue(1, light, false);
         // 负载不均，触发负载均衡：core 0 的任务迁移到 core 1
         let result = ms.load_balance();
@@ -949,7 +949,7 @@ mod tests {
     #[test]
     fn sched_task_state_query() {
         let mut ms = MulticoreScheduler::new(2);
-        let mut t = Task::new("query", 5);
+        let t = Task::new("query", 5);
         let tid = t.id;
         ms.enqueue(0, t, false);
         let st = ms.task_state(tid).unwrap();

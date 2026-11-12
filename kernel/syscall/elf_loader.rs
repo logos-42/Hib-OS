@@ -919,7 +919,7 @@ mod tests {
         let content = b"hello elf";
         let path = std::env::temp_dir().join(format!("hibos-elf-test-{}.bin", std::process::id()));
         std::fs::write(&path, make_minimal_elf64(entry, vaddr, content)).unwrap();
-        let mut program = ElfLoader::load(path.to_str().unwrap()).unwrap();
+        let program = ElfLoader::load(path.to_str().unwrap()).unwrap();
         assert!(!program.segments.is_empty());
         assert_eq!(program.entry_point(), entry);
         assert!(program.contains_addr(vaddr));

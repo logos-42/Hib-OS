@@ -143,7 +143,7 @@ fn semantic_to_memory_pipeline() {
 
     // 记忆巩固
     let consolidated = eng.consolidate_wm_to_ltm();
-    assert!(consolidated >= 0);
+    let _ = consolidated;
 
     eng.tick(1_000_000_000);
 }

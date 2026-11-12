@@ -999,7 +999,7 @@ mod tests {
             parameters: BTreeMap::new(), preconditions: Vec::new(), postconditions: Vec::new(),
             estimated_duration_ns: 100_000_000, energy_cost: 0.1, success_probability: 0.9, enabled: true,
         };
-        let (success, duration, result) = exec.execute(&prim, 0);
+        let (success, _duration, _result) = exec.execute(&prim, 0);
         assert!(success);
         assert_eq!(exec.execution_count, 1);
         assert_eq!(exec.success_count, 1);

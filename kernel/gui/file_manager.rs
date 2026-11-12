@@ -993,7 +993,7 @@ mod tests {
         assert!(res.contains("图标"));
         let res = file_manager_act("sort name").unwrap();
         assert!(res.contains("名称"));
-        let res = file_manager_act("list").unwrap();
+        let _res = file_manager_act("list").unwrap();
         assert!(sense.contains("current="));
     }
 

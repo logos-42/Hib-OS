@@ -1114,7 +1114,7 @@ mod tests {
         assert_eq!(segs1.len(), 1);
         assert_eq!(segs2.len(), 1);
         let s1_seq = segs1[0].seq;
-        let s2_seq = segs2[0].seq;
+        let _s2_seq = segs2[0].seq;
 
         // server 只收到第一段，重复 ACK 三次（对 s1_seq+4）。
         let d1 = segs1[0].serialize(test_ip(), peer_ip());
@@ -1144,9 +1144,9 @@ mod tests {
 
         let ck = client_key(50001);
         let conn = st.conns.get(&ck).unwrap();
-        let initial_cwnd = conn.congest.cwnd;
+        let _initial_cwnd = conn.congest.cwnd;
         let initial_rto = conn.rto;
-        drop(conn);
+        let _ = conn;
         // 伪造超时：把 rto_deadline 设为过去，发送一些数据占据 send_buf。
         if let Some(c) = st.conns.get_mut(&ck) {
             c.send_buf.extend(b"timeout data".iter().cloned());

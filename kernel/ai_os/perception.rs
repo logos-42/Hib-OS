@@ -18,7 +18,7 @@
 //!
 //! 所有结构均为纯 Rust 原型，无硬件依赖，供内核统一核算与调度。
 
-use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::{Mutex, OnceLock};
 
 // =====================================================================================
@@ -780,7 +780,7 @@ impl PerceptionEngine {
         modality_features.insert(channel.modality, features.clone());
 
         // 多模态融合
-        let fused = self.fusion.fuse(&modality_features);
+        let _fused = self.fusion.fuse(&modality_features);
 
         // 感知绑定
         let obj_id = self.binding.bind(channel.modality, features);
@@ -1211,7 +1211,7 @@ mod tests {
     #[test]
     fn binding_merge_modalities() {
         let mut bind = PerceptionBinding::new();
-        let now = crate::ai_os::native::now_ns();
+        let _now = crate::ai_os::native::now_ns();
         bind.binding_window_ns = u128::MAX; // 确保同一对象
         let id1 = bind.bind(
             SensoryModality::Visual,

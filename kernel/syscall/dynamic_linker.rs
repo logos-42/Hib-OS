@@ -558,7 +558,7 @@ mod tests {
         base
     }
 
-    fn write_elf_stub(dir: &Path, name: &str, kind: &str) -> PathBuf {
+    fn write_elf_stub(dir: &Path, name: &str, _kind: &str) -> PathBuf {
         let p = dir.join(name);
         let mut data = Vec::new();
         data.extend_from_slice(b"\x7fELF");
@@ -667,7 +667,7 @@ mod tests {
         write_elf_stub(&dir, "libgpu.so", "libgpu");
         let mut linker = DynamicLinker::new();
         linker.add_search_path(dir.clone());
-        let libc_id = linker.load_library_simple("libc.so").unwrap();
+        let _libc_id = linker.load_library_simple("libc.so").unwrap();
         let gpu_id = linker.load_library_simple("libgpu.so").unwrap();
         // 绑定 libgpu 的导入（依赖 libc）。
         assert!(linker.bind_imports(gpu_id).is_ok());
@@ -749,7 +749,7 @@ mod tests {
     fn search_path_absolute_and_candidates() {
         let dir = tmp_dir("cand");
         write_elf_stub(&dir, "libdirect.so", "lib");
-        let mut linker = DynamicLinker::new();
+        let linker = DynamicLinker::new();
         // 直接传入存在的绝对路径。
         let abs = dir.join("libdirect.so");
         let found = linker.search_path(abs.to_str().unwrap());

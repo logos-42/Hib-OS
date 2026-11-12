@@ -263,9 +263,10 @@ pub fn close(fd: SocketFd) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::net::{EthernetFrame, ETH_TYPE_IPV4, ICMP_ECHO_REPLY, IP_PROTO_ICMP, IcmpPacket, Ipv4Packet};
+    use crate::net::{EthernetFrame, ICMP_ECHO_REPLY, IP_PROTO_ICMP, IcmpPacket, Ipv4Packet};
 
     fn test_ip() -> [u8; 4] { [10, 0, 0, 2] }
+    #[allow(dead_code)]
     fn peer_ip() -> [u8; 4] { [10, 0, 0, 3] }
 
     fn reset_stack() {

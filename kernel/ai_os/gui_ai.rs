@@ -911,7 +911,7 @@ mod tests {
     #[test]
     fn window_focus() {
         let mut wm = AIWindowManager::new();
-        let id1 = wm.create_window("win1", 0, 0, 100, 100);
+        let _id1 = wm.create_window("win1", 0, 0, 100, 100);
         let id2 = wm.create_window("win2", 0, 0, 100, 100);
         assert!(wm.focus_window(id2));
         assert_eq!(wm.focused_window, Some(id2));
@@ -928,7 +928,7 @@ mod tests {
 
     #[test]
     fn widget_creation() {
-        let mut widget = AIGWidget::new(1, WidgetType::Button, "确定", 10, 10, 100, 30);
+        let widget = AIGWidget::new(1, WidgetType::Button, "确定", 10, 10, 100, 30);
         assert_eq!(widget.label, "确定");
         assert!(widget.enabled);
         assert!(widget.visible);

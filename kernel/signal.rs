@@ -732,7 +732,7 @@ mod tests {
 
     #[test]
     fn send_and_pending() {
-        let mut h = SignalHandler::new();
+        let h = SignalHandler::new();
         signal_send(1, Signal::SIGINT);
         signal_send(1, Signal::SIGTERM);
         let pending = signal_pending(1);
@@ -743,7 +743,7 @@ mod tests {
 
     #[test]
     fn masked_signal_not_pending() {
-        let mut h = SignalHandler::new();
+        let h = SignalHandler::new();
         signal_mask_add(1, Signal::SIGINT);
         signal_send(1, Signal::SIGINT);
         let pending = signal_pending(1);
@@ -754,7 +754,7 @@ mod tests {
 
     #[test]
     fn deliver_signals_invokes_handler() {
-        let mut h = SignalHandler::new();
+        let _h = SignalHandler::new();
         let invoked = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let invoked2 = invoked.clone();
         signal_register_handler_fn(1, Signal::SIGUSR1, move |sig| {
@@ -772,7 +772,7 @@ mod tests {
 
     #[test]
     fn sigkill_always_default_terminates() {
-        let mut h = SignalHandler::new();
+        let h = SignalHandler::new();
         // 即使注册了自定义处理，SIGKILL 也应终止进程
         signal_register_handler_fn(1, Signal::SIGKILL, |_| true);
         signal_send(1, Signal::SIGKILL);
@@ -783,7 +783,7 @@ mod tests {
 
     #[test]
     fn sigcont_resumes() {
-        let mut h = SignalHandler::new();
+        let _h = SignalHandler::new();
         signal_send(1, Signal::SIGSTOP);
         signal_deliver(1);
         assert!(signal_is_terminated(1));
@@ -794,7 +794,7 @@ mod tests {
 
     #[test]
     fn handler_return_false_terminates() {
-        let mut h = SignalHandler::new();
+        let h = SignalHandler::new();
         signal_register_handler_fn(1, Signal::SIGUSR2, |_| false);
         signal_send(1, Signal::SIGUSR2);
         signal_deliver(1);
@@ -804,7 +804,7 @@ mod tests {
 
     #[test]
     fn pending_signals_cleared_after_deliver() {
-        let mut h = SignalHandler::new();
+        let _h = SignalHandler::new();
         signal_send(1, Signal::SIGINT);
         signal_send(1, Signal::SIGINT); // 重复发送同一信号，pending 是 set，只保留一份
         let _d1 = signal_deliver(1);
@@ -850,7 +850,7 @@ mod tests {
 
     #[test]
     fn signal_mask_set_and_operations() {
-        let mut h = SignalHandler::new();
+        let _h = SignalHandler::new();
         signal_mask_add(1, Signal::SIGINT);
         signal_mask_add(1, Signal::SIGTERM);
         let set = signal_mask_set(1);
@@ -865,7 +865,7 @@ mod tests {
 
     #[test]
     fn signal_send_set_delivers() {
-        let mut h = SignalHandler::new();
+        let _h = SignalHandler::new();
         let mut set = SigSet::empty();
         set.add(Signal::SIGUSR1);
         set.add(Signal::SIGUSR2);
@@ -880,7 +880,7 @@ mod tests {
 
     #[test]
     fn signal_suspend_returns_pending() {
-        let mut h = SignalHandler::new();
+        let _h = SignalHandler::new();
         signal_send(1, Signal::SIGALRM);
         let sig = signal_suspend(1);
         assert_eq!(sig, Some(Signal::SIGALRM));

@@ -576,7 +576,7 @@ fn hex_decode(s: &str) -> Result<Vec<u8>, String> {
 mod tests {
     use super::*;
     use crate::net::{ICMP_ECHO_REQUEST, ICMP_ECHO_REPLY};
-    use crate::net::ipv4::IP_PROTO_ICMP;
+    
     #[test]
     fn echo_request_reply_roundtrip() {
         let mut st = IcmpStack::new();
@@ -659,7 +659,7 @@ mod tests {
     fn process_echo_reply_matches_pending_and_rtt() {
         let mut st = IcmpStack::new();
         let payload = b"ping!";
-        let req_bytes = st.echo_request(0x5678, 3, payload);
+        let _req_bytes = st.echo_request(0x5678, 3, payload);
         st.register_pending(0x5678, 3, [10, 0, 0, 3], payload);
 
         // 收到对应的 Echo Reply。

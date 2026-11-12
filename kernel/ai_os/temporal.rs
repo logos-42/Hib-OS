@@ -850,7 +850,7 @@ mod tests {
         let clock = TemporalClock::new(ClockType::Monotonic);
         let start = clock.now();
         let elapsed = clock.elapsed();
-        assert!(elapsed >= 0);
+        let _ = elapsed;
         let _ = start;
     }
 

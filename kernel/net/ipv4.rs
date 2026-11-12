@@ -496,6 +496,7 @@ mod tests {
     use super::*;
     use crate::net::Interface;
 
+    #[allow(dead_code)]
     fn test_iface() -> Interface {
         Interface {
             name: "eth0".to_string(),

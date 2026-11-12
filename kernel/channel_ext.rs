@@ -771,7 +771,7 @@ pub fn group_list() -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::exec::ExecId;
+    
 
     #[test]
     fn channel_meta_new_and_summary() {
@@ -917,7 +917,7 @@ mod tests {
         // 确保无人持有
         let _ = lease::release(ch, 801u64);
         let ep = LeaseExt::wait_for_lease(ch, 801u64, Duration::from_secs(1)).unwrap();
-        assert!(ep >= 0);
+        assert!(ep < u64::MAX);
         let _ = lease::release(ch, 801u64);
     }
 

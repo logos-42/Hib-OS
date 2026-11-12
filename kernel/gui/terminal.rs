@@ -1225,7 +1225,7 @@ mod tests {
         assert!(res.contains("30"));
         let res = terminal_act("clear").unwrap();
         assert!(res.contains("清屏"));
-        let res = terminal_act("list").unwrap();
+        let _res = terminal_act("list").unwrap();
         assert!(sense.contains("cols="));
     }
 
