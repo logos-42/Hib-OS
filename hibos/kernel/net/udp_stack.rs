@@ -11,7 +11,7 @@
 //! * 端口 → socket 的多路复用映射
 //! * sense/act 通道：`net://udp`
 
-use alloc::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, VecDeque};
 use crate::ksync::{SpinLock, OnceLock};
 
 use crate::net::ipv4::compute_checksum;

@@ -13,7 +13,7 @@
 //! * 阻塞/非阻模式简化版
 //! * sense/act 通道：`socket://tcp`（兼容现有）
 
-use alloc::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, VecDeque};
 use crate::ksync::{SpinLock, OnceLock};
 
 // =======================================================================

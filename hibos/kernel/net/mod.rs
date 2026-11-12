@@ -11,7 +11,7 @@
 //! `parse_ip/parse_mac/fmt_ip/fmt_mac/same_subnet`、`send/recv/arp_add/...`
 //! 与原 kernel/net.rs 接口一致，供 kernel/sense.rs / kernel/netif.rs / kernel/shell.rs 继续使用。
 
-use alloc::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, VecDeque};
 use crate::ksync::{SpinLock, OnceLock};
 
 pub mod device;

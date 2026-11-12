@@ -11,7 +11,7 @@
 //! * 递归查询（串联多台上游服务器）、缓存（TTL 过期淘汰）、hosts 文件支持
 //! * sense/act 通道：`net://dns`
 
-use alloc::collections::HashMap;
+use std::collections::HashMap;
 use crate::ksync::{SpinLock, OnceLock};
 
 // =======================================================================

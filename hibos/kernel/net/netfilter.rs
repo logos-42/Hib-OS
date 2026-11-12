@@ -12,7 +12,7 @@
 //! * NAT 简化版：SNAT / DNAT、连接跟踪表（conntrack）简化版
 //! * sense/act 通道：`netfilter://rules`
 
-use alloc::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, VecDeque};
 use crate::ksync::{SpinLock, OnceLock};
 
 // =======================================================================

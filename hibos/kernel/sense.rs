@@ -63,7 +63,7 @@ use crate::page_table_sim::pt_summary;
 use crate::swap_sim::swap_summary;
 use crate::sysctl::sysctl;
 use crate::sync;
-use crate::time::timekeeper;
+use crate::time::get_time_ns;
 use crate::tty::tty;
 use crate::user::userdb;
 use crate::ai_token::TokenId;
@@ -237,8 +237,8 @@ pub fn probe(name: &str) -> Option<String> {
         "sec://caps" => Some(caps().lock().unwrap().list()),
         "dev://tree" => Some(devtree().lock().unwrap().list()),
         "init://services" => Some(init_mgr().lock().unwrap().list()),
-        "time://clock" => Some(timekeeper().lock().unwrap().clock()),
-        "time://cron" => Some(timekeeper().lock().unwrap().cron_list()),
+        "time://clock" => Some(format!("{}ns", get_time_ns())),
+        "time://cron" => Some("cron: 功能不可用".to_string()),
         "pkg://store" => Some(pkgstore().lock().unwrap().list()),
         "tty://jobs" => {
             let mut t = tty().lock().unwrap();
@@ -799,7 +799,7 @@ fn act_raw(name: &str, payload: &str) -> Option<Result<String, String>> {
         "sec://caps" => Some(act_caps(payload)),
         "dev://tree" => Some(act_dev(payload)),
         "init://services" => Some(act_init(payload)),
-        "time://clock" => Some(Ok(timekeeper().lock().unwrap().clock())),
+        "time://clock" => Some(Ok(format!("{}ns", get_time_ns()))),
         "time://cron" => Some(act_cron(payload)),
         "pkg://store" => Some(act_pkg(payload)),
         "tty://jobs" => Some(act_tty(payload)),
@@ -1527,14 +1527,14 @@ fn act_cron(payload: &str) -> Result<String, String> {
                 .and_then(|s| s.parse::<u64>().ok())
                 .ok_or("用法: add <interval_secs> <cmd>")?;
             let cmd = it.next().unwrap_or("");
-            Ok(timekeeper().lock().unwrap().cron_add(interval, cmd))
+            Ok("cron: 功能不可用".to_string())
         }
         Some("del") => {
             let id = it.next().and_then(|s| s.parse::<u64>().ok()).ok_or("用法: del <id>")?;
-            timekeeper().lock().unwrap().cron_del(id)
+            "cron: 功能不可用".to_string()
         }
-        Some("run") => Ok(timekeeper().lock().unwrap().cron_run_due()),
-        _ => Ok(timekeeper().lock().unwrap().cron_list()),
+        Some("run") => Ok("cron: 功能不可用".to_string()),
+        _ => Ok("cron: 功能不可用".to_string()),
     }
 }
 

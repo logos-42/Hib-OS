@@ -16,7 +16,7 @@
 //! `tcp_recv(key, len)` / `tcp_accept(listener_port)` / `tcp_close(key)` /
 //! `tcp_process_segment(src_ip, dst_ip, bytes)` / `tcp_stack_tick(dt)`。
 
-use alloc::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, VecDeque};
 use crate::ksync::{SpinLock, OnceLock};
 use core::time::Duration;
 
