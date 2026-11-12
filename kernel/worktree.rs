@@ -128,6 +128,56 @@ pub fn worktrees() -> &'static Mutex<WorktreeRegistry> {
     WORKTREES.get_or_init(|| Mutex::new(WorktreeRegistry::new()))
 }
 
+/// 当前激活 worktree 的根路径（未激活则为 "/"）。
+pub fn current_root() -> String {
+    worktrees().lock().unwrap().current_root()
+}
+
+/// 把**相对路径**解析到当前 worktree 根下（绝对路径原样返回）。
+///
+/// 这是 worktree 与 VFS 文件操作真正隔离的关键：AI 在自己的 worktree 里
+/// `write note.txt` 会落到 `<worktree_root>/note.txt`，而不会污染其他实例。
+pub fn resolve_path(path: &str) -> String {
+    let p = path.trim();
+    if p.is_empty() || p.starts_with('/') {
+        return p.to_string();
+    }
+    let root = current_root();
+    if root == "/" {
+        return p.to_string();
+    }
+    format!(
+        "{}/{}",
+        root.trim_end_matches('/'),
+        p.trim_start_matches('/')
+    )
+}
+
+/// 解析 `fs://vfs` 动作负载中的路径参数（write/read/ls/mkdir/rm/stat）。
+pub fn resolve_fs_payload(payload: &str) -> String {
+    let payload = payload.trim();
+    let (cmd, rest) = match payload.split_once(char::is_whitespace) {
+        Some((c, r)) => (c, r.trim()),
+        None => (payload, ""),
+    };
+    if !matches!(
+        cmd,
+        "write" | "read" | "ls" | "mkdir" | "rm" | "stat"
+    ) {
+        return payload.to_string();
+    }
+    let (path, tail) = match rest.split_once(char::is_whitespace) {
+        Some((p, t)) => (p, t),
+        None => (rest, ""),
+    };
+    let resolved = resolve_path(path);
+    if tail.is_empty() {
+        format!("{} {}", cmd, resolved)
+    } else {
+        format!("{} {} {}", cmd, resolved, tail)
+    }
+}
+
 /// `sense worktree://trees`：返回 worktree 快照。
 pub fn worktree_sense() -> String {
     worktrees().lock().unwrap().list()

@@ -792,7 +792,7 @@ fn act_raw(name: &str, payload: &str) -> Option<Result<String, String>> {
         "mem://ram" => Some(act_ram(payload)),
         "mem://mmap" => Some(act_mmap(payload)),
         "fs://meta" => Some(act_fsmeta(payload)),
-        "fs://vfs" => Some(fs_act_dispatch(payload)),
+        "fs://vfs" => Some(fs_act_dispatch(&crate::worktree::resolve_fs_payload(payload))),
         "user://db" => Some(act_user(payload)),
         "socket://tcp" => Some(act_socket(payload)),
         "net://dns" => Some(act_dns(payload)),

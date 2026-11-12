@@ -863,6 +863,16 @@ impl Shell {
         Some(ChannelKind::Plugin)
     }
 
+    /// worktree 创建后，在 VFS 里建出对应隔离根目录（让工作区真实可见）。
+    fn sync_worktree_hooks(&mut self, payload: &str) {
+        let name = payload.split_whitespace().nth(1).unwrap_or("").trim();
+        if name.is_empty() {
+            return;
+        }
+        let _ = self.vfs.mkdir("/worktrees");
+        let _ = self.vfs.mkdir(&format!("/worktrees/{}", name));
+    }
+
     fn cmd_sense(&mut self, parts: &[&str]) {
         let Some(name) = parts.get(1).copied() else {
             println!("用法: sense <通道>  (channels 查看全部通道)");
@@ -981,6 +991,10 @@ impl Shell {
             // 挂载表是唯一需要同步到 VFS 的通道：成功挂载后立刻建目录 / 写伪文件。
             if ok && name == "mount://table" {
                 self.sync_mount_hooks(&payload);
+            }
+            // worktree 创建后立刻在 VFS 里建出隔离根目录，让工作区真实可见。
+            if ok && name == "worktree://trees" && payload.trim_start().starts_with("create") {
+                self.sync_worktree_hooks(&payload);
             }
             return;
         }
@@ -1384,7 +1398,19 @@ impl Shell {
 
     fn cmd_ls(&mut self, path: Option<&str>) {
         self.refresh_virtual_mounts();
-        match self.vfs.ls(path) {
+        // worktree 生效时：相对路径与默认目录都落在隔离根下。
+        let resolved: Option<String> = match path {
+            Some(p) => Some(crate::worktree::resolve_path(p)),
+            None => {
+                let root = crate::worktree::current_root();
+                if root == "/" {
+                    None
+                } else {
+                    Some(root)
+                }
+            }
+        };
+        match self.vfs.ls(resolved.as_deref()) {
             Ok(items) => {
                 if items.is_empty() {
                     println!("(空目录)");
@@ -1407,8 +1433,11 @@ impl Shell {
 
     fn cmd_cd(&mut self, path: Option<&str>) {
         self.refresh_virtual_mounts();
-        let target = path.unwrap_or("/");
-        match self.vfs.cd(target) {
+        let target = match path {
+            Some(p) => crate::worktree::resolve_path(p),
+            None => "/".to_string(),
+        };
+        match self.vfs.cd(&target) {
             Ok(()) => {}
             Err(e) => println!("cd 失败: {} ({})", e, target),
         }
@@ -1419,8 +1448,9 @@ impl Shell {
             println!("用法: cat <路径>");
             return;
         };
+        let path = crate::worktree::resolve_path(path);
         self.refresh_virtual_mounts();
-        match self.vfs.cat(path) {
+        match self.vfs.cat(&path) {
             Ok(content) => {
                 if content.is_empty() {
                     println!("(空文件)");
@@ -1442,10 +1472,11 @@ impl Shell {
         };
         let mut content = parts[2..].join(" ");
         content.push('\n');
+        let path = crate::worktree::resolve_path(path);
         let result = if append {
-            self.vfs.append(path, &content)
+            self.vfs.append(&path, &content)
         } else {
-            self.vfs.write(path, &content)
+            self.vfs.write(&path, &content)
         };
         match result {
             Ok(()) => println!(
@@ -1463,7 +1494,8 @@ impl Shell {
             println!("用法: mkdir <路径>");
             return;
         };
-        match self.vfs.mkdir(path) {
+        let path = crate::worktree::resolve_path(path);
+        match self.vfs.mkdir(&path) {
             Ok(()) => println!("已创建目录 {}", path),
             Err(e) => println!("mkdir 失败: {}", e),
         }
@@ -1474,7 +1506,8 @@ impl Shell {
             println!("用法: touch <路径>");
             return;
         };
-        match self.vfs.touch(path) {
+        let path = crate::worktree::resolve_path(path);
+        match self.vfs.touch(&path) {
             Ok(()) => println!("已创建文件 {}", path),
             Err(e) => println!("touch 失败: {}", e),
         }
@@ -1485,7 +1518,8 @@ impl Shell {
             println!("用法: rm <路径>");
             return;
         };
-        match self.vfs.rm(path) {
+        let path = crate::worktree::resolve_path(path);
+        match self.vfs.rm(&path) {
             Ok(()) => println!("已删除 {}", path),
             Err(e) => println!("rm 失败: {}", e),
         }
@@ -1816,11 +1850,18 @@ impl Shell {
         );
         let mut loop_ = crate::deepseek::ThoughtLoop::new(&system_prompt).with_limits(10, 8000);
         tagged_out!("[hibos]", "AI 意识闭环已启动 (exit/quit 退出)");
-        let mut last_cycle: Option<std::time::Instant> = None;
+        // 周期巡检间隔：默认 60s，可用环境变量 HIBOS_LLM_INTERVAL_SECS 调整。
+        let interval_secs: u64 = std::env::var("HIBOS_LLM_INTERVAL_SECS")
+            .ok()
+            .and_then(|v| v.trim().parse::<u64>().ok())
+            .unwrap_or(60)
+            .max(5);
+        // 起始即计时：启动时不立即触发一轮，避免初次加载时 AI 刷出一大段回复。
+        let mut last_cycle = std::time::Instant::now();
         loop {
             // —— 内部驱动：定时器触发周期巡检 ——
             let now = std::time::Instant::now();
-            let due = last_cycle.map(|t| now.duration_since(t).as_secs() >= 60).unwrap_or(true);
+            let due = now.duration_since(last_cycle).as_secs() >= interval_secs;
             if due {
                 let perception = format!(
                     "系统周期巡检: 已感知通道={} 当前目录={}",
@@ -1849,7 +1890,7 @@ impl Shell {
                         loop_.reset();
                     }
                 }
-                last_cycle = Some(now);
+                last_cycle = now;
             }
 
             // — 外部输入驱动 —
@@ -1962,14 +2003,15 @@ impl Shell {
                     }
                     format!("act {}", args.join(" "))
                 }
-                // —— 文件系统高级指令 ——
+                // —— 文件系统高级指令（相对路径解析到当前 worktree 根，实现实例隔离） ——
                 "file" => match args.first().copied() {
                     Some("write") | Some("append") => {
                         if args.len() < 3 {
                             tagged_out!("[llm]", "用法: ACTION: file write <路径> <内容...>");
                             continue;
                         }
-                        format!("{} {} {}", args[0], args[1], args[2..].join(" "))
+                        let p = crate::worktree::resolve_path(args[1]);
+                        format!("{} {} {}", args[0], p, args[2..].join(" "))
                     }
                     Some("mkdir") | Some("touch") | Some("rm") | Some("cat") | Some("ls")
                     | Some("cd") => {
@@ -1977,7 +2019,8 @@ impl Shell {
                             tagged_out!("[llm]", "用法: ACTION: file {} <路径>", args[0]);
                             continue;
                         }
-                        format!("{} {}", args[0], args[1..].join(" "))
+                        let p = crate::worktree::resolve_path(args[1]);
+                        format!("{} {}", args[0], p)
                     }
                     _ => {
                         println!(
