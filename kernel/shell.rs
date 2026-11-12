@@ -213,7 +213,7 @@ impl Shell {
 
         if !providers.is_empty() {
             // 极简启动（无大横幅、无子系统噪声日志）。
-            println!("Hib OS — AI 意识本体闭环已就绪 (exit 退出)");
+            println!("Hib OS — AI OS 已就绪 (exit 退出)");
             self.run_llm_loop(&providers);
             return;
         }
@@ -1941,13 +1941,10 @@ impl Shell {
                     .join(", ")
             );
         }
-        // 每个闭环实例绑定独立的 worktree —— 意识实例级工作区隔离。
-        let seq = LOOP_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let wt_name = format!("loop-{}-{}", provider, seq);
-        let wt_root = crate::worktree::ensure_worktree(&wt_name, "ai-loop");
-        self.sync_worktree_root(&wt_root);
-        tagged_out!("[hibos]", "AI 意识闭环已启动 (exit/quit 退出)");
-        tagged_out!("[worktree]", "本实例工作区: {} ({})", wt_root, wt_name);
+        // 意识实例级工作区：**收到第一条用户命令时才绑定**。
+        // 没有用户命令之前不创建 worktree、不发起任何模型调用（保持静默待命）。
+        let mut wt: Option<(String, String)> = None;
+        tagged_out!("[hibos]", "AI 意识闭环已启动（等待你的第一条命令）");
         // 周期巡检间隔：默认 60s，可用环境变量 HIBOS_LLM_INTERVAL_SECS 调整。
         let interval_secs: u64 = std::env::var("HIBOS_LLM_INTERVAL_SECS")
             .ok()
@@ -1957,10 +1954,11 @@ impl Shell {
         // 起始即计时：启动时不立即触发一轮，避免初次加载时 AI 刷出一大段回复。
         let mut last_cycle = std::time::Instant::now();
         loop {
-            // —— 内部驱动：定时器触发周期巡检 ——
+            // —— 内部驱动：仅在用户下过命令之后才开始周期巡检 ——
             let now = std::time::Instant::now();
-            let due = now.duration_since(last_cycle).as_secs() >= interval_secs;
+            let due = wt.is_some() && now.duration_since(last_cycle).as_secs() >= interval_secs;
             if due {
+                let (_, wt_root) = wt.as_ref().unwrap();
                 let perception = format!(
                     "系统周期巡检: 已感知通道={} 当前目录={} 工作区={}",
                     self.channels.len(),
@@ -1968,8 +1966,9 @@ impl Shell {
                     wt_root
                 );
                 // 多 provider 并行思考 → 逐个落地行动 → 呈现回复。
-                self.run_cycle(&mut sessions, &perception, &wt_root);
-                last_cycle = now;            }
+                self.run_cycle(&mut sessions, &perception, wt_root);
+                last_cycle = now;
+            }
 
             // — 外部输入驱动 —
             let prompt = theme::prompt("~");
@@ -1979,6 +1978,7 @@ impl Shell {
             match outcome {
                 Ok(line_editor::ReadOutcome::Line(line)) => {
                     let trimmed = line.trim();
+                    tagged_out!("[llm]", "DEBUG 读到输入: {:?}", trimmed);
                     if trimmed.is_empty() {
                         continue;
                     }
@@ -1990,6 +1990,17 @@ impl Shell {
                         );
                         break;
                     }
+                    // 首次用户命令：绑定本实例工作区（意识实例级隔离）。
+                    if wt.is_none() {
+                        let seq = LOOP_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        let wt_name = format!("loop-{}-{}", provider, seq);
+                        let wt_root = crate::worktree::ensure_worktree(&wt_name, "ai-loop");
+                        self.sync_worktree_root(&wt_root);
+                        tagged_out!("[worktree]", "本实例工作区: {} ({})", wt_root, wt_name);
+                        wt = Some((wt_name, wt_root));
+                        last_cycle = std::time::Instant::now();
+                    }
+                    let (_, wt_root) = wt.as_ref().unwrap();
                     // 感知：把当前 shell 上下文（工作目录、通道数）作为感知输入
                     let perception = format!(
                         "用户输入: {}\n当前目录: {}\n已感知通道: {} 个\n工作区: {}",
@@ -1999,7 +2010,7 @@ impl Shell {
                         wt_root
                     );
                     // 多 provider 并行思考 → 逐个落地行动 → 呈现回复。
-                    self.run_cycle(&mut sessions, &perception, &wt_root);
+                    self.run_cycle(&mut sessions, &perception, wt_root);
                 }
                 Ok(line_editor::ReadOutcome::Cancelled) => {
                     // Ctrl+C：退出闭环循环（原先仅取消本行、继续 REPL，导致 Ctrl+C 无法退出）

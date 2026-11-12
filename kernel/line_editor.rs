@@ -103,7 +103,11 @@ impl LineEditor {
         if n == 0 {
             return Ok(ReadOutcome::Eof);
         }
-        let line = buf.trim_end_matches(['\r', '\n']).to_string();
+        // 去掉行尾换行与可能存在的 UTF-8 BOM（管道/重定向输入常带 BOM）。
+        let line = buf
+            .trim_end_matches(['\r', '\n'])
+            .trim_start_matches('\u{feff}')
+            .to_string();
         self.add_history(&line);
         Ok(ReadOutcome::Line(line))
     }
