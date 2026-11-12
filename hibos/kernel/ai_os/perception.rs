@@ -1,4 +1,4 @@
-//! 多模态感知层 —— AI 原生 OS 的「感知系统」 (Multi-modal Perception)
+﻿//! 多模态感知层 —— AI 原生 OS 的「感知系统」 (Multi-modal Perception)
 //!
 //! 本模块实现 AI 原生 OS 的多模态感知，对应传统 OS 中的「中断控制器 /
 //! I/O 设备驱动」概念，但重新映射到感知域：
@@ -1426,3 +1426,4 @@ mod tests {
         assert_eq!(SensorType::Microphone as u32, 1);
     }
 }
+

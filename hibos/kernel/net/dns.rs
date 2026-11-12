@@ -1,4 +1,4 @@
-//! DNS 解析器（kernel/net/dns.rs）。
+﻿//! DNS 解析器（kernel/net/dns.rs）。
 //!
 //! 本模块实现一个简化的 DNS 解析器：构造与解析 DNS 报文（头部、问题区、回答区、
 //! 权威区、附加区）、递归查询、带 TTL 过期淘汰的缓存、hosts 文件支持。
@@ -350,11 +350,11 @@ struct CacheEntry {
 
 /// DNS 缓存：按 (name, type) 索引，TTL 过期淘汰。
 pub struct DnsCache {
-    entries: HashMap<(String, u16), CacheEntry>,
+    entries: BTreeMap<(String, u16), CacheEntry>,
 }
 
 impl DnsCache {
-    pub fn new() -> Self { Self { entries: HashMap::new() } }
+    pub fn new() -> Self { Self { entries: BTreeMap::new() } }
 
     /// 查找：命中且未过期返回记录，否则 None（并清理过期项）。
     pub fn lookup(&mut self, name: &str, rtype: DnsRecordType) -> Option<DnsRecord> {
@@ -391,15 +391,15 @@ fn now_secs() -> u32 {
 
 /// hosts 条目：域名 -> IP。
 pub struct Hosts {
-    map: HashMap<String, [u8; 4]>,
+    map: BTreeMap<String, [u8; 4]>,
 }
 
 impl Hosts {
-    pub fn new() -> Self { Self { map: HashMap::new() } }
+    pub fn new() -> Self { Self { map: BTreeMap::new() } }
 
     /// 从字符串内容解析 hosts 文件（每行：ip  name [#注释]）。
     pub fn parse(content: &str) -> Self {
-        let mut map = HashMap::new();
+        let mut map = BTreeMap::new();
         for line in content.lines() {
             let line = line.split('#').next().unwrap_or(line).trim();
             if line.is_empty() { continue; }

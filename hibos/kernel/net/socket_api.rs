@@ -1,4 +1,4 @@
-//! POSIX 兼容 Socket API（kernel/net/socket_api.rs）。
+﻿//! POSIX 兼容 Socket API（kernel/net/socket_api.rs）。
 //!
 //! 本模块在 `kernel/net` 的 tcp/udp/ip 层之上提供 BSD 风格简化版 Socket API：
 //! socket/bind/listen/accept/connect/send/recv/sendto/recvfrom/close/setsockopt/getsockopt。
@@ -13,7 +13,7 @@
 //! * 阻塞/非阻模式简化版
 //! * sense/act 通道：`socket://tcp`（兼容现有）
 
-use alloc::collections::{HashMap, VecDeque};
+use alloc::collections::{BTreeMap, VecDeque};
 use crate::ksync::{SpinLock, OnceLock};
 
 // =======================================================================
@@ -206,13 +206,13 @@ impl SockOpt {
 
 /// 文件描述符表：管理全部 socket 的生命周期。
 pub struct SocketTable {
-    sockets: HashMap<SocketFd, SocketEntry>,
+    sockets: BTreeMap<SocketFd, SocketEntry>,
     next_fd: SocketFd,
 }
 
 impl SocketTable {
     pub fn new() -> Self {
-        Self { sockets: HashMap::new(), next_fd: 3 } // 从 3 开始（0/1/2 为 stdin/stdout/stderr）
+        Self { sockets: BTreeMap::new(), next_fd: 3 } // 从 3 开始（0/1/2 为 stdin/stdout/stderr）
     }
 
     fn alloc_fd(&mut self) -> SocketFd {

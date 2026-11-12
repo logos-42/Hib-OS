@@ -1,4 +1,4 @@
-//! IPv4：寻址、路由、分片/重组、ICMP、向上层（TCP/UDP）分发。
+﻿//! IPv4：寻址、路由、分片/重组、ICMP、向上层（TCP/UDP）分发。
 //!
 //! 主机协议栈（不做转发）：收到的包若目的地址不是本机即丢弃。
 
@@ -198,12 +198,12 @@ struct ReassemblyEntry {
 
 /// IPv4 分片重组缓冲区，key = (src, dst, identification)。
 pub struct ReassemblyBuffer {
-    entries: HashMap<([u8; 4], [u8; 4], u16), ReassemblyEntry>,
+    entries: BTreeMap<([u8; 4], [u8; 4], u16), ReassemblyEntry>,
 }
 
 impl ReassemblyBuffer {
     pub fn new() -> Self {
-        Self { entries: HashMap::new() }
+        Self { entries: BTreeMap::new() }
     }
 
     /// 插入一片；全部齐全后返回重组好的包，否则返回 None（等待后续分片）。

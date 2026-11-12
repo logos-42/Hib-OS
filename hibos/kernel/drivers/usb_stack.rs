@@ -222,9 +222,9 @@ pub struct UsbDevice {
     pub state: DeviceState,
     pub address: u8,
     /// 端点地址 -> 端点描述符。
-    pub endpoints: HashMap<u8, EndpointDescriptor>,
+    pub endpoints: BTreeMap<u8, EndpointDescriptor>,
     /// 端点传输队列（方向 -> 队列）。
-    pub queues: HashMap<u8, VecDeque<Vec<u8>>>,
+    pub queues: BTreeMap<u8, VecDeque<Vec<u8>>>,
     /// 统计。
     pub stats: DeviceStats,
 }
@@ -249,7 +249,7 @@ impl UsbDevice {
             dev_id, descriptor,
             configs: Vec::new(), current_config: None,
             state: DeviceState::Attached, address: USB_DEFAULT_ADDRESS,
-            endpoints: HashMap::new(), queues: HashMap::new(),
+            endpoints: BTreeMap::new(), queues: BTreeMap::new(),
             stats: DeviceStats::default(),
         }
     }
@@ -320,7 +320,7 @@ pub const USB_REQ_TYPE_DIR_DEVICE_TO_HOST: u8 = 0x80;
 /// USB 总线：管理已注册设备、地址分配、传输调度。
 pub struct UsbBus {
     /// 设备 ID -> 设备。
-    devices: HashMap<UsbDeviceId, UsbDevice>,
+    devices: BTreeMap<UsbDeviceId, UsbDevice>,
     /// 下一个设备地址（1..127）。
     next_address: u8,
     /// 下一个设备 ID。
@@ -341,7 +341,7 @@ pub struct BusStats {
 impl UsbBus {
     /// 创建一个 USB 总线实例。
     pub fn new() -> Self {
-        Self { devices: HashMap::new(), next_address: 1, next_dev_id: 1, stats: BusStats::default() }
+        Self { devices: BTreeMap::new(), next_address: 1, next_dev_id: 1, stats: BusStats::default() }
     }
 
     /// 全局 USB 总线实例（`drv://usb` 通道后端）。
@@ -676,3 +676,4 @@ mod tests {
         assert!(usb_act_raw("enumerate 999").is_err());
     }
 }
+

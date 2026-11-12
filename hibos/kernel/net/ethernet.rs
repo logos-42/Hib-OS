@@ -1,4 +1,4 @@
-//! 以太网帧与 ARP —— 链路层。
+﻿//! 以太网帧与 ARP —— 链路层。
 //!
 //! 提供以太网 II 帧的封装/解析、MAC 地址表示、ARP 请求/应答包的序列化，
 //! 以及协议栈共用的 ARP 表查询辅助（ARP 条目本身由 `NetStack` 持有，见 `mod.rs`）。
@@ -133,7 +133,7 @@ impl ArpPacket {
 }
 
 /// ARP 表查询辅助：IP -> MAC；未知条目返回广播 MAC（与旧 net.rs 的 arp_resolve 语义一致）。
-pub fn arp_resolve(arp: &HashMap<[u8; 4], [u8; 6]>, ip: [u8; 4]) -> [u8; 6] {
+pub fn arp_resolve(arp: &BTreeMap<[u8; 4], [u8; 6]>, ip: [u8; 4]) -> [u8; 6] {
     arp.get(&ip).copied().unwrap_or(ETH_BROADCAST)
 }
 
@@ -195,7 +195,7 @@ mod tests {
 
     #[test]
     fn arp_resolve_known_and_unknown() {
-        let mut arp = HashMap::new();
+        let mut arp = BTreeMap::new();
         arp.insert([10, 0, 0, 3], [0x02, 0x00, 0x00, 0x00, 0x00, 0x03]);
         assert_eq!(arp_resolve(&arp, [10, 0, 0, 3]), [0x02, 0x00, 0x00, 0x00, 0x00, 0x03]);
         assert_eq!(arp_resolve(&arp, [10, 0, 0, 9]), ETH_BROADCAST);

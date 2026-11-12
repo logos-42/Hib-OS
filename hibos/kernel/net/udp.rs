@@ -1,4 +1,4 @@
-//! 轻量 UDP 传输层（kernel/net/udp.rs）。
+﻿//! 轻量 UDP 传输层（kernel/net/udp.rs）。
 //!
 //! 职责：UDP 首部的构造/解析、伪首部校验和计算与验证、按端口多路复用的
 //! 接收队列与发送封装。它与更完整的 `udp_stack.rs` 并存——后者面向
@@ -8,7 +8,7 @@
 //! 校验和算法遵循 RFC 768：伪首部(12B) + UDP 首部(校验和置 0) + 数据，
 //! 16 位反码求和后取反；结果为 0 时按惯例发送 0xFFFF。
 
-use alloc::collections::{HashMap, HashSet, VecDeque};
+use alloc::collections::{BTreeMap, HashSet, VecDeque};
 
 /// UDP 首部固定长度（字节）。
 pub const UDP_HEADER_LEN: usize = 8;
@@ -135,7 +135,7 @@ pub struct UdpLayer {
     /// 已绑定端口集合。
     bound: HashSet<u16>,
     /// 端口 -> 已接收数据报队列。
-    queues: HashMap<u16, VecDeque<Vec<u8>>>,
+    queues: BTreeMap<u16, VecDeque<Vec<u8>>>,
 }
 
 impl UdpLayer {
@@ -144,7 +144,7 @@ impl UdpLayer {
         Self {
             local_ip,
             bound: HashSet::new(),
-            queues: HashMap::new(),
+            queues: BTreeMap::new(),
         }
     }
 
@@ -269,3 +269,4 @@ mod tests {
         assert!(l.bind(5000).is_err());
     }
 }
+

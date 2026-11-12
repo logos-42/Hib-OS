@@ -1,4 +1,4 @@
-//! 工作记忆层 —— AI 原生 OS 的「记忆系统」 (Memory Working Space)
+﻿//! 工作记忆层 —— AI 原生 OS 的「记忆系统」 (Memory Working Space)
 //!
 //! 本模块实现 AI 原生 OS 的多层记忆架构，对应传统 OS 中的「缓存 / 主存 /
 //! 交换分区 / 文件系统」概念，但重新映射到记忆域：
@@ -731,13 +731,13 @@ pub struct AssociationResult {
 
 /// 记忆联想：基于语义相似度的关联检索。
 pub struct MemoryAssociation {
-    associations: HashMap<String, Vec<(String, f32)>>, // key -> [(related_key, strength)]
+    associations: BTreeMap<String, Vec<(String, f32)>>, // key -> [(related_key, strength)]
 }
 
 impl MemoryAssociation {
     pub fn new() -> Self {
         Self {
-            associations: HashMap::new(),
+            associations: BTreeMap::new(),
         }
     }
 
@@ -1747,3 +1747,4 @@ mod advanced_tests {
         assert_eq!(CompressionAlgorithm::None as u32, 3);
     }
 }
+

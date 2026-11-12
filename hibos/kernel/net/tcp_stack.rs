@@ -16,7 +16,7 @@
 //! `tcp_recv(key, len)` / `tcp_accept(listener_port)` / `tcp_close(key)` /
 //! `tcp_process_segment(src_ip, dst_ip, bytes)` / `tcp_stack_tick(dt)`。
 
-use alloc::collections::{HashMap, VecDeque};
+use alloc::collections::{BTreeMap, VecDeque};
 use crate::ksync::{SpinLock, OnceLock};
 use core::time::Duration;
 
@@ -362,7 +362,7 @@ pub struct TcpStack {
     /// 本机 IPv4 地址。
     pub our_ip: [u8; 4],
     /// 连接表：TcpConnKey -> TcpConn。
-    pub conns: HashMap<TcpConnKey, TcpConn>,
+    pub conns: BTreeMap<TcpConnKey, TcpConn>,
     /// 下一个临时端口。
     pub next_ephemeral: u16,
     /// 默认拥塞控制算法。
@@ -387,7 +387,7 @@ impl TcpStack {
     pub fn new(our_ip: [u8; 4]) -> Self {
         Self {
             our_ip,
-            conns: HashMap::new(),
+            conns: BTreeMap::new(),
             next_ephemeral: 49152,
             default_alg: CongestAlg::Reno,
             stats: TcpStackStats::default(),

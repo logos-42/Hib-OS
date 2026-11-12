@@ -259,7 +259,7 @@ pub struct PendingEcho {
 /// ICMP 协议栈：维护未解决 Echo 查询表、统计计数器。
 pub struct IcmpStack {
     /// 未解决的 Echo Request：(id, seq) -> PendingEcho。
-    pub pending: HashMap<(u16, u16), PendingEcho>,
+    pub pending: BTreeMap<(u16, u16), PendingEcho>,
     /// 下一个 echo 标识符。
     pub next_id: u16,
     /// 统计。
@@ -281,7 +281,7 @@ pub struct IcmpStats {
     /// 新建 ICMP 协议栈实例。
     pub fn new() -> Self {
         Self {
-            pending: HashMap::new(),
+            pending: BTreeMap::new(),
             next_id: 1,
             stats: IcmpStats::default(),
         }

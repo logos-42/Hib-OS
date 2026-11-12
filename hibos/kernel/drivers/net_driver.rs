@@ -196,11 +196,11 @@ pub struct DriverRegistration {
 /// 网卡驱动框架主体。
 pub struct NetDriver {
     /// 已注册驱动：名 -> 注册项。
-    pub drivers: HashMap<String, DriverRegistration>,
+    pub drivers: BTreeMap<String, DriverRegistration>,
     /// 已探测/绑定设备：device_id -> 设备实例。
-    pub devices: HashMap<DeviceId, NetDeviceInstance>,
+    pub devices: BTreeMap<DeviceId, NetDeviceInstance>,
     /// 名 -> device_id。
-    pub name_to_id: HashMap<String, DeviceId>,
+    pub name_to_id: BTreeMap<String, DeviceId>,
     /// 下一个 device id。
     next_device_id: u64,
     /// 中断计数（供统计）。
@@ -211,9 +211,9 @@ impl NetDriver {
     /// 创建一个空的驱动框架。
     pub fn new() -> Self {
         Self {
-            drivers: HashMap::new(),
-            devices: HashMap::new(),
-            name_to_id: HashMap::new(),
+            drivers: BTreeMap::new(),
+            devices: BTreeMap::new(),
+            name_to_id: BTreeMap::new(),
             next_device_id: 1,
             irq_count: AtomicU64::new(0),
         }
@@ -613,3 +613,4 @@ mod tests {
         assert!(net_driver_act_raw("link 1 up").is_err());
     }
 }
+

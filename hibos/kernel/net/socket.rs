@@ -1,4 +1,4 @@
-//! BSD 风格 socket API，建立于 kernel/net 的 tcp/udp/ip 层之上。
+﻿//! BSD 风格 socket API，建立于 kernel/net 的 tcp/udp/ip 层之上。
 //!
 //! 提供 socket/bind/connect/accept/recv/send/close，并与 `socket://tcp`
 //! 感知通道对齐（见 kernel/channels.rs 的 `socket://tcp` 通道注册以及
@@ -46,7 +46,7 @@ enum SockEntry {
 
 /// Socket 描述符表。
 pub struct SocketTable {
-    sockets: HashMap<SocketFd, SockEntry>,
+    sockets: BTreeMap<SocketFd, SockEntry>,
     next_fd: SocketFd,
 }
 
@@ -54,7 +54,7 @@ use alloc::collections::HashMap;
 
 impl SocketTable {
     pub fn new() -> Self {
-        Self { sockets: HashMap::new(), next_fd: 1 }
+        Self { sockets: BTreeMap::new(), next_fd: 1 }
     }
 
     fn alloc_fd(&mut self) -> SocketFd {

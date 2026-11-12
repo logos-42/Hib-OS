@@ -1,10 +1,10 @@
-//! 简化版 TCP：状态机（LISTEN/SYN-SENT/ESTABLISHED 等）、三次握手、
+﻿//! 简化版 TCP：状态机（LISTEN/SYN-SENT/ESTABLISHED 等）、三次握手、
 //! 序列号/确认号、滑动窗口。
 //!
 //! 本层不依赖以太网：`TcpLayer` 只处理 TCP 段字节流，收发由上层（`NetStack`）经
 //! IPv4 层封装成以太网帧送出。
 
-use alloc::collections::{HashMap, VecDeque};
+use alloc::collections::{BTreeMap, VecDeque};
 
 use crate::net::ipv4::compute_checksum;
 
@@ -185,7 +185,7 @@ impl TcpSocket {
 /// TCP 层：按本端端口索引的 socket 表。
 pub struct TcpLayer {
     pub our_ip: [u8; 4],
-    pub sockets: HashMap<TcpConnKey, TcpSocket>,
+    pub sockets: BTreeMap<TcpConnKey, TcpSocket>,
     pub next_ephemeral: u16,
 }
 
@@ -193,7 +193,7 @@ impl TcpLayer {
     pub fn new(our_ip: [u8; 4]) -> Self {
         Self {
             our_ip,
-            sockets: HashMap::new(),
+            sockets: BTreeMap::new(),
             next_ephemeral: 49152,
         }
     }

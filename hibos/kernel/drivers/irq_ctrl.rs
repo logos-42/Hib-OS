@@ -219,9 +219,9 @@ pub struct IrqController {
     /// IDT 表。
     pub idt: Idt,
     /// 中断线 -> 处理器列表（按优先级排序）。
-    pub handlers: HashMap<IrqLine, Vec<IrqHandlerEntry>>,
+    pub handlers: BTreeMap<IrqLine, Vec<IrqHandlerEntry>>,
     /// 中断线 -> 累计触发次数。
-    pub irq_counts: HashMap<IrqLine, u64>,
+    pub irq_counts: BTreeMap<IrqLine, u64>,
     /// 伪中断（spurious IRQ）计数。
     pub spurious_count: u64,
     /// 全局中断屏蔽掩码（位图，bit i = 屏蔽 IrqLine(i)）。
@@ -235,8 +235,8 @@ impl IrqController {
     pub fn new() -> Self {
         Self {
             idt: Idt::new(),
-            handlers: HashMap::new(),
-            irq_counts: HashMap::new(),
+            handlers: BTreeMap::new(),
+            irq_counts: BTreeMap::new(),
             spurious_count: 0,
             mask: 0,
             enabled: true,
@@ -635,4 +635,5 @@ mod tests {
         assert!(irq_ctrl_act_raw("raise 3").is_ok());
     }
 }
+
 

@@ -1,4 +1,4 @@
-//! Netfilter 防火墙（kernel/net/netfilter.rs）。
+﻿//! Netfilter 防火墙（kernel/net/netfilter.rs）。
 //!
 //! 本模块实现简化版 Netfilter：钩子点与规则链、报文过滤 verdict、
 //! 规则匹配（源/目的 IP、端口、协议、入/出接口）、动作（ACCEPT/DROP/REJECT/LOG/NAT 简化版）、
@@ -12,7 +12,7 @@
 //! * NAT 简化版：SNAT / DNAT、连接跟踪表（conntrack）简化版
 //! * sense/act 通道：`netfilter://rules`
 
-use alloc::collections::{HashMap, VecDeque};
+use alloc::collections::{BTreeMap, VecDeque};
 use crate::ksync::{SpinLock, OnceLock};
 
 // =======================================================================
@@ -223,11 +223,11 @@ pub struct ConntrackEntry {
 
 /// 连接跟踪表。
 pub struct Conntrack {
-    entries: HashMap<PacketKey, ConntrackEntry>,
+    entries: BTreeMap<PacketKey, ConntrackEntry>,
 }
 
 impl Conntrack {
-    pub fn new() -> Self { Self { entries: HashMap::new() } }
+    pub fn new() -> Self { Self { entries: BTreeMap::new() } }
 
     /// 查找现有连接（按原向或反向）。
     pub fn lookup(&self, key: &PacketKey) -> Option<&ConntrackEntry> {
@@ -274,15 +274,15 @@ struct HookChain {
 /// Netfilter 主体：规则表、钩子链、conntrack、NAT 映射。
 pub struct Netfilter {
     /// 规则 ID -> 规则。
-    rules: HashMap<u64, Rule>,
+    rules: BTreeMap<u64, Rule>,
     /// 钩子点 -> 链。
-    chains: HashMap<HookPoint, HookChain>,
+    chains: BTreeMap<HookPoint, HookChain>,
     /// 下一个规则 ID。
     next_rule_id: u64,
     /// 连接跟踪表。
     conntrack: Conntrack,
     /// NAT 映射：原地址 -> 新地址（SNAT/DNAT 简化）。
-    nat_map: HashMap<PacketKey, PacketKey>,
+    nat_map: BTreeMap<PacketKey, PacketKey>,
     /// 日志缓冲（最近条目）。
     log: VecDeque<String>,
     /// 统计。
@@ -303,11 +303,11 @@ impl Netfilter {
     /// 创建一个 Netfilter 实例。
     pub fn new() -> Self {
         Self {
-            rules: HashMap::new(),
-            chains: HashMap::new(),
+            rules: BTreeMap::new(),
+            chains: BTreeMap::new(),
             next_rule_id: 1,
             conntrack: Conntrack::new(),
-            nat_map: HashMap::new(),
+            nat_map: BTreeMap::new(),
             log: VecDeque::new(),
             stats: NetfilterStats::default(),
         }

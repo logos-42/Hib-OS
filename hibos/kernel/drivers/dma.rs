@@ -15,7 +15,7 @@
 //! 接口：`dma_submit(sg_list) -> Result<DmaTransferId, String>` / `dma_poll()` /
 //! `dma_register_completion_callback(...)` / `dma_transfer_status(id)`。
 
-use alloc::collections::{HashMap, VecDeque};
+use alloc::collections::{BTreeMap, VecDeque};
 use alloc::sync::Arc;
 use alloc::string::{String, ToString};
 use crate::ksync::{SpinLock, OnceLock};
@@ -207,15 +207,15 @@ impl DmaChannel {
 /// DMA 引擎：管理多个通道、传输队列、完成中断与统计。
 pub struct DmaEngine {
     /// 通道索引 -> 通道。
-    pub channels: HashMap<u8, DmaChannel>,
+    pub channels: BTreeMap<u8, DmaChannel>,
     /// 传输 ID -> 传输记录。
-    pub transfers: HashMap<DmaTransferId, DmaTransfer>,
+    pub transfers: BTreeMap<DmaTransferId, DmaTransfer>,
     /// 下一个传输 ID。
     pub next_id: u64,
     /// 下一个通道索引。
     pub next_channel: u8,
     /// 传输完成回调注册表（传输 ID -> 回调）。
-    pub completion_callbacks: HashMap<DmaTransferId, Arc<dyn Fn(DmaTransferId) + Send + Sync>>,
+    pub completion_callbacks: BTreeMap<DmaTransferId, Arc<dyn Fn(DmaTransferId) + Send + Sync>>,
     /// 统计。
     pub stats: DmaStats,
 }
@@ -235,11 +235,11 @@ impl DmaEngine {
     /// 新建 DMA 引擎（无通道）。
     pub fn new() -> Self {
         Self {
-            channels: HashMap::new(),
-            transfers: HashMap::new(),
+            channels: BTreeMap::new(),
+            transfers: BTreeMap::new(),
             next_id: 1,
             next_channel: 0,
-            completion_callbacks: HashMap::new(),
+            completion_callbacks: BTreeMap::new(),
             stats: DmaStats::default(),
         }
     }
@@ -643,4 +643,5 @@ mod tests {
         assert!(dma_act_raw("chan 0").is_err()); // 默认无通道
     }
 }
+
 

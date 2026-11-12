@@ -1,4 +1,4 @@
-//! UDP 协议栈完善（kernel/net/udp_stack.rs）。
+﻿//! UDP 协议栈完善（kernel/net/udp_stack.rs）。
 //!
 //! 本模块实现更完整的 UDP 传输层：端口多路复用、已连接/未连接模式、
 //! 发送/接收队列、伪首部 + UDP 首部 + 数据的校验和计算与验证。
@@ -11,7 +11,7 @@
 //! * 端口 → socket 的多路复用映射
 //! * sense/act 通道：`net://udp`
 
-use alloc::collections::{HashMap, VecDeque};
+use alloc::collections::{BTreeMap, VecDeque};
 use crate::ksync::{SpinLock, OnceLock};
 
 use crate::net::ipv4::compute_checksum;
@@ -158,9 +158,9 @@ pub struct UdpStack {
     /// 本机 IPv4 地址。
     pub local_ip: Ipv4Addr,
     /// 端口 → socket id。
-    port_map: HashMap<Port, UdpSocketId>,
+    port_map: BTreeMap<Port, UdpSocketId>,
     /// socket id → socket。
-    sockets: HashMap<UdpSocketId, UdpSocket>,
+    sockets: BTreeMap<UdpSocketId, UdpSocket>,
     next_id: u64,
     next_ephemeral: Port,
 }
@@ -170,8 +170,8 @@ impl UdpStack {
     pub fn new(local_ip: Ipv4Addr) -> Self {
         Self {
             local_ip,
-            port_map: HashMap::new(),
-            sockets: HashMap::new(),
+            port_map: BTreeMap::new(),
+            sockets: BTreeMap::new(),
             next_id: 1,
             next_ephemeral: 49152,
         }
@@ -467,3 +467,4 @@ mod tests {
         assert!(udp_act_raw("sockets").is_ok());
     }
 }
+

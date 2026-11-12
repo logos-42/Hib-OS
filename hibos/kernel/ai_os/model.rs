@@ -1,4 +1,4 @@
-//! 模型子系统 —— AI 原生 OS 的「可执行镜像」。
+﻿//! 模型子系统 —— AI 原生 OS 的「可执行镜像」。
 //!
 //! 对应《现代操作系统》中的**可执行文件与进程映像**：模型文件之于智能体，
 //! 如同 ELF 之于进程。模型注册表等价于内核的二进制格式注册表。
@@ -726,7 +726,7 @@ pub struct ModelShard {
 /// 分发器（P2P / 副本 / 一致性哈希）。
 pub struct ModelDistributor {
     shards: BTreeMap<u64, ModelShard>,
-    replicas: HashMap<String, Vec<String>>, // shard -> peer list
+    replicas: BTreeMap<String, Vec<String>>, // shard -> peer list
     ring: Vec<(u64, String)>,              // 一致性哈希环
 }
 
@@ -734,7 +734,7 @@ impl ModelDistributor {
     pub fn new() -> Self {
         Self {
             shards: BTreeMap::new(),
-            replicas: HashMap::new(),
+            replicas: BTreeMap::new(),
             ring: Vec::new(),
         }
     }
@@ -3847,3 +3847,4 @@ mod serving_tests {
         assert_eq!(resp.status, InferenceStatus::Processing);
     }
 }
+

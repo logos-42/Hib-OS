@@ -1,4 +1,4 @@
-//! 意识原子层 —— AI 原生 OS 的「意识原语」 (Native Consciousness Primitives)
+﻿//! 意识原子层 —— AI 原生 OS 的「意识原语」 (Native Consciousness Primitives)
 //!
 //! 本模块实现 AI 原生操作系统最底层的意识抽象，对应传统 OS 中的
 //! 「最小执行单元」与「中断向量」概念，但重新映射到 AI 意识域：
@@ -322,7 +322,7 @@ impl PhenomenalState {
     }
 
     pub fn dominant_modality(&self) -> Option<QualiaModality> {
-        let mut counts: HashMap<QualiaModality, u32> = HashMap::new();
+        let mut counts: BTreeMap<QualiaModality, u32> = BTreeMap::new();
         for q in &self.qualia {
             *counts.entry(q.modality).or_insert(0) += 1;
         }
@@ -1126,3 +1126,4 @@ impl QualiaFactory {
         self.create(QualiaModality::Auditory, vec![freq, 0.5, 0.0, 0.0])
     }
 }
+
