@@ -1,7 +1,7 @@
 //! IRQ 分发器 —— P1-2 子模块。
 
-use std::collections::BTreeMap;
-use std::sync::{Mutex, OnceLock};
+use alloc::collections::BTreeMap;
+use crate::ksync::{SpinLock, OnceLock};
 
 use crate::drivers::{IrqLine, IrqHandler};
 
@@ -10,17 +10,17 @@ struct IrqRegistry {
     handlers: BTreeMap<IrqLine, IrqHandler>,
 }
 
-static IRQ_REG: OnceLock<Mutex<IrqRegistry>> = OnceLock::new();
+static IRQ_REG: OnceLock<SpinLock<IrqRegistry>> = OnceLock::new();
 
-fn irq_reg() -> &'static Mutex<IrqRegistry> {
-    IRQ_REG.get_or_init(|| Mutex::new(IrqRegistry {
+fn irq_reg() -> &'static SpinLock<IrqRegistry> {
+    IRQ_REG.get_or_init(|| SpinLock::new(IrqRegistry {
         handlers: BTreeMap::new(),
     }))
 }
 
 /// 绑定 IRQ 处理器。
 pub fn irq_bind(irq: IrqLine, handler: IrqHandler) -> Result<(), String> {
-    let mut g = irq_reg().lock().unwrap();
+    let mut g = irq_reg().lock();
     if g.handlers.contains_key(&irq) {
         return Err(format!("IRQ 已绑定: {}", irq.0));
     }

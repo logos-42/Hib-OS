@@ -2,8 +2,9 @@
 //!
 //! 全局设备表，设备可绑定/解绑驱动，驱动支持热插拔。
 
-use std::collections::BTreeMap;
-use std::sync::{Mutex, OnceLock};
+use alloc::collections::BTreeMap;
+use alloc::string::String;
+use crate::ksync::{SpinLock, OnceLock};
 
 /// 驱动接口：每个驱动实现 init/probe/remove 三个方法。
 pub trait Driver: Send + Sync {
@@ -73,30 +74,30 @@ impl DeviceRegistry {
     }
 }
 
-static DEVICE_REGISTRY: OnceLock<Mutex<DeviceRegistry>> = OnceLock::new();
+static DEVICE_REGISTRY: OnceLock<SpinLock<DeviceRegistry>> = OnceLock::new();
 
-fn device_registry() -> &'static Mutex<DeviceRegistry> {
-    DEVICE_REGISTRY.get_or_init(|| Mutex::new(DeviceRegistry::new()))
+fn device_registry() -> &'static SpinLock<DeviceRegistry> {
+    DEVICE_REGISTRY.get_or_init(|| SpinLock::new(DeviceRegistry::new()))
 }
 
 /// 注册一个设备。
 pub fn register_device(name: &str) {
-    device_registry().lock().unwrap().register(name);
+    device_registry().lock().register(name);
 }
 
 /// 将驱动绑定到设备。
 pub fn bind_driver(device: &str, driver: &str) -> bool {
-    device_registry().lock().unwrap().bind_driver(device, driver)
+    device_registry().lock().bind_driver(device, driver)
 }
 
 /// 解绑设备的驱动。
 pub fn unbind_driver(device: &str) -> bool {
-    device_registry().lock().unwrap().unbind_driver(device)
+    device_registry().lock().unbind_driver(device)
 }
 
 /// 列出所有设备的快照字符串（供 `sense dev://drivers` 使用）。
 pub fn drivers_list() -> String {
-    let reg = device_registry().lock().unwrap();
+    let reg = device_registry().lock();
     if reg.list().is_empty() {
         return "（无设备）".to_string();
     }
@@ -153,12 +154,12 @@ mod tests {
     fn bind_and_unbind_driver() {
         register_device("net0");
         assert!(bind_driver("net0", "e1000"));
-        let e = device_registry().lock().unwrap().find("net0").unwrap();
+        let e = device_registry().lock().find("net0").unwrap();
         assert_eq!(e.driver.as_deref(), Some("e1000"));
         assert_eq!(e.state, "bound");
 
         assert!(unbind_driver("net0"));
-        let e = device_registry().lock().unwrap().find("net0").unwrap();
+        let e = device_registry().lock().find("net0").unwrap();
         assert_eq!(e.driver, None);
         assert_eq!(e.state, "unbound");
 

@@ -13,7 +13,6 @@
 
 use alloc::collections::BTreeMap;
 use crate::ksync::{SpinLock, OnceLock};
-use std::sync::Mutex;
 
 // =======================================================================
 // PCI 常量
@@ -208,9 +207,9 @@ impl PciBus {
     }
 
     /// 全局 PCI 总线实例（`drv://pci` 通道后端）。
-    pub fn bus() -> &'static Mutex<PciBus> {
-        static BUS: OnceLock<Mutex<PciBus>> = OnceLock::new();
-        BUS.get_or_init(|| Mutex::new(Self::new()))
+    pub fn bus() -> &'static SpinLock<PciBus> {
+        static BUS: OnceLock<SpinLock<PciBus>> = OnceLock::new();
+        BUS.get_or_init(|| SpinLock::new(Self::new()))
     }
 
     // ------ 配置空间读写 ------

@@ -12,8 +12,8 @@
 //! * 多队支持简化版、流量控制（XON/XOFF 简化）
 //! * sense/act 通道：`drv://net`
 
-use std::collections::{BTreeMap, HashMap, VecDeque};
-use std::sync::{atomic::{AtomicU64, Ordering}, Mutex, OnceLock};
+use alloc::collections::{BTreeMap, VecDeque};
+use core::sync::atomic::{AtomicU64, Ordering}; use crate::ksync::{SpinLock, OnceLock};
 
 // =======================================================================
 // 网络统计
@@ -220,9 +220,9 @@ impl NetDriver {
     }
 
     /// 全局网卡驱动框架实例（`drv://net` 通道后端）。
-    pub fn driver() -> &'static Mutex<NetDriver> {
-        static DRV: OnceLock<Mutex<NetDriver>> = OnceLock::new();
-        DRV.get_or_init(|| Mutex::new(Self::new()))
+    pub fn driver() -> &'static SpinLock<NetDriver> {
+        static DRV: OnceLock<SpinLock<NetDriver>> = OnceLock::new();
+        DRV.get_or_init(|| SpinLock::new(Self::new()))
     }
 
     // ------ 驱动注册 ------
@@ -426,7 +426,7 @@ impl NetDriverOps for MockDriver {
 
 /// 查询网卡驱动状态快照（供 `sense drv://net`）。
 pub fn net_driver_sense_snapshot() -> String {
-    let drv = NetDriver::driver().lock().unwrap();
+    let drv = NetDriver::driver().lock();
     drv.status()
 }
 
@@ -436,12 +436,12 @@ pub fn net_driver_act_raw(payload: &str) -> Result<String, String> {
     match it.next() {
         Some("stats") => Ok(net_driver_sense_snapshot()),
         Some("list") => {
-            let drv = NetDriver::driver().lock().unwrap();
+            let drv = NetDriver::driver().lock();
             Ok(drv.status())
         }
         Some("probe") => {
             let driver_name = it.next().ok_or("用法: probe <driver_name>")?;
-            let mut drv = NetDriver::driver().lock().unwrap();
+            let mut drv = NetDriver::driver().lock();
             // 需先注册驱动；此处若未注册则返回错误。
             if !drv.drivers.contains_key(driver_name) {
                 return Err(format!("驱动 {} 未注册", driver_name));
@@ -452,7 +452,7 @@ pub fn net_driver_act_raw(payload: &str) -> Result<String, String> {
         Some("remove") => {
             let id_s = it.next().ok_or("用法: remove <device_id>")?;
             let id: u64 = id_s.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
-            let mut drv = NetDriver::driver().lock().unwrap();
+            let mut drv = NetDriver::driver().lock();
             drv.remove(DeviceId(id)).map(|()| format!("已移除设备 {:?}", id))
         }
         Some("mac") => {
@@ -460,7 +460,7 @@ pub fn net_driver_act_raw(payload: &str) -> Result<String, String> {
             let id: u64 = id_s.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
             let mac_s = it.next().ok_or("缺少 mac")?;
             let mac = parse_mac_driver(mac_s)?;
-            let mut drv = NetDriver::driver().lock().unwrap();
+            let mut drv = NetDriver::driver().lock();
             drv.set_mac(DeviceId(id), mac).map(|()| format!("设备 {:?} MAC 已设为 {}", id, mac_s))
         }
         Some("link") => {
@@ -468,13 +468,13 @@ pub fn net_driver_act_raw(payload: &str) -> Result<String, String> {
             let id: u64 = id_s.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
             let state_s = it.next().ok_or("缺少 up/down")?;
             let state = match state_s { "up" => LinkState::Up, "down" => LinkState::Down, _ => return Err("用法: link <id> up|down".to_string()) };
-            let mut drv = NetDriver::driver().lock().unwrap();
+            let mut drv = NetDriver::driver().lock();
             drv.set_link_state(DeviceId(id), state).map(|()| format!("设备 {:?} 链路 {}", id, state.name()))
         }
         Some("irq") => {
             let id_s = it.next().ok_or("用法: irq <device_id>")?;
             let id: u64 = id_s.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
-            let mut drv = NetDriver::driver().lock().unwrap();
+            let mut drv = NetDriver::driver().lock();
             drv.trigger_irq(DeviceId(id)).map(|()| format!("已向设备 {:?} 投递中断", id))
         }
         _ => Err("用法: act drv://net stats | list | probe <driver> | remove <id> | mac <id> <mac> | link <id> up|down | irq <id>".to_string()),

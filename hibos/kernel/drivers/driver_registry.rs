@@ -1,7 +1,7 @@
 //! 驱动注册表 —— P1-2 子模块。
 
-use std::collections::BTreeMap;
-use std::sync::{Mutex, OnceLock};
+use alloc::collections::BTreeMap;
+use crate::ksync::{SpinLock, OnceLock};
 
 use crate::drivers::{Driver, DriverState};
 
@@ -10,17 +10,17 @@ struct DriverRegistryState {
     drivers: BTreeMap<String, Driver>,
 }
 
-static DRV_REG: OnceLock<Mutex<DriverRegistryState>> = OnceLock::new();
+static DRV_REG: OnceLock<SpinLock<DriverRegistryState>> = OnceLock::new();
 
-fn drv_reg() -> &'static Mutex<DriverRegistryState> {
-    DRV_REG.get_or_init(|| Mutex::new(DriverRegistryState {
+fn drv_reg() -> &'static SpinLock<DriverRegistryState> {
+    DRV_REG.get_or_init(|| SpinLock::new(DriverRegistryState {
         drivers: BTreeMap::new(),
     }))
 }
 
 /// 注册驱动。
 pub fn driver_register(driver: Driver) -> Result<(), String> {
-    let mut g = drv_reg().lock().unwrap();
+    let mut g = drv_reg().lock();
     if g.drivers.contains_key(&driver.name) {
         return Err(format!("驱动已存在: {}", driver.name));
     }

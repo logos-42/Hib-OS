@@ -1,7 +1,7 @@
 //! 设备树 —— P1-2 子模块。
 
-use std::collections::BTreeMap;
-use std::sync::{Mutex, OnceLock};
+use alloc::collections::BTreeMap;
+use crate::ksync::{SpinLock, OnceLock};
 
 /// 设备树节点。
 #[derive(Clone, Debug)]
@@ -17,17 +17,17 @@ pub struct DeviceTree {
     nodes: BTreeMap<String, DeviceNode>,
 }
 
-static DEV_TREE: OnceLock<Mutex<DeviceTree>> = OnceLock::new();
+static DEV_TREE: OnceLock<SpinLock<DeviceTree>> = OnceLock::new();
 
-fn dev_tree() -> &'static Mutex<DeviceTree> {
-    DEV_TREE.get_or_init(|| Mutex::new(DeviceTree {
+fn dev_tree() -> &'static SpinLock<DeviceTree> {
+    DEV_TREE.get_or_init(|| SpinLock::new(DeviceTree {
         nodes: BTreeMap::new(),
     }))
 }
 
 /// 插入设备节点。
 pub fn devtree_insert(name: &str, path: &str, properties: BTreeMap<String, String>) -> Result<(), String> {
-    let mut g = dev_tree().lock().unwrap();
+    let mut g = dev_tree().lock();
     if g.nodes.contains_key(path) {
         return Err(format!("节点已存在: {}", path));
     }

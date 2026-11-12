@@ -11,8 +11,8 @@
 //! * 设备状态：附加/默认/地址/配置
 //! * sense/act 通道：`drv://usb`
 
-use std::collections::{BTreeMap, HashMap, VecDeque};
-use std::sync::{Mutex, OnceLock};
+use alloc::collections::{BTreeMap, VecDeque};
+use crate::ksync::{SpinLock, OnceLock};
 
 // =======================================================================
 // USB 常量
@@ -345,9 +345,9 @@ impl UsbBus {
     }
 
     /// 全局 USB 总线实例（`drv://usb` 通道后端）。
-    pub fn bus() -> &'static Mutex<UsbBus> {
-        static BUS: OnceLock<Mutex<UsbBus>> = OnceLock::new();
-        BUS.get_or_init(|| Mutex::new(Self::new()))
+    pub fn bus() -> &'static SpinLock<UsbBus> {
+        static BUS: OnceLock<SpinLock<UsbBus>> = OnceLock::new();
+        BUS.get_or_init(|| SpinLock::new(Self::new()))
     }
 
     /// 注册一个设备（设备已物理附加，返回设备 ID，状态 Attached）。
@@ -520,7 +520,7 @@ impl UsbBus {
 
 /// 查询 USB 总线状态快照（供 `sense drv://usb`）。
 pub fn usb_sense_snapshot() -> String {
-    let bus = UsbBus::bus().lock().unwrap();
+    let bus = UsbBus::bus().lock();
     bus.status()
 }
 
@@ -530,7 +530,7 @@ pub fn usb_act_raw(payload: &str) -> Result<String, String> {
     match it.next() {
         Some("stats") => Ok(usb_sense_snapshot()),
         Some("list") => {
-            let bus = UsbBus::bus().lock().unwrap();
+            let bus = UsbBus::bus().lock();
             Ok(bus.status())
         }
         Some("enumerate") => {
@@ -542,7 +542,7 @@ pub fn usb_act_raw(payload: &str) -> Result<String, String> {
         Some("state") => {
             let id_s = it.next().ok_or("用法: state <dev_id>")?;
             let id: u64 = id_s.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
-            let bus = UsbBus::bus().lock().unwrap();
+            let bus = UsbBus::bus().lock();
             match bus.device_state(UsbDeviceId(id)) {
                 Some(s) => Ok(format!("设备 {:?} state={}", id, s.name())),
                 None => Err(format!("设备 {:?} 不存在", id)),
