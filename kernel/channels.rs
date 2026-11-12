@@ -408,6 +408,8 @@ pub fn bootstrap() -> ChannelRegistry {
         (ChannelKind::Memory, "mem://mmap", Access::ReadWrite),
         (ChannelKind::Memory, "lease://channels", Access::ReadWrite),
         (ChannelKind::File, "fs://meta", Access::ReadWrite),
+        // —— Worktree：AI 意识实例的隔离工作区 ——
+        (ChannelKind::File, "worktree://trees", Access::ReadWrite),
         (ChannelKind::Vfs, "fs://vfs", Access::ReadWrite),
         (ChannelKind::User, "user://db", Access::ReadWrite),
         (ChannelKind::Net, "socket://tcp", Access::ReadWrite),

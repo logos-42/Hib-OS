@@ -400,6 +400,13 @@ pub fn probe(name: &str) -> Option<String> {
             let eng = crate::ai_os::memory_ws::memory_engine().lock().unwrap();
             Some(format!("程序记忆 技能={} 平均熟练度={:.2}", eng.procedural.len(), eng.procedural.avg_proficiency()))
         }
+        // —— Worktree：AI 意识实例的隔离工作区 ——
+        "worktree://trees" => Some(crate::worktree::worktree_sense()),
+        // —— 自造插件接口 ——
+        "plugin://modules" => Some(crate::plugin::plugin_sense()),
+        "plugin://hotreload" => Some(crate::plugin::plugin_hotreload_sense()),
+        // 自造插件自有通道 `plugin://<name>`
+        other if other.starts_with("plugin://") => crate::plugin::plugin_sense_one(other),
         _ => None,
     }
 }
@@ -946,6 +953,15 @@ fn act_raw(name: &str, payload: &str) -> Option<Result<String, String>> {
         // —— AI 原生智能图形界面通道 ——
         "gui_ai://create-window" | "gui_ai://close-window" | "gui_ai://focus-window" | "gui_ai://add-widget" | "gui_ai://add-layer" | "gui_ai://compose" | "gui_ai://inject-event" | "gui_ai://poll-event" | "gui_ai://set-theme" | "gui_ai://enable-modality" | "gui_ai://set-layout" => {
             Some(crate::ai_os::gui_ai::gui_ai_act_dispatch(payload))
+        }
+        // —— Worktree：隔离工作区（create/switch/remove/list） ——
+        "worktree://trees" => Some(crate::worktree::worktree_act(payload)),
+        // —— 自造插件接口（安装/卸载/热重载） ——
+        "plugin://modules" => Some(crate::plugin::plugin_act_modules(payload)),
+        "plugin://hotreload" => Some(crate::plugin::plugin_act_hotreload(payload)),
+        // 自造插件自有通道 `plugin://<name>`
+        other if other.starts_with("plugin://") => {
+            Some(crate::plugin::plugin_act_dynamic(other, payload))
         }
         _ => None,
     }

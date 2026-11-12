@@ -47,6 +47,7 @@ pub mod mount;
 pub mod net;
 pub mod netif;
 pub mod pkg;
+pub mod plugin;
 pub mod power;
 pub mod proc;
 pub mod proc2;
@@ -77,6 +78,7 @@ pub mod loader;
 pub mod irq;
 pub mod mm;
 pub mod file_channel;
+pub mod worktree;
 
 // —— Subagent-A 新增：内核核心与通道系统扩充 ——
 pub mod channel_ext;
