@@ -11,9 +11,10 @@
 //! 本模块为协作式调度模拟：每个任务的 Future 被反复 `poll`，若返回
 //! `Pending` 则挂起直到被 `wake`，适合异步子系统的原型验证。
 
-use std::collections::{HashMap, VecDeque};
-use std::sync::{Arc, Mutex, OnceLock};
-use std::task::{Context, RawWaker, RawWakerVTable, Waker};
+use alloc::collections::{BTreeMap, VecDeque};
+use alloc::sync::Arc;
+use crate::ksync::{SpinLock, OnceLock};
+use core::task::{Context, RawWaker, RawWakerVTable, Waker};
 
 // =====================================================================================
 // Poll 与 Future（简化版）
@@ -346,7 +347,7 @@ fn dummy_context() -> Context<'static> {
 /// 轻量级 async 运行时：封装 Reactor，提供 spawn / block_on / wake /
 /// task_state / cancel 接口。
 pub struct Runtime {
-    reactor: Mutex<Reactor>,
+    reactor: SpinLock<Reactor>,
 }
 
 impl Runtime {
@@ -358,7 +359,7 @@ impl Runtime {
         // 统一处理。为保持简单，wake 直接通过 Runtime::wake 入队。
         let _ = reactor;
         Self {
-            reactor: Mutex::new(reactor),
+            reactor: SpinLock::new(reactor),
         }
     }
 
@@ -380,7 +381,7 @@ impl Runtime {
             }
         }
         let fut: Box<dyn Future<Output = ()> + Send> = Box::new(UnitFuture { inner: future });
-        let mut r = self.reactor.lock().unwrap();
+        let mut r = self.reactor.lock();
         r.spawn_task(name, fut)
     }
 
@@ -405,42 +406,42 @@ impl Runtime {
 
     /// 唤醒指定任务，使其在下次 poll 中继续推进。
     pub fn wake(&self, task_id: u64) {
-        self.reactor.lock().unwrap().wake(task_id);
+        self.reactor.lock().wake(task_id);
     }
 
     /// 查询任务状态。
     pub fn task_state(&self, task_id: u64) -> Option<TaskState> {
-        self.reactor.lock().unwrap().task_state(task_id)
+        self.reactor.lock().task_state(task_id)
     }
 
     /// 取消任务。
     pub fn cancel(&self, task_id: u64) -> bool {
-        self.reactor.lock().unwrap().cancel(task_id)
+        self.reactor.lock().cancel(task_id)
     }
 
     /// 单次 poll 所有就绪任务，返回 poll 任务数。
     pub fn poll(&self) -> usize {
-        self.reactor.lock().unwrap().poll()
+        self.reactor.lock().poll()
     }
 
     /// 运行直到 stalled。
     pub fn run_until_stalled(&self) -> usize {
-        self.reactor.lock().unwrap().run_until_stalled()
+        self.reactor.lock().run_until_stalled()
     }
 
     /// 返回任务总数。
     pub fn task_count(&self) -> usize {
-        self.reactor.lock().unwrap().task_count()
+        self.reactor.lock().task_count()
     }
 
     /// 返回已完成任务数。
     pub fn completed_count(&self) -> u64 {
-        self.reactor.lock().unwrap().completed_count()
+        self.reactor.lock().completed_count()
     }
 
     /// 返回 reactor 文本摘要。
     pub fn summary(&self) -> String {
-        self.reactor.lock().unwrap().summary()
+        self.reactor.lock().summary()
     }
 }
 
@@ -454,10 +455,10 @@ impl Default for Runtime {
 // 全局运行时单例
 // =====================================================================================
 
-static RUNTIME: OnceLock<Mutex<Runtime>> = OnceLock::new();
+static RUNTIME: OnceLock<SpinLock<Runtime>> = OnceLock::new();
 
-fn runtime() -> &'static Mutex<Runtime> {
-    RUNTIME.get_or_init(|| Mutex::new(Runtime::new()))
+fn runtime() -> &'static SpinLock<Runtime> {
+    RUNTIME.get_or_init(|| SpinLock::new(Runtime::new()))
 }
 
 /// 创建任务（全局运行时）。
@@ -465,37 +466,37 @@ pub fn async_spawn<F>(name: &str, future: F) -> u64
 where
     F: Future + Send + 'static,
 {
-    runtime().lock().unwrap().spawn(name, future)
+    runtime().lock().spawn(name, future)
 }
 
 /// 唤醒任务（全局运行时）。
 pub fn async_wake(task_id: u64) {
-    runtime().lock().unwrap().wake(task_id);
+    runtime().lock().wake(task_id);
 }
 
 /// 查询任务状态（全局运行时）。
 pub fn async_task_state(task_id: u64) -> Option<TaskState> {
-    runtime().lock().unwrap().task_state(task_id)
+    runtime().lock().task_state(task_id)
 }
 
 /// 取消任务（全局运行时）。
 pub fn async_cancel(task_id: u64) -> bool {
-    runtime().lock().unwrap().cancel(task_id)
+    runtime().lock().cancel(task_id)
 }
 
 /// 单次 poll（全局运行时）。
 pub fn async_poll() -> usize {
-    runtime().lock().unwrap().poll()
+    runtime().lock().poll()
 }
 
 /// 运行直到 stalled（全局运行时）。
 pub fn async_run_until_stalled() -> usize {
-    runtime().lock().unwrap().run_until_stalled()
+    runtime().lock().run_until_stalled()
 }
 
 /// 返回运行时摘要（全局）。
 pub fn async_summary() -> String {
-    runtime().lock().unwrap().summary()
+    runtime().lock().summary()
 }
 
 // =====================================================================================

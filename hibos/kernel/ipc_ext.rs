@@ -10,7 +10,7 @@
 //! 所有状态均通过 `OnceLock<Mutex<...>>` 全局单例持有，与现有 `kernel/ipc.rs`
 //! 风格保持一致。
 
-use std::collections::{BinaryHeap, HashMap, VecDeque};
+use std::collections::{BTreeMap, BinaryHeap, HashMap, VecDeque};
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 

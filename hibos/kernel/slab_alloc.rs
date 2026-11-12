@@ -16,7 +16,7 @@
 //! 能力模型：分配/释放受 `kernel/caps.rs` 的 `CAP_SYS_ADMIN` 门禁，非特权
 //! 意识主体仅可通过通道 `slab://stats` 只读观测。
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::{Mutex, OnceLock};
 
 // =====================================================================================

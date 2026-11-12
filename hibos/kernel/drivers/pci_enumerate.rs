@@ -13,6 +13,7 @@
 
 use alloc::collections::BTreeMap;
 use crate::ksync::{SpinLock, OnceLock};
+use std::sync::Mutex;
 
 // =======================================================================
 // PCI 常量

@@ -11,7 +11,7 @@
 //! * 设备状态：附加/默认/地址/配置
 //! * sense/act 通道：`drv://usb`
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::sync::{Mutex, OnceLock};
 
 // =======================================================================

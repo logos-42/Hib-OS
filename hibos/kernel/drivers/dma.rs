@@ -108,7 +108,7 @@ impl Default for DmaSgList {
 // =======================================================================
 
 /// DMA 传输句柄。
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct DmaTransferId(pub u64);
 
 /// DMA 传输状态。

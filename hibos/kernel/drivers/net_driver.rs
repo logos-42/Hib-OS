@@ -12,7 +12,7 @@
 //! * 多队支持简化版、流量控制（XON/XOFF 简化）
 //! * sense/act 通道：`drv://net`
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::sync::{atomic::{AtomicU64, Ordering}, Mutex, OnceLock};
 
 // =======================================================================

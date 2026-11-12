@@ -5,7 +5,7 @@
 //! 提供 bread/brelse/bwrite/sync 接口。两者均模拟宿主页框与锁，不接触真实
 //! 磁盘，适合内存管理子系统的原型验证。
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 

@@ -162,12 +162,12 @@ impl NetStack {
     pub fn sock_recv(&mut self, fd: SocketFd, buf: &mut [u8]) -> Result<usize, String> {
         match self.sockets.sockets.get_mut(&fd).ok_or_else(|| "socket 不存在".to_string())? {
             SockEntry::Tcp { key } => {
-                let data = self.tcp.recv(&key, buf.len())?;
+                let data = self.tcp.recv(key, buf.len())?;
                 buf[..data.len()].copy_from_slice(&data);
                 Ok(data.len())
             }
             SockEntry::Udp { port, .. } => {
-                let data = self.udp.recv(port, buf.len())?;
+                let data = self.udp.recv(*port, buf.len())?;
                 buf[..data.len()].copy_from_slice(&data);
                 Ok(data.len())
             }
@@ -178,7 +178,7 @@ impl NetStack {
         match self.sockets.sockets.get_mut(&fd).ok_or_else(|| "socket 不存在".to_string())? {
             SockEntry::Tcp { key } => {
                 let remote_ip = key.remote_ip;
-                let segments = self.tcp.send(&key, buf)?;
+                let segments = self.tcp.send(key, buf)?;
                 for seg in segments {
                     self.enqueue_tcp_segment(remote_ip, &seg)?;
                 }
@@ -186,11 +186,11 @@ impl NetStack {
                 Ok(buf.len())
             }
             SockEntry::Udp { port, connected } => {
-                if port == 0 { return Err("未绑定本地端口".to_string()); }
+                if *port == 0 { return Err("未绑定本地端口".to_string()); }
                 let remote = connected.as_mut().ok_or_else(|| "UDP 未连接对端".to_string())?;
                 let (rip, rport) = (remote.ip, remote.port);
                 let our_ip = self.iface.ip;
-                let datagram = self.udp.send(our_ip, port, rip, rport, buf)?;
+                let datagram = self.udp.send(our_ip, *port, rip, rport, buf)?;
                 let packets = self.ip.transmit(rip, IP_PROTO_UDP, &datagram, self.iface.mtu as usize)?;
                 self.frame_and_queue(rip, packets)?;
                 self.poll();

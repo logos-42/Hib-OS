@@ -8,7 +8,7 @@
 //!
 //! 本模块为纯内存模拟，不操作真实进程，适合信号子系统的原型验证。
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::{Mutex, OnceLock};
 
 // =====================================================================================

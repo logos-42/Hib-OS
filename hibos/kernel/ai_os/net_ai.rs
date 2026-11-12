@@ -787,7 +787,7 @@ pub fn init() {
 // =====================================================================================
 
 pub fn status() -> String {
-    let eng = net_ai().lock();
+    let eng = net_ai().lock().unwrap();
     format!(
         "net_ai: packets={} bytes={} sockets={} routes={} topology_nodes={} topology_edges={} bandwidth_alloc={} utilization={:.2} avg_latency_ms={:.2} congestion={:?} firewall_accept={} firewall_drop={}",
         eng.packet_count(),
@@ -825,7 +825,7 @@ pub fn net_ai_act(payload: &str) -> Result<String, String> {
             if data.is_empty() {
                 return Err("缺少数据".into());
             }
-            let mut eng = net_ai().lock();
+            let mut eng = net_ai().lock().unwrap();
             let id = eng.send_packet(src, dst, &data, tag);
             // 注入：激活 L1 TCP/IP 协议栈，使 `sense net://eth0` 可见。
             let _ = net().lock().poll();
@@ -834,7 +834,7 @@ pub fn net_ai_act(payload: &str) -> Result<String, String> {
         Some("socket") => {
             let agent = it.next().and_then(|s| s.parse::<u64>().ok()).ok_or("缺少代理")?;
             let port = it.next().and_then(|s| s.parse::<u16>().ok()).unwrap_or(8080);
-            let mut eng = net_ai().lock();
+            let mut eng = net_ai().lock().unwrap();
             let fd = eng.create_socket(agent, port);
             // 注入：激活 L1 网络统计，使 `sense net://eth0` 可见。
             let _ = net().lock().stats();
@@ -844,7 +844,7 @@ pub fn net_ai_act(payload: &str) -> Result<String, String> {
             let fd = it.next().and_then(|s| s.parse::<u64>().ok()).ok_or("缺少 fd")?;
             let remote = it.next().and_then(|s| s.parse::<u64>().ok()).ok_or("缺少远程代理")?;
             let port = it.next().and_then(|s| s.parse::<u16>().ok()).unwrap_or(8080);
-            let mut eng = net_ai().lock();
+            let mut eng = net_ai().lock().unwrap();
             eng.connect_socket(fd, remote, port)?;
             // 注入：激活 L1 路由查询子系统，使 `sense net://eth0` 可见。
             let _ = net().lock().lookup_route(ETH_IP);
@@ -856,7 +856,7 @@ pub fn net_ai_act(payload: &str) -> Result<String, String> {
             if data.is_empty() {
                 return Err("缺少数据".into());
             }
-            let mut eng = net_ai().lock();
+            let mut eng = net_ai().lock().unwrap();
             let n = eng.socket_send(fd, &data)?;
             // 注入：激活 L1 TCP/IP 协议栈，使 `sense net://eth0` 可见。
             let _ = net().lock().poll();
@@ -864,7 +864,7 @@ pub fn net_ai_act(payload: &str) -> Result<String, String> {
         }
         Some("sock-recv") => {
             let fd = it.next().and_then(|s| s.parse::<u64>().ok()).ok_or("缺少 fd")?;
-            let mut eng = net_ai().lock();
+            let mut eng = net_ai().lock().unwrap();
             // 注入：激活 L1 TCP/IP 协议栈，使 `sense net://eth0` 可见。
             let _ = net().lock().poll();
             match eng.socket_recv(fd) {
@@ -877,7 +877,7 @@ pub fn net_ai_act(payload: &str) -> Result<String, String> {
             let next_hop = it.next().and_then(|s| s.parse::<u64>().ok()).ok_or("缺少下一跳")?;
             let cost = it.next().and_then(|s| s.parse::<f32>().ok()).unwrap_or(1.0);
             let metric = it.next().unwrap_or("default");
-            let mut eng = net_ai().lock();
+            let mut eng = net_ai().lock().unwrap();
             eng.add_route(dst, next_hop, cost, metric);
             // 注入：激活 L1 路由查询子系统，使 `sense net://eth0` 可见。
             let _ = net().lock().lookup_route(ETH_IP);
@@ -885,7 +885,7 @@ pub fn net_ai_act(payload: &str) -> Result<String, String> {
         }
         Some("route-intent") => {
             let intent = it.next().ok_or("缺少意图")?;
-            let eng = net_ai().lock();
+            let eng = net_ai().lock().unwrap();
             match eng.router.route_by_intent(intent) {
                 Some(dst) => Ok(format!("意图 {} 路由到代理 {}", intent, dst)),
                 None => Err(format!("意图 {} 无路由", intent)),
@@ -903,14 +903,14 @@ pub fn net_ai_act(payload: &str) -> Result<String, String> {
             };
             let bw = it.next().and_then(|s| s.parse::<f64>().ok()).unwrap_or(100.0);
             let lat = it.next().and_then(|s| s.parse::<f64>().ok()).unwrap_or(10.0);
-            let mut eng = net_ai().lock();
+            let mut eng = net_ai().lock().unwrap();
             eng.add_topology_edge(from, to, state, bw, lat);
             Ok(format!("已添加拓扑边 {} -> {} 带宽={}Mbps 延迟={}ms", from, to, bw, lat))
         }
         Some("bandwidth") => {
             let agent = it.next().and_then(|s| s.parse::<u64>().ok()).ok_or("缺少代理")?;
             let mbps = it.next().and_then(|s| s.parse::<f64>().ok()).unwrap_or(10.0);
-            let mut eng = net_ai().lock();
+            let mut eng = net_ai().lock().unwrap();
             if eng.allocate_bandwidth(agent, mbps) {
                 Ok(format!("已为代理 {} 分配带宽 {}Mbps", agent, mbps))
             } else {
@@ -921,7 +921,7 @@ pub fn net_ai_act(payload: &str) -> Result<String, String> {
             let src = it.next().and_then(|s| s.parse::<u64>().ok()).ok_or("缺少源")?;
             let dst = it.next().and_then(|s| s.parse::<u64>().ok()).ok_or("缺少目标")?;
             let ms = it.next().and_then(|s| s.parse::<f64>().ok()).unwrap_or(0.0);
-            let mut eng = net_ai().lock();
+            let mut eng = net_ai().lock().unwrap();
             eng.record_latency(src, dst, ms);
             Ok(format!("已记录延迟 {} -> {} {}ms", src, dst, ms))
         }
@@ -936,7 +936,7 @@ pub fn net_ai_act(payload: &str) -> Result<String, String> {
                 "reject" => FirewallAction::Reject,
                 _ => FirewallAction::Accept,
             };
-            let mut eng = net_ai().lock();
+            let mut eng = net_ai().lock().unwrap();
             let id = eng.firewall.add_rule(src, dst, tag.map(|s| s.to_string()), action);
             Ok(format!("已添加防火墙规则 id={}", id))
         }
