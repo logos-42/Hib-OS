@@ -2064,16 +2064,6 @@ impl Shell {
                         }
                         prev_reply = reply;
                     }
-                    if round > 1 {
-                        tagged_out!(
-                            "[llm]",
-                            "本次命令共 {} 轮：执行 {} 条 ACTION（感知 {} 条 / 落地 {} 条）",
-                            round,
-                            total,
-                            total - mutating,
-                            mutating
-                        );
-                    }
                 }
                 Ok(line_editor::ReadOutcome::Cancelled) => {
                     // Ctrl+C：退出闭环循环（原先仅取消本行、继续 REPL，导致 Ctrl+C 无法退出）
