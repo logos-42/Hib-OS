@@ -11,7 +11,7 @@
 //! * 设备状态：附加/默认/地址/配置
 //! * sense/act 通道：`drv://usb`
 
-use alloc::collections::{BTreeMap, VecDeque}; use alloc::vec::Vec;
+use alloc::collections::{BTreeMap, VecDeque}; use alloc::vec::Vec; use alloc::string::ToString;
 use crate::ksync::{SpinLock, OnceLock};
 
 // =======================================================================
@@ -230,7 +230,7 @@ pub struct UsbDevice {
 }
 
 /// USB 设备句柄。
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct UsbDeviceId(pub u64);
 
 /// 设备统计。

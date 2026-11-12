@@ -11,7 +11,7 @@
 //! * 设备枚举（总线/设备/功能）、BAR 大小探测
 //! * sense/act 通道：`drv://pci`
 
-use alloc::collections::BTreeMap; use alloc::vec::Vec; use alloc::boxed::Box;
+use alloc::collections::BTreeMap; use alloc::vec::Vec; use alloc::boxed::Box; use alloc::string::String; use alloc::string::ToString;
 use crate::ksync::{SpinLock, OnceLock};
 
 // =======================================================================
@@ -402,7 +402,7 @@ impl PciBus {
 
 /// 查询 PCI 总线状态快照（供 `sense drv://pci`）。
 pub fn pci_sense_snapshot() -> String {
-    let bus = PciBus::bus().lock().unwrap();
+    let bus = PciBus::bus().lock();
     bus.status()
 }
 
@@ -411,24 +411,24 @@ pub fn pci_act_raw(payload: &str) -> Result<String, String> {
     let mut it = payload.split_whitespace();
     match it.next() {
         Some("scan") => {
-            let mut bus = PciBus::bus().lock().unwrap();
+            let mut bus = PciBus::bus().lock();
             let found = bus.scan_bus();
             Ok(format!("PCI 扫描完成，发现 {} 个设备", found.len()))
         }
         Some("list") => {
-            let bus = PciBus::bus().lock().unwrap();
+            let bus = PciBus::bus().lock();
             Ok(bus.status())
         }
         Some("class") => {
             let code_s = it.next().ok_or("用法: class <16 进制类代码>")?;
             let code = u8::from_str_radix(code_s, 16).map_err(|e| e.to_string())?;
-            let bus = PciBus::bus().lock().unwrap();
+            let bus = PciBus::bus().lock();
             let devs = bus.device_by_class(code);
             Ok(format!("类 {:02x} 设备数={}", code, devs.len()))
         }
         Some("bdf") => {
             let bdf = it.next().ok_or("用法: bdf <bus:device.function>")?;
-            let bus = PciBus::bus().lock().unwrap();
+            let bus = PciBus::bus().lock();
             match bus.find(bdf) {
                 Some(d) => Ok(format!("{} {} command=0x{:04x} status=0x{:04x} irq={}", d.bdf(), d.id_str(), d.command, d.status, d.irq_line)),
                 None => Err(format!("未找到设备 {}", bdf)),

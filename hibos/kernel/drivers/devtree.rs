@@ -1,6 +1,6 @@
 //! 设备树 —— P1-2 子模块。
 
-use alloc::collections::BTreeMap; use alloc::string::String; use alloc::vec::Vec;
+use alloc::collections::BTreeMap; use alloc::string::{String, ToString}; use alloc::vec::Vec;
 use crate::ksync::{SpinLock, OnceLock};
 
 /// 设备树节点。
@@ -49,13 +49,13 @@ pub fn devtree_insert(name: &str, path: &str, properties: BTreeMap<String, Strin
 
 /// 查找设备节点。
 pub fn devtree_lookup(path: &str) -> Option<DeviceNode> {
-    let g = dev_tree().lock().unwrap();
+    let g = dev_tree().lock();
     g.nodes.get(path).cloned()
 }
 
 /// 列出所有节点路径。
 pub fn devtree_paths() -> Vec<String> {
-    let g = dev_tree().lock().unwrap();
+    let g = dev_tree().lock();
     g.nodes.keys().cloned().collect()
 }
 

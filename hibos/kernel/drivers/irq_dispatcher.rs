@@ -1,6 +1,9 @@
 //! IRQ 分发器 —— P1-2 子模块。
 
 use alloc::collections::BTreeMap;
+use alloc::string::String;
+use alloc::vec::Vec;
+use alloc::string::ToString;
 use crate::ksync::{SpinLock, OnceLock};
 
 use crate::drivers::{IrqLine, IrqHandler};
@@ -30,19 +33,19 @@ pub fn irq_bind(irq: IrqLine, handler: IrqHandler) -> Result<(), String> {
 
 /// 触发 IRQ（调用处理器）。
 pub fn irq_fire(irq: IrqLine) -> bool {
-    let g = irq_reg().lock().unwrap();
+    let g = irq_reg().lock();
     g.handlers.contains_key(&irq)
 }
 
 /// 解绑 IRQ 处理器。
 pub fn irq_unbind(irq: IrqLine) -> bool {
-    let mut g = irq_reg().lock().unwrap();
+    let mut g = irq_reg().lock();
     g.handlers.remove(&irq).is_some()
 }
 
 /// 列出所有绑定的 IRQ。
 pub fn irq_list() -> Vec<IrqLine> {
-    let g = irq_reg().lock().unwrap();
+    let g = irq_reg().lock();
     g.handlers.keys().copied().collect()
 }
 

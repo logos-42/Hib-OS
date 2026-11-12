@@ -12,7 +12,7 @@
 //! * 多队支持简化版、流量控制（XON/XOFF 简化）
 //! * sense/act 通道：`drv://net`
 
-use alloc::collections::{BTreeMap, VecDeque}; use alloc::vec::Vec;
+use alloc::collections::{BTreeMap, VecDeque}; use alloc::vec::Vec; use alloc::string::{String, ToString}; use alloc::boxed::Box;
 use core::sync::atomic::{AtomicU64, Ordering}; use crate::ksync::{SpinLock, OnceLock};
 
 // =======================================================================
