@@ -176,7 +176,6 @@ impl Shell {
     /// 如未配置 API Key，则退回到传统命令行 shell 模式。
     pub fn run(&mut self) {
         crate::boot_subsystems();
-        self.linux_boot();
 
         let state = Vfs::default_state_path();
         match Vfs::load_from_path(&state) {
@@ -192,18 +191,21 @@ impl Shell {
         let has_key = self.handler.consciousness.deepseek_key().is_some();
 
         if has_key {
-            // 极简 Linux 风格启动（彩色），无大横幅、无子系统噪声日志。
+            // 极简启动（彩色），无大横幅、无子系统噪声日志。
             println!(
                 "{} (exit 退出)",
-                theme::green("Hib OS [linux] — AI 意识本体闭环已就绪")
+                theme::green("Hib OS — AI OS已就绪")
             );
             self.run_llm_loop("deepseek");
             return;
         }
 
+        // 传统 shell 模式才输出启动画面；AI 模式保持极简。
+        self.linux_boot();
+
         println!(
             "{} (help / exit)",
-            theme::green("Hib OS [linux] — interactive shell ready")
+            theme::green("Hib OS — interactive shell ready")
         );
         if io::stdin().is_terminal() {
             println!("↑↓ 历史, Tab 补全, ←→ 移动光标");
@@ -1803,7 +1805,17 @@ impl Shell {
                     );
                     match loop_.cycle(&key, &perception, &mut self.handler.consciousness) {
                         Ok(reply) => {
-                            println!("[llm:{}] {}", provider, reply);
+                            // 显式区分：先输出对话文本，再自动执行 ACTION 指令。
+                            // 回复中以单独一行 `ACTION: ...` 开头的行属于行动，其余为对话文本。
+                            let text = reply
+                                .lines()
+                                .map(|l| l.trim())
+                                .filter(|l| !l.is_empty() && !l.trim_start().starts_with("ACTION:"))
+                                .collect::<Vec<_>>()
+                                .join("\n");
+                            if !text.is_empty() {
+                                println!("[llm:{}] {}", provider, text);
+                            }
                             let concepts = self.handler.consciousness.concept_count();
                             println!("[llm] 意识本体概念数: {}", concepts);
                             // 自动执行 ACTION 指令
@@ -1812,7 +1824,11 @@ impl Shell {
                         Err(e) => println!("[llm:{}] 循环失败: {}", provider, e),
                     }
                 }
-                Ok(line_editor::ReadOutcome::Cancelled) => continue,
+                Ok(line_editor::ReadOutcome::Cancelled) => {
+                    // Ctrl+C：退出闭环循环（原先仅取消本行、继续 REPL，导致 Ctrl+C 无法退出）
+                    println!("[llm:{}] 闭环循环已由 Ctrl+C 中断，共 {} 轮。", provider, loop_.turn());
+                    break;
+                }
                 Ok(line_editor::ReadOutcome::Eof) | Err(_) => {
                     println!("[llm:{}] 闭环循环结束，共 {} 轮。", provider, loop_.turn());
                     break;
