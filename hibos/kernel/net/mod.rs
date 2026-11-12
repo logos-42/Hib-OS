@@ -11,7 +11,7 @@
 //! `parse_ip/parse_mac/fmt_ip/fmt_mac/same_subnet`、`send/recv/arp_add/...`
 //! 与原 kernel/net.rs 接口一致，供 kernel/sense.rs / kernel/netif.rs / kernel/shell.rs 继续使用。
 
-use alloc::collections::{HashMap, VecDeque};
+use alloc::collections::{BTreeMap, VecDeque};
 use crate::ksync::{SpinLock, OnceLock};
 
 pub mod device;
@@ -122,7 +122,7 @@ pub struct NetStats {
 pub struct NetStack {
     pub iface: Interface,
     /// ARP 表：IP -> MAC。
-    pub arp: HashMap<[u8; 4], [u8; 6]>,
+    pub arp: BTreeMap<[u8; 4], [u8; 6]>,
     /// 路由表。
     pub routes: Vec<RouteEntry>,
     /// 旧版发送队列（裸 IP 包，供 net://eth0 send 兼容）。
@@ -150,7 +150,7 @@ impl NetStack {
         });
         Self {
             iface: Interface::default_eth0(),
-            arp: HashMap::new(),
+            arp: BTreeMap::new(),
             routes,
             tx: VecDeque::new(),
             rx: VecDeque::new(),
