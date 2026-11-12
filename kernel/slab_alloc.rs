@@ -489,11 +489,6 @@ mod tests {
             "非法对象句柄（越界或已释放）"
         );
     }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
 
     /// 返回该缓存的利用率（0.0~1.0）。
     impl SlabCache {

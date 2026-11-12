@@ -796,11 +796,6 @@ mod tests {
         assert!(dhcp_act_raw("discover").is_ok());
         assert!(dhcp_act_raw("request").is_err()); // 无 offer
     }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
 
     // 辅助：在不引入 borrow 检查问题下，从 DhcpClient 读取消息类型。
     impl DhcpClient {

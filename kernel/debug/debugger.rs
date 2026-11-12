@@ -755,11 +755,6 @@ mod tests {
         assert!(names.contains(&"rflags"));
         assert!(!names.is_empty());
     }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
 
     /// 读取单字节（测试专用，绕过私有方法）。
     impl Debugger {

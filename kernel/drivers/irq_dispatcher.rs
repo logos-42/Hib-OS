@@ -55,7 +55,7 @@ mod tests {
     #[test]
     fn bind_and_fire() {
         let irq = IrqLine(42);
-        assert!(irq_bind(irq, Box::new(|_| {})).is_ok());
+        assert!(irq_bind(irq, Box::new(|_| true)).is_ok());
         assert!(irq_fire(irq));
         assert!(irq_unbind(irq));
         assert!(!irq_fire(irq));
@@ -64,7 +64,7 @@ mod tests {
     #[test]
     fn bind_duplicate() {
         let irq = IrqLine(1);
-        assert!(irq_bind(irq, Box::new(|_| {})).is_ok());
-        assert!(irq_bind(irq, |_| {}).is_err());
+        assert!(irq_bind(irq, Box::new(|_| true)).is_ok());
+        assert!(irq_bind(irq, Box::new(|_| true)).is_err());
     }
 }
