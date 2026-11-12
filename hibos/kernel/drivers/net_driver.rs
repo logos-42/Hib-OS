@@ -12,7 +12,7 @@
 //! * 多队支持简化版、流量控制（XON/XOFF 简化）
 //! * sense/act 通道：`drv://net`
 
-use alloc::collections::{BTreeMap, VecDeque}; use alloc::vec::Vec; use alloc::string::{String, ToString}; use alloc::boxed::Box;
+use alloc::collections::BTreeMap; use alloc::vec::Vec; use alloc::string::{String, ToString}; use alloc::boxed::Box;
 use core::sync::atomic::{AtomicU64, Ordering}; use crate::ksync::{SpinLock, OnceLock};
 
 // =======================================================================
@@ -246,7 +246,7 @@ impl NetDriver {
     // ------ 探测与绑定 ------
 
     /// 探测总线地址，绑定匹配的驱动，创建设备实例并返回 DeviceId。
-    pub fn probe(&mut self, bus_addr: &str, driver_name: &str) -> Result<DeviceId, String> {
+    pub fn probe(&mut self, _bus_addr: &str, driver_name: &str) -> Result<DeviceId, String> {
         let reg = self.drivers.get(driver_name).ok_or_else(|| format!("驱动 {} 未注册", driver_name))?;
         let mut ops = (reg.factory)();
         ops.init().map_err(|e| format!("驱动 {} init 失败: {}", driver_name, e))?;
@@ -275,7 +275,7 @@ impl NetDriver {
 
     /// 移除设备（停止驱动、释放资源）。
     pub fn remove(&mut self, device_id: DeviceId) -> Result<(), String> {
-        let mut instance = self.devices.get_mut(&device_id).ok_or_else(|| format!("设备 {:?} 不存在", device_id))?;
+        let instance = self.devices.get_mut(&device_id).ok_or_else(|| format!("设备 {:?} 不存在", device_id))?;
         instance.ops.stop().map_err(|e| format!("stop 失败: {}", e))?;
         instance.link_state = LinkState::Down;
         instance.opened = false;
@@ -398,11 +398,13 @@ impl NetDriver {
 // ======================================================================
 
 /// 模拟网卡驱动（用于单元测试，把 xmit 数据放入 rx 队列模拟回环）。
+#[allow(dead_code)]
 struct MockDriver {
     tx_bytes: AtomicU64,
     rx_bytes: AtomicU64,
 }
 
+#[allow(dead_code)]
 impl MockDriver {
     fn new() -> Self { Self { tx_bytes: AtomicU64::new(0), rx_bytes: AtomicU64::new(0) } }
 }

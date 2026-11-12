@@ -56,7 +56,9 @@ const PCI_COMMAND_BUS_MASTER: u16 = 0x0004;
 // BAR 位。
 const BAR_TYPE_MASK: u64 = 0x1;
 const BAR_TYPE_IO: u64 = 0x1;
+#[allow(dead_code)]
 const BAR_TYPE_MEM_32: u64 = 0x0;
+#[allow(dead_code)]
 const BAR_TYPE_MEM_64: u64 = 0x2; // bit 1:2 = 10b
 
 // =======================================================================
