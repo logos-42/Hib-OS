@@ -71,6 +71,15 @@ mod theme {
     }
 }
 
+/// 带方括号标识的输出：**方括号内的标识用绿色，方括号外的正文保持终端默认色**。
+///
+/// 例：`tagged_out!("[llm]", "Provider '{}' => {}", provider, masked)`
+macro_rules! tagged_out {
+    ($tag:expr, $($body:tt)*) => {
+        println!("{} {}", theme::green($tag), format!($($body)*))
+    };
+}
+
 /// REPL 可补全的命令名。
 pub const COMMANDS: &[&str] = &[
     "help",
@@ -191,11 +200,8 @@ impl Shell {
         let has_key = self.handler.consciousness.deepseek_key().is_some();
 
         if has_key {
-            // 极简启动（彩色），无大横幅、无子系统噪声日志。
-            println!(
-                "{} (exit 退出)",
-                theme::green("Hib OS — AI OS已就绪")
-            );
+            // 极简启动（无大横幅、无子系统噪声日志）。
+            println!("Hib OS — AI 意识本体闭环已就绪 (exit 退出)");
             self.run_llm_loop("deepseek");
             return;
         }
@@ -203,10 +209,7 @@ impl Shell {
         // 传统 shell 模式才输出启动画面；AI 模式保持极简。
         self.linux_boot();
 
-        println!(
-            "{} (help / exit)",
-            theme::green("Hib OS — interactive shell ready")
-        );
+        println!("Hib OS — interactive shell ready (help / exit)");
         if io::stdin().is_terminal() {
             println!("↑↓ 历史, Tab 补全, ←→ 移动光标");
             if !has_key {
@@ -1602,9 +1605,9 @@ impl Shell {
             None | Some("status") => {
                 let keys = self.handler.consciousness.api_keys();
                 if keys.is_empty() {
-                    println!("[llm] 未配置任何 Provider API Key (使用 `llm key set <provider> <key>`)");
+                    tagged_out!("[llm]", "未配置任何 Provider API Key (使用 `llm key set <provider> <key>`)");
                 } else {
-                    println!("[llm] 已配置 Provider:");
+                    tagged_out!("[llm]", "已配置 Provider:");
                     for (provider, key) in &keys {
                         let masked = if key.len() > 4 {
                             format!("{}****{}", &key[..4], &key[key.len()-4..])
@@ -1619,9 +1622,9 @@ impl Shell {
                 None | Some("list") => {
                     let keys = self.handler.consciousness.api_keys();
                     if keys.is_empty() {
-                        println!("[llm] 未配置任何 Provider");
+                        tagged_out!("[llm]", "未配置任何 Provider");
                     } else {
-                        println!("[llm] Provider 列表:");
+                        tagged_out!("[llm]", "Provider 列表:");
                         for (provider, key) in &keys {
                             let masked = if key.len() > 4 {
                                 format!("{}****{}", &key[..4], &key[key.len()-4..])
@@ -1639,7 +1642,7 @@ impl Shell {
                         println!("用法: llm key set <provider> <key>");
                     } else {
                         self.handler.consciousness.set_api_key(provider, key.to_string());
-                        println!("[llm] Provider '{}' API Key 已设置 (长度: {})", provider, key.len());
+                        tagged_out!("[llm]", "Provider '{}' API Key 已设置 (长度: {})", provider, key.len());
                     }
                 }
                 Some("del") => {
@@ -1648,7 +1651,7 @@ impl Shell {
                         println!("用法: llm key del <provider>");
                     } else {
                         self.handler.consciousness.del_api_key(provider);
-                        println!("[llm] Provider '{}' API Key 已删除", provider);
+                        tagged_out!("[llm]", "Provider '{}' API Key 已删除", provider);
                     }
                 }
                 Some("show") => {
@@ -1663,9 +1666,9 @@ impl Shell {
                                 } else {
                                     "****".to_string()
                                 };
-                                println!("[llm] Provider '{}' => {}", provider, masked);
+                                tagged_out!("[llm]", "Provider '{}' => {}", provider, masked);
                             }
-                            None => println!("[llm] Provider '{}' 未配置 API Key", provider),
+                            None => tagged_out!("[llm]", "Provider '{}' 未配置 API Key", provider),
                         }
                     }
                 }
@@ -1685,31 +1688,22 @@ impl Shell {
                 let key = match self.handler.consciousness.api_key(provider) {
                     Some(k) => k.clone(),
                     None => {
-                        println!("[llm] Provider '{}' 未配置 API Key (先用 `llm key set <provider> <key>`)", provider);
+                        tagged_out!("[llm]", "Provider '{}' 未配置 API Key (先用 `llm key set <provider> <key>`)", provider);
                         return;
                     }
                 };
                 match crate::deepseek::chat(&key, &message) {
                     Ok(reply) => {
-                        // [llm] 前缀统一用绿色着色（theme::green）。
-                        println!(
-                            "{}",
-                            theme::green(&format!("[llm:{}] {}", provider, reply))
-                        );
+                        // 方括号标识绿色，正文默认色。
+                        tagged_out!(&format!("[llm:{}]", provider), "{}", reply);
                         // 把 AI 回复注入意识本体作为新的感知概念
                         let concept_name = format!("llm_reply_{}_{}", provider, self.handler.consciousness.concept_count());
                         self.handler
                             .consciousness
                             .add_perception_channel(&concept_name, crate::channels::ChannelKind::Text);
-                        println!(
-                            "[llm] 回复已注入意识本体 (概念: {})",
-                            concept_name
-                        );
+                        tagged_out!("[llm]", "回复已注入意识本体 (概念: {})", concept_name);
                     }
-                    Err(e) => println!(
-                        "{}",
-                        theme::green(&format!("[llm:{}] 对话失败: {}", provider, e))
-                    ),
+                    Err(e) => tagged_out!(&format!("[llm:{}]", provider), "对话失败: {}", e),
                 }
             }
             Some("loop") => {
@@ -1730,7 +1724,10 @@ impl Shell {
         let key = match self.handler.consciousness.api_key(provider) {
             Some(k) => k.clone(),
             None => {
-                println!("[llm:{}] 未配置 API Key (先用 `llm key set <provider> <key>`)", provider);
+                tagged_out!(
+                    &format!("[llm:{}]", provider),
+                    "未配置 API Key (先用 `llm key set <provider> <key>`)"
+                );
                 return;
             }
         };
@@ -1787,11 +1784,44 @@ impl Shell {
             catalog
         );
         let mut loop_ = crate::deepseek::ThoughtLoop::new(&system_prompt).with_limits(10, 8000);
-        println!(
-            "{} (exit/quit 退出)",
-            theme::cyan("[hibos] AI 意识闭环已启动")
-        );
+        tagged_out!("[hibos]", "AI 意识闭环已启动 (exit/quit 退出)");
+        let mut last_cycle: Option<std::time::Instant> = None;
         loop {
+            // —— 内部驱动：定时器触发周期巡检 ——
+            let now = std::time::Instant::now();
+            let due = last_cycle.map(|t| now.duration_since(t).as_secs() >= 60).unwrap_or(true);
+            if due {
+                let perception = format!(
+                    "系统周期巡检: 已感知通道={} 当前目录={}",
+                    self.channels.len(),
+                    self.vfs.cwd_path()
+                );
+                match loop_.cycle(&key, &perception, &mut self.handler.consciousness) {
+                    Ok(reply) => {
+                        // 人类阅读节奏：先显示执行（行动落地），再显示回复文本。
+                        self.execute_llm_actions(&reply);
+                        let concepts = self.handler.consciousness.concept_count();
+                        tagged_out!("[llm]", "意识本体概念数: {}", concepts);
+                        // 回复正文：剔除 ACTION 行，标识绿色、正文默认色。
+                        let text = reply
+                            .lines()
+                            .map(|l| l.trim())
+                            .filter(|l| !l.is_empty() && !l.trim_start().starts_with("ACTION:"))
+                            .collect::<Vec<_>>()
+                            .join("\n");
+                        if !text.is_empty() {
+                            tagged_out!(&format!("[llm:{}]", provider), "{}", text);
+                        }
+                    }
+                    Err(e) => {
+                        tagged_out!(&format!("[llm:{}]", provider), "循环失败: {}", e);
+                        loop_.reset();
+                    }
+                }
+                last_cycle = Some(now);
+            }
+
+            // — 外部输入驱动 —
             let prompt = theme::prompt("~");
             let mut editor = std::mem::replace(&mut self.editor, LineEditor::new());
             let outcome = editor.read_line(&prompt, |input| self.completion(input));
@@ -1803,7 +1833,11 @@ impl Shell {
                         continue;
                     }
                     if trimmed == "exit" || trimmed == "quit" {
-                        println!("[llm:{}] 闭环循环结束，共 {} 轮。", provider, loop_.turn());
+                        tagged_out!(
+                            &format!("[llm:{}]", provider),
+                            "闭环循环结束，共 {} 轮。",
+                            loop_.turn()
+                        );
                         break;
                     }
                     // 感知：把当前 shell 上下文（工作目录、通道数）作为感知输入
@@ -1815,8 +1849,11 @@ impl Shell {
                     );
                     match loop_.cycle(&key, &perception, &mut self.handler.consciousness) {
                         Ok(reply) => {
-                            // 显式区分：先输出对话文本，再自动执行 ACTION 指令。
-                            // 回复中以单独一行 `ACTION: ...` 开头的行属于行动，其余为对话文本。
+                            // 人类阅读节奏：先显示执行（行动落地），再显示回复文本。
+                            self.execute_llm_actions(&reply);
+                            let concepts = self.handler.consciousness.concept_count();
+                            tagged_out!("[llm]", "意识本体概念数: {}", concepts);
+                            // 回复正文：剔除 ACTION 行，标识绿色、正文默认色。
                             let text = reply
                                 .lines()
                                 .map(|l| l.trim())
@@ -1824,22 +1861,11 @@ impl Shell {
                                 .collect::<Vec<_>>()
                                 .join("\n");
                             if !text.is_empty() {
-                                // [llm] 前缀统一用绿色着色（theme::green）。
-                                println!(
-                                    "{}",
-                                    theme::green(&format!("[llm:{}] {}", provider, text))
-                                );
+                                tagged_out!(&format!("[llm:{}]", provider), "{}", text);
                             }
-                            let concepts = self.handler.consciousness.concept_count();
-                            println!("[llm] 意识本体概念数: {}", concepts);
-                            // 自动执行 ACTION 指令
-                            self.execute_llm_actions(&reply);
                         }
                         Err(e) => {
-                            println!(
-                                "{}",
-                                theme::green(&format!("[llm:{}] 循环失败: {}", provider, e))
-                            );
+                            tagged_out!(&format!("[llm:{}]", provider), "循环失败: {}", e);
                             // 错误恢复：失败后清空上下文窗口，避免脏上下文卡死后续循环。
                             loop_.reset();
                         }
@@ -1847,11 +1873,19 @@ impl Shell {
                 }
                 Ok(line_editor::ReadOutcome::Cancelled) => {
                     // Ctrl+C：退出闭环循环（原先仅取消本行、继续 REPL，导致 Ctrl+C 无法退出）
-                    println!("[llm:{}] 闭环循环已由 Ctrl+C 中断，共 {} 轮。", provider, loop_.turn());
+                    tagged_out!(
+                        &format!("[llm:{}]", provider),
+                        "闭环循环已由 Ctrl+C 中断，共 {} 轮。",
+                        loop_.turn()
+                    );
                     break;
                 }
                 Ok(line_editor::ReadOutcome::Eof) | Err(_) => {
-                    println!("[llm:{}] 闭环循环结束，共 {} 轮。", provider, loop_.turn());
+                    tagged_out!(
+                        &format!("[llm:{}]", provider),
+                        "闭环循环结束，共 {} 轮。",
+                        loop_.turn()
+                    );
                     break;
                 }
             }
@@ -1885,14 +1919,14 @@ impl Shell {
                 // —— 通用感知 / 行动：覆盖所有已注册通道 ——
                 "sense" => {
                     if args.is_empty() {
-                        println!("[llm] ACTION sense 需要通道名，例如 sense net://eth0");
+                        tagged_out!("[llm]", "ACTION sense 需要通道名，例如 sense net://eth0");
                         continue;
                     }
                     format!("sense {}", args.join(" "))
                 }
                 "act" => {
                     if args.is_empty() {
-                        println!("[llm] ACTION act 需要通道名，例如 act driver://gpu alloc 64");
+                        tagged_out!("[llm]", "ACTION act 需要通道名，例如 act driver://gpu alloc 64");
                         continue;
                     }
                     format!("act {}", args.join(" "))
@@ -1901,7 +1935,7 @@ impl Shell {
                 "file" => match args.first().copied() {
                     Some("write") | Some("append") => {
                         if args.len() < 3 {
-                            println!("[llm] 用法: ACTION: file write <路径> <内容...>");
+                            tagged_out!("[llm]", "用法: ACTION: file write <路径> <内容...>");
                             continue;
                         }
                         format!("{} {} {}", args[0], args[1], args[2..].join(" "))
@@ -1909,7 +1943,7 @@ impl Shell {
                     Some("mkdir") | Some("touch") | Some("rm") | Some("cat") | Some("ls")
                     | Some("cd") => {
                         if args.len() < 2 {
-                            println!("[llm] 用法: ACTION: file {} <路径>", args[0]);
+                            tagged_out!("[llm]", "用法: ACTION: file {} <路径>", args[0]);
                             continue;
                         }
                         format!("{} {}", args[0], args[1..].join(" "))
@@ -1933,7 +1967,7 @@ impl Shell {
                 }
                 "proc" => {
                     if args.is_empty() {
-                        println!("[llm] ACTION proc 需要概念名，例如 proc inference 128");
+                        tagged_out!("[llm]", "ACTION proc 需要概念名，例如 proc inference 128");
                         continue;
                     }
                     format!("proc {}", args.join(" "))
@@ -1943,20 +1977,20 @@ impl Shell {
                 "module" => match args.first().copied() {
                     Some("load") => {
                         if args.len() < 2 {
-                            println!("[llm] 用法: ACTION: module load <名称>");
+                            tagged_out!("[llm]", "用法: ACTION: module load <名称>");
                             continue;
                         }
                         format!("modload {}", args[1..].join(" "))
                     }
                     Some("unload") => {
                         if args.len() < 2 {
-                            println!("[llm] 用法: ACTION: module unload <名称>");
+                            tagged_out!("[llm]", "用法: ACTION: module unload <名称>");
                             continue;
                         }
                         format!("modunload {}", args[1..].join(" "))
                     }
                     _ => {
-                        println!("[llm] 用法: ACTION: module load|unload <名称>");
+                        tagged_out!("[llm]", "用法: ACTION: module load|unload <名称>");
                         continue;
                     }
                 },
@@ -1978,18 +2012,18 @@ impl Shell {
                     Some(ch) if ch.access.can_write() => format!("act {}", rest),
                     Some(_) => format!("sense {}", rest),
                     None => {
-                        println!("[llm] 未知 ACTION 指令: {}", head);
+                        tagged_out!("[llm]", "未知 ACTION 指令: {}", head);
                         continue;
                     }
                 },
             };
 
-            println!("[llm] 执行 ACTION: {}", cmd);
+            tagged_out!("[llm]", "执行 ACTION: {}", cmd);
             self.dispatch(&cmd);
             executed += 1;
         }
         if executed > 0 {
-            println!("[llm] 本轮共自动执行 {} 条 ACTION 指令", executed);
+            tagged_out!("[llm]", "本轮共自动执行 {} 条 ACTION 指令", executed);
         }
     }
 
