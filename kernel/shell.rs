@@ -2009,7 +2009,31 @@ impl Shell {
                         wt_root
                     );
                     // 多 provider 并行思考 → 逐个落地行动 → 呈现回复。
-                    self.run_cycle(&mut sessions, &perception, wt_root);
+                    let (mut total, mut mutating) =
+                        self.run_cycle(&mut sessions, &perception, wt_root);
+
+                    // react 续跑：本轮只有感知、没有落地行动时，基于感知结果自动再跑一轮，
+                    // 避免 AI 只说"接下来要行动"却把行动停在承诺里。
+                    const MAX_REACT_ROUNDS: usize = 4;
+                    let mut round = 1usize;
+                    while round < MAX_REACT_ROUNDS && total > 0 && mutating == 0 {
+                        round += 1;
+                        tagged_out!(
+                            "[llm]",
+                            "react 续跑第 {} 轮（上一轮只有感知，继续推动行动）",
+                            round
+                        );
+                        let cont_perception = format!(
+                            "{}\n提示：上一轮只完成了感知，请直接基于感知结果给出行动 ACTION（不要只做感知）。",
+                            perception
+                        );
+                        let (t, m) = self.run_cycle(&mut sessions, &cont_perception, wt_root);
+                        total += t;
+                        mutating += m;
+                        if t == 0 {
+                            break;
+                        }
+                    }
                 }
                 Ok(line_editor::ReadOutcome::Cancelled) => {
                     // Ctrl+C：退出闭环循环（原先仅取消本行、继续 REPL，导致 Ctrl+C 无法退出）
@@ -2037,14 +2061,36 @@ impl Shell {
         sessions.iter().map(|(_, _, lp)| lp.turn()).sum()
     }
 
+    /// 判断一条已下发的命令是否属于"落地行动"（写入/改变状态），而非只读感知。
+    fn is_mutating_action(cmd: &str) -> bool {
+        let head = cmd.split_whitespace().next().unwrap_or("");
+        !matches!(
+            head,
+            "sense" | "ls"
+                | "cat"
+                | "pwd"
+                | "stat"
+                | "read"
+                | "tree"
+                | "df"
+                | "channels"
+                | "history"
+                | "modules"
+                | "fbpreview"
+                | "wallpaper"
+        )
+    }
+
     /// 一轮闭环：把同一份感知**并行**发给所有 provider，
     /// 逐个落地行动，再按 provider 呈现回复（先执行、后回复）。
+    ///
+    /// 返回 `(执行的动作数, 其中落地行动数)`。
     fn run_cycle(
         &mut self,
         sessions: &mut [(String, String, crate::llm::ThoughtLoop)],
         perception: &str,
         root: &str,
-    ) {
+    ) -> (usize, usize) {
         // 并行思考：每个 provider 在自己的线程里调用模型，互不阻塞。
         let results: Vec<(String, Result<String, String>)> = std::thread::scope(|scope| {
             let mut handles = Vec::new();
@@ -2066,6 +2112,8 @@ impl Shell {
                 .collect()
         });
 
+        let mut total = 0usize;
+        let mut mutating = 0usize;
         for (provider, res) in results {
             match res {
                 Ok(reply) => {
@@ -2074,7 +2122,9 @@ impl Shell {
                         lp.apply_actions(&reply, &mut self.handler.consciousness);
                     }
                     // 人类阅读节奏：先显示执行（行动落地），再显示回复文本。
-                    self.execute_llm_actions(&reply, root);
+                    let (t, m) = self.execute_llm_actions(&reply, root);
+                    total += t;
+                    mutating += m;
                     let concepts = self.handler.consciousness.concept_count();
                     tagged_out!("[llm]", "意识本体概念数: {}", concepts);
                     // 回复正文：剔除 ACTION 行，标识绿色、正文默认色。
@@ -2097,6 +2147,7 @@ impl Shell {
                 }
             }
         }
+        (total, mutating)
     }
 
     /// 从 AI 回复中解析并执行 ACTION 指令。
@@ -2106,8 +2157,9 @@ impl Shell {
     /// - `act <通道> <负载...>`   向通道写入（行动）—— 任何可写入的通道
     /// - 高级指令：`file` / `token` / `proc` / `run` / `desktop` / `module` / `concepts` / `stats`
     /// - 兼容旧式写法：`gpu://vram ...` / `net://eth0 ...` / `file://vfs ...` / `dev://disk ...`
-    fn execute_llm_actions(&mut self, reply: &str, root: &str) {
+    fn execute_llm_actions(&mut self, reply: &str, root: &str) -> (usize, usize) {
         let mut executed = 0usize;
+        let mut mutating = 0usize;
         for line in reply.lines() {
             let line = line.trim();
             let Some(rest) = line.strip_prefix("ACTION:") else {
@@ -2231,10 +2283,14 @@ impl Shell {
             tagged_out!("[llm]", "执行 ACTION: {}", cmd);
             self.dispatch(&cmd);
             executed += 1;
+            if Self::is_mutating_action(&cmd) {
+                mutating += 1;
+            }
         }
         if executed > 0 {
             tagged_out!("[llm]", "本轮共自动执行 {} 条 ACTION 指令", executed);
         }
+        (executed, mutating)
     }
 
     fn cmd_history(&self) {        if self.editor.history().is_empty() {
@@ -2385,6 +2441,20 @@ mod tests {
         assert!(s.dispatch("   "));
         assert!(!s.dispatch("exit"));
         assert!(!s.dispatch("quit"));
+    }
+
+    #[test]
+    fn mutating_action_classification() {
+        // 只读感知不算"落地行动"
+        assert!(!Shell::is_mutating_action("sense gpu://vram"));
+        assert!(!Shell::is_mutating_action("ls /worktrees/wt1"));
+        assert!(!Shell::is_mutating_action("cat note.txt"));
+        assert!(!Shell::is_mutating_action("stat /x"));
+        // 写入/改变状态算"落地行动"
+        assert!(Shell::is_mutating_action("act driver://gpu alloc 64"));
+        assert!(Shell::is_mutating_action("write /worktrees/wt1/note.txt hi"));
+        assert!(Shell::is_mutating_action("token create llama-13b"));
+        assert!(Shell::is_mutating_action("mkdir /worktrees/wt2"));
     }
 
     #[test]
