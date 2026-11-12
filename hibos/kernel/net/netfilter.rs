@@ -30,7 +30,7 @@ pub type Port = u16;
 // ======================================================================
 
 /// 报文处理 verdict。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Verdict {
     /// 接受，继续后续处理。
     Accept,
@@ -64,7 +64,7 @@ impl Verdict {
 // ======================================================================
 
 /// Netfilter 钩子点（与 Linux 对齐）。
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum HookPoint {
     Prerouting,   // 路由前（DNAT 常在此点）
     Input,        // 目的地为本机
@@ -97,7 +97,7 @@ pub enum Direction {
 }
 
 /// 报文五元组（用于匹配与 conntrack）。
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct PacketKey {
     pub src_ip: Ipv4Addr,
     pub dst_ip: Ipv4Addr,

@@ -16,8 +16,8 @@
 //!
 //! 所有结构均为纯 Rust 原型，无真实网络依赖，供内核统一核算与调度。
 
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
-use std::sync::{Mutex, OnceLock};
+use alloc::collections::{BTreeMap, BTreeSet, VecDeque};
+use crate::ksync::{SpinLock, OnceLock};
 
 use crate::net::{net, ETH_IP};
 
@@ -768,10 +768,10 @@ impl Default for NetAI {
 // 全局单例
 // =====================================================================================
 
-static NET_AI: OnceLock<Mutex<NetAI>> = OnceLock::new();
+static NET_AI: OnceLock<SpinLock<NetAI>> = OnceLock::new();
 
-pub fn net_ai() -> &'static Mutex<NetAI> {
-    NET_AI.get_or_init(|| Mutex::new(NetAI::new()))
+pub fn net_ai() -> &'static SpinLock<NetAI> {
+    NET_AI.get_or_init(|| SpinLock::new(NetAI::new()))
 }
 
 // =====================================================================================
