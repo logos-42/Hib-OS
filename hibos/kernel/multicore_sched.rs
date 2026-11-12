@@ -1,4 +1,4 @@
-﻿//! 多核调度模拟（CFS / EEVDF 简化版）。
+//! 多核调度模拟（CFS / EEVDF 简化版）。
 //!
 //! 模拟多核系统的调度器：每个核心独立维护运行队列，支持 CFS（完全公平调度）
 //! 的虚拟运行时间 vruntime 与 nice 值权重，以及 EEVDF 简化版的截止时间排序。
@@ -757,7 +757,6 @@ pub fn sched_enqueue_least_loaded(name: &str, nice: i32, use_eevdf: bool) -> Tas
 pub fn sched_pick_next(core_id: usize, use_eevdf: bool) -> Option<TaskId> {
     multicore_sched()
         .lock()
-        .unwrap()
         .pick_next(core_id, use_eevdf)
 }
 /// 让出指定核心上的任务（接口：yield_to(core_id)）。
@@ -768,7 +767,6 @@ pub fn sched_yield_to(core_id: usize, tid: TaskId, use_eevdf: bool) {
 pub fn sched_tick(core_id: usize, tid: TaskId, use_eevdf: bool, delta_ns: u64) {
     multicore_sched()
         .lock()
-        .unwrap()
         .tick(core_id, tid, use_eevdf, delta_ns);
 }
 /// 负载均衡。
@@ -990,4 +988,6 @@ mod tests {
         assert_eq!(ms.task_state(tid), Some((CoreId(0), TaskState::Ready)));
     }
 }
+
+
 

@@ -1514,15 +1514,15 @@ fn act_cron(payload: &str) -> Result<String, String> {
     let mut it = payload.splitn(3, ' ');
     match it.next() {
         Some("add") => {
-            let interval = it
+            let _interval = it
                 .next()
                 .and_then(|s| s.parse::<u64>().ok())
                 .ok_or("用法: add <interval_secs> <cmd>")?;
-            let cmd = it.next().unwrap_or("");
+            let _cmd = it.next().unwrap_or("");
             Ok("cron: 功能不可用".to_string())
         }
         Some("del") => {
-            let id = it.next().and_then(|s| s.parse::<u64>().ok()).ok_or("用法: del <id>")?;
+            let _id = it.next().and_then(|s| s.parse::<u64>().ok()).ok_or("用法: del <id>")?;
             Ok("cron: 功能不可用".to_string())
         }
         Some("run") => Ok("cron: 功能不可用".to_string()),
