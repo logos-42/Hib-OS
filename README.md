@@ -39,3 +39,21 @@ GPU-Centric 宏内核原型：把系统资源（文件、显存、设备、网�
 ## 许可证
 
 [MIT](LICENSE) © logos-42
+
+---
+
+## 仓库结构与变更记录
+
+- 项目文件直接放在仓库根目录：`Cargo.toml`、`lib.rs`、`kernel/`、`docs/`、`README.md` 等。
+  GitHub 首页会直接显示本说明，不用再点进子文件夹。
+- 2026-11-12：原先所有内容都套在 `hibos/` 子目录里，现已整体上移一层；
+  两份 `.gitignore` 合并为根目录一份，继续忽略本地密钥 `.env`、内部资料 `.wiki/`、构建产物 `target/` 等。
+- 构建与测试都在仓库根目录执行：`cargo test`、`cargo test --features gui`；
+  `build.ps1` / `build_kernel.ps1` 会自动定位到脚本所在目录。
+
+### 复盘与建议
+
+- 本次用 `git mv` 移动文件，提交历史保持连续（GitHub 显示为重命名，而不是删除后重建）；
+  已用 `cargo metadata` 验证入口路径，并检查 `README.md` 的 19 个文档链接全部有效。
+- `Cargo.toml`、构建脚本、`.cargo/config.toml` 都使用相对自身目录的路径，层级变化无需改动代码。
+- 后续新增文档建议直接放进根目录 `docs/`，不要再套一层目录，避免仓库首页又只剩一个文件夹。

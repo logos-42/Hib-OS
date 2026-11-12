@@ -115,11 +115,11 @@ mod tests {
 
     #[test]
     fn pci_channel_format_and_id() {
-        let dev = PciDevice { bus: 0, device: 2, function: 0, vendor_id: 0x8086, device_id: 0x5916, class_code: CLASS_DISPLAY, subclass: 0x00, irq_line: 16 };
+        let dev = PciDevice { bus: 0, device: 2, function: 0, vendor_id: 0x8086, device_id: 0x5916, class_code: CLASS_DISPLAY, subclass: 0x00, irq_line: 16, bar0: 0 };
         assert_eq!(dev.channel(), "dev://pci/0:2.0");
         assert_eq!(dev.id(), "8086:5916");
 
-        let dev1 = PciDevice { bus: 1, device: 7, function: 3, vendor_id: 0x10de, device_id: 0x1f08, class_code: CLASS_DISPLAY, subclass: 0x00, irq_line: 19 };
+        let dev1 = PciDevice { bus: 1, device: 7, function: 3, vendor_id: 0x10de, device_id: 0x1f08, class_code: CLASS_DISPLAY, subclass: 0x00, irq_line: 19, bar0: 0 };
         assert_eq!(dev1.channel(), "dev://pci/1:7.3");
     }
 

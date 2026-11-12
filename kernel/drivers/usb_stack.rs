@@ -337,6 +337,7 @@ pub struct BusStats {
     pub transfers_success: u64,
     pub transfers_error: u64,
     pub control_transfers: u64,
+    pub bulk_transfers: u64,
 }
 
 impl UsbBus {
