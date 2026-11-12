@@ -320,22 +320,7 @@ impl TcpConn {
         }
     }
 
-    /// 为主动连接新建连接（状态 SynSent）。
-    fn new_active(local_ip: [u8; 4], local_port: u16, remote_ip: [u8; 4], remote_port: u16,
-                  iss: u32, alg: CongestAlg) -> Self {
-        Self {
-            key: TcpConnKey { local_port, remote_ip, remote_port },
-            local_ip, remote_ip, remote_port,
-            state: TcpState::SynSent,
-            iss, snd_una: iss, snd_nxt: iss + 1, rcv_nxt: 0,
-            snd_wnd: 65535, rcv_wnd: 65535,
-            send_buf: VecDeque::new(), recv_buf: VecDeque::new(), accept_queue: VecDeque::new(),
-            congest: CongestionController::new(alg),
-            rto: Duration::from_secs(1),
-            rto_deadline: Instant::now() + Duration::from_secs(1),
-            rtt_seq: None, rtt_start: None, retransmissions: 0, last_sent: None,
-        }
-    }
+    // ------ 连接生命周期 ------
 
     /// 接收窗口可用空间。
     pub fn rcv_window(&self) -> u16 {
@@ -400,16 +385,6 @@ impl TcpStack {
         STACK.get_or_init(|| SpinLock::new(Self::new([10, 0, 0, 2])))
     }
 
-    /// 分配下一个临时端口。
-    fn next_ephemeral_port(&mut self) -> u16 {
-        let port = self.next_ephemeral;
-        self.next_ephemeral = self.next_ephemeral.saturating_add(1);
-        if self.next_ephemeral > 65535 {
-            self.next_ephemeral = 49152;
-        }
-        port
-    }
-
     // ------ 连接生命周期 ------
 
     /// 绑定本地端口（状态 Closed），检查 `CAP_NET_BIND` 能力（<1024 端口需该能力）。
@@ -454,7 +429,7 @@ impl TcpStack {
         }
         let iss = 1000 + local_port as u32; // ISS 基数（与 tcp.rs 一致，实际应随机化）
         let new_key = TcpConnKey { local_port, remote_ip, remote_port };
-        drop(conn); // 释放只读借用，再可变操作 conns
+        let _ = conn; // 释放只读借用，再可变操作 conns
         // 从旧 key 移动到新 key（四元组变化）。
         let mut moved = self.conns.remove(&key).unwrap();
         moved.remote_ip = remote_ip;

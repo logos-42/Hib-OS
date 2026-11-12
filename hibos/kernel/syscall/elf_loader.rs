@@ -381,19 +381,6 @@ fn read_u64(data: &[u8], offset: usize, little: bool) -> ElfResult<u64> {
     Ok(v)
 }
 
-fn read_bytes(data: &[u8], offset: usize, len: usize) -> ElfResult<&[u8]> {
-    if offset + len > data.len() {
-        return Err(ElfError::TruncatedHeader);
-    }
-    Ok(&data[offset..offset + len])
-}
-
-/// 以 C 字符串结束符截断字节切片并转为字符串。
-fn cstr_to_string(bytes: &[u8]) -> String {
-    let len = bytes.iter().position(|&b| b == 0).unwrap_or(bytes.len());
-    String::from_utf8_lossy(&bytes[..len]).to_string()
-}
-
 /// 判断 ELF 头是否为 32 位。
 fn class_is_32(header: &ElfHeader) -> bool {
     header.class == ELF_CLASS_32

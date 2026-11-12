@@ -408,7 +408,7 @@ impl TerminalBuffer {
 
 /// ANSI 参数类型。
 #[derive(Clone, Debug)]
-enum CsiParam {
+pub enum CsiParam {
     Numeric(Option<u16>),
     String(String),
 }

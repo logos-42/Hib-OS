@@ -14,7 +14,7 @@ pub const PAGE_FRAME_SIZE: u64 = 4096;
 pub const TOTAL_FRAMES: u64 = 1_048_576;
 
 /// 页框分配状态。
-struct FrameAllocatorState {
+pub struct FrameAllocatorState {
     /// 已分配页框集合（pfn -> 所有者 exec-id）。
     allocated: BTreeMap<u64, u64>,
     /// 空闲页框集合（pfn）。

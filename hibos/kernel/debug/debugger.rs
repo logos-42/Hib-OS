@@ -757,9 +757,3 @@ mod tests {
     }
 }
 
-/// 读取单字节（测试专用，绕过私有方法）。
-impl Debugger {
-    fn read_byte_for_test(&self, addr: usize) -> u8 {
-        self.read_byte(addr)
-    }
-}

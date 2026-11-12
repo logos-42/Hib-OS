@@ -115,7 +115,6 @@ pub struct SaliencyEntry {
 /// 显著性图：各感知通道的竞争优先级图，决定注意力分配。
 pub struct SaliencyMap {
     entries: BTreeMap<String, SaliencyEntry>,
-    next_id: u64,
     pub max_channels: usize,
     pub global_decay: f32,
 }
@@ -124,7 +123,6 @@ impl SaliencyMap {
     pub fn new() -> Self {
         Self {
             entries: BTreeMap::new(),
-            next_id: 1,
             max_channels: 64,
             global_decay: 0.001,
         }

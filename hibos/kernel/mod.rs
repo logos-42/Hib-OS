@@ -107,6 +107,7 @@ use scheduler::{CpuPriority, GpuScheduler};
 use syscall::{AiSystemCall, AiSystemCallResult};
 use syscall_handler::SyscallHandler;
 
+#[allow(dead_code)]
 fn main() {
     use std::io::IsTerminal;
 
@@ -136,6 +137,7 @@ fn main() {
     }
 }
 
+#[allow(dead_code)]
 fn print_usage() {
     println!("Hib OS —— GPU-Centric Macro-Kernel Prototype");
     println!("用法:");

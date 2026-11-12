@@ -89,7 +89,7 @@ fn parse_ip4_api(s: &str) -> Result<[u8; 4], String> {
 
 /// Socket 内部状态。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum SockState {
+pub enum SockState {
     /// 初始，未绑定。
     Idle,
     /// 已绑定本地地址。
@@ -103,7 +103,7 @@ enum SockState {
 }
 
 /// 单个 socket 的抽象。
-struct SocketEntry {
+pub struct SocketEntry {
     pub fd: SocketFd,
     pub domain: SocketDomain,
     pub ty: SocketType,

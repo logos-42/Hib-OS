@@ -384,7 +384,6 @@ pub enum ProcState {
 
 /// 信号处理器登记（简化：信号号 -> 处理器地址；SIG_IGN/SIG_DFL 用 0/1 表示）。
 const SIG_DFL: usize = 0;
-const SIG_IGN: usize = 1;
 
 // ========================================================================
 // 全局状态：内存文件系统 + 文件描述符表 + 进程表
@@ -801,11 +800,6 @@ impl PosixLayer {
         Self::sys_stat(path)
     }
 
-    /// 将 FileMeta 编码为一个 usize 占位（供 stat/fstat/lstat 返回）。
-    fn encode_stat(meta: &FileMeta) -> u64 {
-        ((meta.mode as u64) << 32) | (meta.size as u64 & 0xFFFF_FFFF)
-    }
-
     // ---------- 进程控制 ----------
 
     fn sys_fork() -> PosixResult<usize> {
@@ -816,7 +810,7 @@ impl PosixLayer {
             let parent_info = s
                 .procs
                 .get(&parent)
-                .ok_or(PosixError::ECHILD_())?;
+                .ok_or(PosixError::EINVAL)?;
             let child = ProcessInfo {
                 pid,
                 ppid: parent,
@@ -849,7 +843,7 @@ impl PosixLayer {
             if s.procs.contains_key(&pid) {
                 Ok(pid as usize)
             } else {
-                Err(PosixError::ECHILD_())
+                Err(PosixError::EINVAL)
             }
         })
     }
@@ -964,7 +958,7 @@ impl PosixLayer {
         let (uid, gid) = current_cred();
         PosixState::with_mut(|s| {
             if s.fs.contains_key(&np) {
-                return Err(PosixError::EEXIST_());
+                return Err(PosixError::EINVAL);
             }
             let meta = FileMeta {
                 path: np.clone(),
@@ -1020,7 +1014,7 @@ impl PosixLayer {
                 return Err(PosixError::ENOENT);
             }
             if s.fs.contains_key(&newp) {
-                return Err(PosixError::EEXIST_());
+                return Err(PosixError::EINVAL);
             }
             let (meta, content) = s.fs.get(&oldp).unwrap().clone();
             let mut meta = meta;
@@ -1036,7 +1030,7 @@ impl PosixLayer {
         let (uid, gid) = current_cred();
         PosixState::with_mut(|s| {
             if s.fs.contains_key(&linkp) {
-                return Err(PosixError::EEXIST_());
+                return Err(PosixError::EINVAL);
             }
             let meta = FileMeta {
                 path: linkp.clone(),
@@ -1270,16 +1264,6 @@ impl Default for PosixLayer {
 // ========================================================================
 // errno 扩展变体（私有，供 fork/wait 用，避免污染公共枚举）
 // ========================================================================
-
-impl PosixError {
-    fn ECHILD_() -> PosixError {
-        // ECHILD 未在公共枚举中列出，这里复用 EINVAL 近似；实际产品中应加入 ECHILD。
-        PosixError::EINVAL
-    }
-    fn EEXIST_() -> PosixError {
-        PosixError::EINVAL
-    }
-}
 
 /// 路径的稳定哈希（用于生成 file_id）。
 fn hash_path(path: &Path) -> u64 {

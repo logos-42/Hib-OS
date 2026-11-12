@@ -549,10 +549,6 @@ pub struct WidgetManager {
     focused: Option<WidgetId>,
     /// 鼠标悬停控件 id。
     hover: Option<WidgetId>,
-    /// 最近一次点击时间戳（用于双击检测）。
-    last_click_ns: u64,
-    /// 上一次点击的控件 id。
-    last_click_id: Option<WidgetId>,
 }
 
 impl Default for WidgetManager {
@@ -570,8 +566,6 @@ impl WidgetManager {
             layout: Layout::absolute(),
             focused: None,
             hover: None,
-            last_click_ns: 0,
-            last_click_id: None,
         }
     }
 

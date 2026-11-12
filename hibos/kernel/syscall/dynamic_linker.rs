@@ -304,7 +304,7 @@ impl DynamicLinker {
         self.path_to_lib
             .insert(lib_path.to_string_lossy().to_string(), id);
         self.load_order.push(id);
-        drop(visiting); // 离开当前库的递归层级
+        let _ = visiting; // 离开当前库的递归层级
         let _ = dep_ids; // 依赖已在 path_to_lib 中去重
         Ok(id)
     }
@@ -348,7 +348,6 @@ impl DynamicLinker {
         }
         let name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
         let mut meta = LibraryMeta {
-            name: name.clone(),
             exports: BTreeMap::new(),
             imports: BTreeMap::new(),
             dependencies: Vec::new(),
@@ -535,7 +534,6 @@ impl Default for DynamicLinker {
 /// 库元数据（轻量解析结果）。
 #[derive(Clone, Debug)]
 struct LibraryMeta {
-    name: String,
     exports: BTreeMap<String, usize>,
     imports: BTreeMap<String, Option<usize>>,
     dependencies: Vec<String>,

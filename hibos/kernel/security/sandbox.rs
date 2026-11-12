@@ -452,7 +452,6 @@ impl Sandbox {
 #[derive(Clone, Debug)]
 struct CheckCacheEntry {
     allowed: bool,
-    hits: u64,
 }
 
 /// 检查缓存：(sandbox_id, check_type, key) -> 结果。
@@ -485,16 +484,12 @@ impl CheckCache {
         }
         self.entries.insert(
             (sandbox_id, check_type.to_string(), key.to_string()),
-            CheckCacheEntry { allowed, hits: 1 },
+            CheckCacheEntry { allowed },
         );
     }
 
     fn clear(&mut self) {
         self.entries.clear();
-    }
-
-    fn len(&self) -> usize {
-        self.entries.len()
     }
 }
 

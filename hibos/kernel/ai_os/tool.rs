@@ -103,7 +103,6 @@ pub struct ToolRegistry {
     leases: BTreeMap<String, u64>,
     pub total_calls: u64,
     pub total_failures: u64,
-    enabled: bool,
 }
 
 impl ToolRegistry {
@@ -115,7 +114,6 @@ impl ToolRegistry {
             leases: BTreeMap::new(),
             total_calls: 0,
             total_failures: 0,
-            enabled: true,
         }
     }
 

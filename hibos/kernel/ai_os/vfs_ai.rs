@@ -611,10 +611,10 @@ impl Default for VfsAi {
 // 全局单例
 // =====================================================================================
 
-static VfsAi: OnceLock<Mutex<VfsAi>> = OnceLock::new();
+static VFS_AI: OnceLock<Mutex<VfsAi>> = OnceLock::new();
 
 pub fn vfs_ai() -> &'static Mutex<VfsAi> {
-    VfsAi.get_or_init(|| Mutex::new(VfsAi::new()))
+    VFS_AI.get_or_init(|| Mutex::new(VfsAi::new()))
 }
 
 // =====================================================================================

@@ -242,7 +242,7 @@ impl TcpLayer {
 
         let new_key = TcpConnKey { local_port, remote_ip, remote_port };
         let iss = socket.iss;
-        drop(socket);
+        let _ = socket;
         let moved = self.sockets.remove(&key).unwrap();
         self.sockets.insert(new_key.clone(), moved);
 

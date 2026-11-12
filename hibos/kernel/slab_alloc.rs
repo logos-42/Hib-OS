@@ -126,14 +126,7 @@ struct SlabCache {
         self.frees += 1;
         Ok(())
     }
-    /// 返回该缓存的利用率（0.0~1.0）。
-    fn utilization(&self) -> f64 {
-        if self.capacity == 0 {
-            return 0.0;
-        }
-        self.used as f64 / self.capacity as f64
-    }
-    /// 返回空闲槽数。
+    /// 返回空闲槽数。
     fn free_count(&self) -> usize {
         self.free.len()
     }

@@ -469,7 +469,6 @@ pub struct KvBlock {
 #[derive(Clone, Debug)]
 pub struct KvCacheManager {
     blocks: BTreeMap<u64, KvBlock>,
-    free_blocks: Vec<u64>,
     next_block: u64,
     block_size: u64,
     max_blocks: u64,
@@ -480,7 +479,6 @@ impl KvCacheManager {
     pub fn new(block_size: u64, max_blocks: u64) -> Self {
         Self {
             blocks: BTreeMap::new(),
-            free_blocks: Vec::new(),
             next_block: 1,
             block_size,
             max_blocks,
@@ -726,16 +724,12 @@ pub struct ModelShard {
 /// 分发器（P2P / 副本 / 一致性哈希）。
 pub struct ModelDistributor {
     shards: BTreeMap<u64, ModelShard>,
-    replicas: BTreeMap<String, Vec<String>>, // shard -> peer list
-    ring: Vec<(u64, String)>,              // 一致性哈希环
 }
 
 impl ModelDistributor {
     pub fn new() -> Self {
         Self {
             shards: BTreeMap::new(),
-            replicas: BTreeMap::new(),
-            ring: Vec::new(),
         }
     }
 
@@ -785,7 +779,6 @@ pub enum WatermarkLoc {
 
 pub struct ModelSecurity {
     signatures: BTreeMap<String, ModelSignature>,
-    watermarks: BTreeMap<String, Vec<WatermarkLoc>>,
     trusted_signers: BTreeSet<String>,
 }
 
@@ -793,7 +786,6 @@ impl ModelSecurity {
     pub fn new() -> Self {
         Self {
             signatures: BTreeMap::new(),
-            watermarks: BTreeMap::new(),
             trusted_signers: BTreeSet::new(),
         }
     }
@@ -1051,7 +1043,6 @@ pub struct ModelRegistry {
     optimizer: ModelOptimizer,
     distributor: ModelDistributor,
     security: ModelSecurity,
-    versions: BTreeMap<String, Vec<ModelInstallRecord>>,
     pub vram_budget: u64,
     pub vram_used: u64,
     pub total_loads: u64,
@@ -1068,7 +1059,6 @@ impl ModelRegistry {
             optimizer: ModelOptimizer::default(),
             distributor: ModelDistributor::new(),
             security: ModelSecurity::new(),
-            versions: BTreeMap::new(),
             vram_budget: 8 << 30,
             vram_used: 0,
             total_loads: 0,

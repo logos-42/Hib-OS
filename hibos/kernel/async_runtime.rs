@@ -14,7 +14,7 @@
 use alloc::collections::{BTreeMap, VecDeque};
 use alloc::sync::Arc;
 use crate::ksync::{SpinLock, OnceLock};
-use core::task::{Context, RawWaker, RawWakerVTable, Waker};
+use core::task::{Context, Waker};
 
 // =====================================================================================
 // Poll 与 Future（简化版）
@@ -116,44 +116,6 @@ impl Task {
 
 /// 任务唤醒回调：wake 某个任务 ID。
 type WakeCallback = Box<dyn Fn(u64) + Send + Sync>;
-
-/// 构造一个绑定到任务 ID 的 Waker（实际唤醒由 Reactor 负责将任务重新入就绪队列）。
-fn make_waker(task_id: u64, wake_cb: Arc<WakeCallback>) -> Waker {
-    unsafe { Waker::from_raw(raw_waker(task_id, wake_cb)) }
-}
-
-static WAKER_VTABLE: RawWakerVTable =
-    RawWakerVTable::new(clone_waker, wake_task, wake_by_ref_task, drop_waker);
-
-unsafe fn raw_waker(task_id: u64, wake_cb: Arc<WakeCallback>) -> RawWaker {
-    let data = Arc::into_raw(Arc::new((task_id, wake_cb))) as *mut ();
-    RawWaker::new(data, &WAKER_VTABLE)
-}
-
-unsafe fn clone_waker(data: *const ()) -> RawWaker {
-    let arc = Arc::from_raw(data as *const (u64, Arc<WakeCallback>));
-    std::mem::forget(arc.clone());
-    RawWaker::new(Arc::into_raw(arc) as *mut (), &WAKER_VTABLE)
-}
-
-unsafe fn wake_task(data: *const ()) {
-    let arc = Arc::from_raw(data as *const (u64, Arc<WakeCallback>));
-    let (task_id, cb) = &*arc;
-    cb(*task_id);
-    std::mem::forget(arc);
-}
-
-unsafe fn wake_by_ref_task(data: *const ()) {
-    let arc = Arc::from_raw(data as *const (u64, Arc<WakeCallback>));
-    let (task_id, cb) = &*arc;
-    cb(*task_id);
-    std::mem::forget(arc);
-}
-
-unsafe fn drop_waker(data: *const ()) {
-    let _arc = Arc::from_raw(data as *const (u64, Arc<WakeCallback>));
-    drop(_arc);
-}
 
 // =====================================================================================
 // Reactor —— 轮询器
@@ -529,13 +491,12 @@ impl Future for CounterFuture {
 
 /// 延迟 Future：模拟经过若干轮 poll 后才就绪的定时器。
 pub struct DelayFuture {
-    name: String,
     remaining_ticks: u64,
 }
 
 impl DelayFuture {
-    pub fn new(name: &str, ticks: u64) -> Self {
-        Self { name: name.to_string(), remaining_ticks: ticks }
+    pub fn new(_name: &str, ticks: u64) -> Self {
+        Self { remaining_ticks: ticks }
     }
 }
 

@@ -187,7 +187,6 @@ impl UdpStack {
     fn next_ephemeral_port(&mut self) -> Port {
         let port = self.next_ephemeral;
         self.next_ephemeral = self.next_ephemeral.saturating_add(1);
-        if self.next_ephemeral > 65535 { self.next_ephemeral = 49152; }
         port
     }
 

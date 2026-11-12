@@ -223,12 +223,9 @@ pub struct GestureRecognizer {
     active: BTreeMap<u64, TouchPoint>,
     /// 已抬起的触点历史（用于双击检测）。
     last_tap: Option<TouchPoint>,
-    /// 配置。
+/// 配置。
     pub config: GestureConfig,
-    /// 上一次识别出的手势（用于去重）。
-    last_gesture: Option<Gesture>,
 }
-
 impl Default for GestureRecognizer {
     fn default() -> Self {
         Self::new()
@@ -242,7 +239,6 @@ impl GestureRecognizer {
             active: BTreeMap::new(),
             last_tap: None,
             config: GestureConfig::default_config(),
-            last_gesture: None,
         }
     }
 

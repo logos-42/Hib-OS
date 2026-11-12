@@ -260,8 +260,6 @@ pub struct PendingEcho {
 pub struct IcmpStack {
     /// 未解决的 Echo Request：(id, seq) -> PendingEcho。
     pub pending: BTreeMap<(u16, u16), PendingEcho>,
-    /// 下一个 echo 标识符。
-    pub next_id: u16,
     /// 统计。
     pub stats: IcmpStats,
 }
@@ -282,7 +280,6 @@ pub struct IcmpStats {
     pub fn new() -> Self {
         Self {
             pending: BTreeMap::new(),
-            next_id: 1,
             stats: IcmpStats::default(),
         }
     }
@@ -291,13 +288,7 @@ pub struct IcmpStats {
         static STACK: OnceLock<SpinLock<IcmpStack>> = OnceLock::new();
         STACK.get_or_init(|| SpinLock::new(Self::new()))
     }
-    /// 分配下一个 echo 标识符。
-    fn next_id(&mut self) -> u16 {
-        let id = self.next_id;
-        self.next_id = self.next_id.saturating_add(1);
-        id
-    }
-    // ------ 发送构造 ------
+    // ------ 发送构造 ------
     /// 构造 ICMP Echo Request（ping）数据报（不含 IP 首部，供上层封装为 IPv4/ICMP 发送）。
     pub fn echo_request(&mut self, id: u16, seq: u16, payload: &[u8]) -> Vec<u8> {
         let pkt = IcmpPacket::echo_request(id, seq, payload.to_vec());
