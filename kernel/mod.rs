@@ -67,7 +67,7 @@ pub mod mutex2;
 pub mod time;
 pub mod tty;
 pub mod user;
-pub mod deepseek;
+pub mod llm;
 pub mod debug;
 pub mod shell;
 pub mod syscall;

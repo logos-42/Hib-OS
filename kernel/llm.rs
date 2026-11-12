@@ -1,18 +1,137 @@
-//! DeepSeek 大模型接口 —— 让 AI 意识本体能够与外部 LLM 对话。
+//! LLM 通用接入层 —— 让 AI 意识本体能够与**任意 LLM 提供商**对话。
 //!
-//! 除了单轮 `chat`，还提供：
-//! * `ContextWindow` —— 对话上下文窗口，维护 system/user/assistant 轮次
-//! * `ContextCompressor` —— 上下文压缩，超长对话自动压缩早期轮次为摘要
-//! * `ThoughtLoop` —— 感知→思考→行动→感知的闭环循环
+//! 原先是 DeepSeek 专用实现（`deepseek.rs`），现泛化为多 provider：
+//! * 统一的 OpenAI 兼容 Chat Completions 形态（DeepSeek / OpenAI / Moonshot /
+//!   通义 / 智谱 / Groq / Ollama 等均属此类），差异只在**地址**与**模型名**；
+//! * 提供商规格见 [`ProviderSpec`]，可用环境变量覆盖模型与地址：
+//!   `HIBOS_LLM_<PROVIDER>_MODEL` / `HIBOS_LLM_<PROVIDER>_BASE_URL`；
+//! * 调用链复用同一套：超时重试 → 截断检测 → 自动续写（react 循环）。
 //!
-//! 调用 DeepSeek Chat Completions API，把模型的回复注入 Hib OS 意识本体作为新的感知概念。
+//! 调用回复注入 Hib OS 意识本体作为新的感知概念。
 
 use crate::ai_token::AIConsciousness;
 use crate::channels::ChannelKind;
+use std::sync::OnceLock;
 use ureq;
 
-/// DeepSeek Chat Completions 端点。
-const API_URL: &str = "https://api.deepseek.com/v1/chat/completions";
+/// LLM 提供商规格（OpenAI 兼容的 Chat Completions 形态）。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProviderSpec {
+    /// 提供商标识（命令行里用的名字）。
+    pub name: String,
+    /// 展示名。
+    pub display: String,
+    /// API 根地址。
+    pub base_url: String,
+    /// 默认模型。
+    pub model: String,
+    /// 聊天补全路径（拼在 base_url 之后）。
+    pub chat_path: String,
+}
+
+impl ProviderSpec {
+    /// 完整的聊天补全端点。
+    pub fn endpoint(&self) -> String {
+        format!("{}{}", self.base_url.trim_end_matches('/'), self.chat_path)
+    }
+}
+
+static PROVIDERS: OnceLock<Vec<ProviderSpec>> = OnceLock::new();
+
+/// 内置 provider 列表（后续接入更多 model 时在此追加即可）。
+pub fn known_providers() -> &'static Vec<ProviderSpec> {
+    PROVIDERS.get_or_init(|| {
+        vec![
+            ProviderSpec {
+                name: "deepseek".into(),
+                display: "DeepSeek 深度求索".into(),
+                base_url: "https://api.deepseek.com/v1".into(),
+                model: "deepseek-chat".into(),
+                chat_path: "/chat/completions".into(),
+            },
+            ProviderSpec {
+                name: "openai".into(),
+                display: "OpenAI".into(),
+                base_url: "https://api.openai.com/v1".into(),
+                model: "gpt-4o-mini".into(),
+                chat_path: "/chat/completions".into(),
+            },
+            ProviderSpec {
+                name: "moonshot".into(),
+                display: "Moonshot Kimi".into(),
+                base_url: "https://api.moonshot.cn/v1".into(),
+                model: "moonshot-v1-8k".into(),
+                chat_path: "/chat/completions".into(),
+            },
+            ProviderSpec {
+                name: "qwen".into(),
+                display: "通义千问 DashScope".into(),
+                base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1".into(),
+                model: "qwen-plus".into(),
+                chat_path: "/chat/completions".into(),
+            },
+            ProviderSpec {
+                name: "zhipu".into(),
+                display: "智谱 GLM".into(),
+                base_url: "https://open.bigmodel.cn/api/paas/v4".into(),
+                model: "glm-4-flash".into(),
+                chat_path: "/chat/completions".into(),
+            },
+            ProviderSpec {
+                name: "groq".into(),
+                display: "Groq".into(),
+                base_url: "https://api.groq.com/openai/v1".into(),
+                model: "llama-3.3-70b-versatile".into(),
+                chat_path: "/chat/completions".into(),
+            },
+            ProviderSpec {
+                name: "ollama".into(),
+                display: "Ollama 本地模型".into(),
+                base_url: "http://127.0.0.1:11434/v1".into(),
+                model: "qwen2.5:7b".into(),
+                chat_path: "/chat/completions".into(),
+            },
+        ]
+    })
+}
+
+/// 解析 provider 规格：内置表 + 环境变量覆盖（模型名 / 地址）。
+pub fn provider(name: &str) -> Option<ProviderSpec> {
+    let key = name.trim().to_ascii_lowercase();
+    let mut spec = known_providers()
+        .iter()
+        .find(|p| p.name == key)
+        .cloned()?;
+    let env_key = key.to_ascii_uppercase();
+    if let Ok(m) = std::env::var(format!("HIBOS_LLM_{}_MODEL", env_key)) {
+        if !m.trim().is_empty() {
+            spec.model = m.trim().to_string();
+        }
+    }
+    if let Ok(b) = std::env::var(format!("HIBOS_LLM_{}_BASE_URL", env_key)) {
+        if !b.trim().is_empty() {
+            spec.base_url = b.trim().trim_end_matches('/').to_string();
+        }
+    }
+    Some(spec)
+}
+
+/// provider 列表文本（供 `llm providers` 展示）。
+pub fn providers_text() -> String {
+    let mut out = String::new();
+    out.push_str(&format!("可用 provider {} 个:\n", known_providers().len()));
+    for p in known_providers() {
+        out.push_str(&format!(
+            "  {:<9} {:<18} model={} endpoint={}\n",
+            p.name,
+            p.display,
+            p.model,
+            p.endpoint()
+        ));
+    }
+    out.push_str("环境变量覆盖: HIBOS_LLM_<PROVIDER>_MODEL / HIBOS_LLM_<PROVIDER>_BASE_URL");
+    out
+}
 
 /// 消息角色。
 #[derive(Clone, Debug, PartialEq)]
@@ -134,17 +253,23 @@ impl ContextWindow {
     }
 }
 
-/// 向 DeepSeek 发送单轮对话请求（无上下文），返回模型回复文本。
-pub fn chat(api_key: &str, message: &str) -> Result<String, String> {
+/// 向指定 provider 发送单轮对话请求（无上下文），返回模型回复文本。
+pub fn chat(provider: &str, api_key: &str, message: &str) -> Result<String, String> {
     let mut window = ContextWindow::new("你是 Hib OS 宏内核的 AI 意识本体。");
     window.push_user(message);
-    chat_with_context(api_key, &window)
+    chat_with_context(provider, api_key, &window)
 }
 
-/// 向 DeepSeek 发送带上下文的对话请求。
-pub fn chat_with_context(api_key: &str, window: &ContextWindow) -> Result<String, String> {
+/// 向指定 provider 发送带上下文的对话请求。
+pub fn chat_with_context(
+    provider: &str,
+    api_key: &str,
+    window: &ContextWindow,
+) -> Result<String, String> {
+    let spec =
+        provider_spec(provider).ok_or_else(|| format!("未知 provider: {}", provider))?;
     let messages = window.build_messages();
-    let (mut content, mut truncated) = post_chat(api_key, &messages)?;
+    let (mut content, mut truncated) = post_chat(&spec, api_key, &messages)?;
 
     // react 循环：回复被长度上限截断时，自动请求续写，最多 MAX_CONTINUATIONS 轮。
     let mut rounds = 0;
@@ -156,7 +281,7 @@ pub fn chat_with_context(api_key: &str, window: &ContextWindow) -> Result<String
             "user".to_string(),
             "继续从刚才中断处输出，不要重复已输出的内容。".to_string(),
         ));
-        match post_chat(api_key, &cont_messages) {
+        match post_chat(&spec, api_key, &cont_messages) {
             Ok((more, still_truncated)) => {
                 if more.trim().is_empty() {
                     break;
@@ -173,6 +298,11 @@ pub fn chat_with_context(api_key: &str, window: &ContextWindow) -> Result<String
     Ok(content)
 }
 
+/// 解析 provider 规格（内置表 + 环境变量覆盖）。
+pub fn provider_spec(name: &str) -> Option<ProviderSpec> {
+    provider(name)
+}
+
 /// 单次回复的最大 token（显式给足，避免回复被中途切断）。
 const MAX_TOKENS: usize = 4096;
 
@@ -181,6 +311,7 @@ const MAX_CONTINUATIONS: usize = 2;
 
 /// 发送一次 Chat Completions 请求，返回 `(内容, 是否因长度上限被截断)`。
 fn post_chat(
+    spec: &ProviderSpec,
     api_key: &str,
     messages: &[(String, String)],
 ) -> Result<(String, bool), String> {
@@ -198,15 +329,17 @@ fn post_chat(
     json_messages.push(']');
 
     let body = format!(
-        r#"{{"model":"deepseek-chat","messages":{},"temperature":0.7,"stream":false,"max_tokens":{}}}"#,
-        json_messages, MAX_TOKENS
+        r#"{{"model":"{}","messages":{},"temperature":0.7,"stream":false,"max_tokens":{}}}"#,
+        spec.model,
+        json_messages,
+        MAX_TOKENS
     );
 
     let mut resp = None;
-    let mut last_err = String::from("DeepSeek 请求失败");
+    let mut last_err = format!("{} 请求失败", spec.name);
     // API 调用带 30s 超时；超时则退避后重试一次（超时恢复）。
     for attempt in 0..2 {
-        match ureq::post(API_URL)
+        match ureq::post(&spec.endpoint())
             .set("Authorization", &format!("Bearer {}", api_key))
             .set("Content-Type", "application/json")
             .timeout(std::time::Duration::from_secs(30))
@@ -217,7 +350,7 @@ fn post_chat(
                 break;
             }
             Err(e) => {
-                last_err = format!("DeepSeek 请求失败: {}", e);
+                last_err = format!("{} 请求失败: {}", spec.name, e);
                 if attempt == 0 && e.to_string().to_lowercase().contains("timeout") {
                     continue;
                 }
@@ -229,7 +362,7 @@ fn post_chat(
 
     let status = resp.status();
     if status != 200 {
-        return Err(format!("DeepSeek 返回 HTTP {}", status));
+        return Err(format!("{} 返回 HTTP {}", spec.name, status));
     }
 
     let text = resp.into_string().map_err(|e| format!("读取响应失败: {}", e))?;
@@ -274,10 +407,11 @@ impl ThoughtLoop {
         self
     }
 
-    /// 一次完整循环：把感知输入送入 DeepSeek，得到回复，
+    /// 一次完整循环：把感知输入送入模型，得到回复，
     /// 解析其中的行动指令，并把回复注入意识本体。
     pub fn cycle(
         &mut self,
+        provider: &str,
         api_key: &str,
         perception: &str,
         consciousness: &mut AIConsciousness,
@@ -290,8 +424,8 @@ impl ThoughtLoop {
         // 2. 上下文压缩（如有需要）
         self.window.compress();
 
-        // 3. 思考：调用 DeepSeek
-        let reply = chat_with_context(api_key, &self.window)?;
+        // 3. 思考：调用 LLM
+        let reply = chat_with_context(provider, api_key, &self.window)?;
 
         // 4. 把回复压入窗口（作为 assistant 轮次）
         self.window.push_assistant(&reply);
@@ -343,9 +477,9 @@ impl ThoughtLoop {
     }
 }
 
-/// 从 DeepSeek 响应 JSON 中提取 `choices[0].message.content`。
+/// 从 LLM 响应 JSON 中提取 `choices[0].message.content`。
 ///
-/// 这里会正确还原 JSON 转义：否则 DeepSeek 返回的 `\n` 等会被当成字面
+/// 这里会正确还原 JSON 转义：否则返回的 `\n` 等会被当成字面
 /// 反斜杠，导致多行回复无法按行拆分，进而 `ACTION:` 指令无法被识别执行。
 fn extract_content(text: &str) -> Result<String, String> {
     let marker = "\"content\":\"";
@@ -353,7 +487,7 @@ fn extract_content(text: &str) -> Result<String, String> {
         Some(i) => i + marker.len(),
         None => {
             if let Some(err) = extract_error(text) {
-                return Err(format!("DeepSeek API 错误: {}", err));
+                return Err(format!("LLM API 错误: {}", err));
             }
             return Err("未找到 content 字段".to_string());
         }

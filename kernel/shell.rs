@@ -145,10 +145,19 @@ impl Shell {
         consciousness.add_common_concepts();
         consciousness.add_extended_concepts();
 
-        // 从环境变量 DEEPSEEK_API_KEY 加载 API Key（不使用 .env 文件）。
+        // 从环境变量加载 API Key（不使用 .env 文件）。
+        // DEEPSEEK_API_KEY 为兼容旧名；通用形式为 HIBOS_LLM_<PROVIDER>_KEY。
         if let Ok(key) = std::env::var("DEEPSEEK_API_KEY") {
             if !key.is_empty() {
                 consciousness.set_deepseek_key(key);
+            }
+        }
+        for p in crate::llm::known_providers() {
+            let env_key = format!("HIBOS_LLM_{}_KEY", p.name.to_ascii_uppercase());
+            if let Ok(key) = std::env::var(&env_key) {
+                if !key.is_empty() {
+                    consciousness.set_api_key(&p.name, key);
+                }
             }
         }
 
@@ -200,12 +209,12 @@ impl Shell {
         // 把挂载表物化进目录树：/proc、/sys、/dev/gpu 等在 ls 里可见。
         self.materialize_all_mounts();
 
-        let has_key = self.handler.consciousness.deepseek_key().is_some();
+        let provider = self.active_provider();
 
-        if has_key {
+        if let Some(provider) = provider {
             // 极简启动（无大横幅、无子系统噪声日志）。
             println!("Hib OS — AI 意识本体闭环已就绪 (exit 退出)");
-            self.run_llm_loop("deepseek");
+            self.run_llm_loop(&provider);
             return;
         }
 
@@ -215,9 +224,7 @@ impl Shell {
         println!("Hib OS — interactive shell ready (help / exit)");
         if io::stdin().is_terminal() {
             println!("↑↓ 历史, Tab 补全, ←→ 移动光标");
-            if !has_key {
-                println!("设置环境变量 DEEPSEEK_API_KEY 可启用 AI 闭环模式");
-            }
+            println!("设置环境变量 HIBOS_LLM_<PROVIDER>_KEY（兼容 DEEPSEEK_API_KEY）可启用 AI 闭环模式");
         }
 
         loop {
@@ -844,6 +851,18 @@ impl Shell {
             self.channels.total_senses(),
             self.channels.total_acts()
         );
+    }
+
+    /// 选一个已配置 API Key 的 provider（优先 deepseek，其次第一个已配置的）。
+    fn active_provider(&self) -> Option<String> {
+        let keys = self.handler.consciousness.api_keys();
+        if keys.is_empty() {
+            return None;
+        }
+        if let Some((p, _)) = keys.iter().find(|(p, _)| p == "deepseek") {
+            return Some(p.clone());
+        }
+        keys.first().map(|(p, _)| p.clone())
     }
 
     /// 自造插件通道按需注册：插件安装后，其 `plugin://<name>` 通道即可被感知/行动。
@@ -1679,6 +1698,12 @@ impl Shell {
     }
     fn cmd_llm(&mut self, parts: &[&str]) {
         match parts.get(1).copied() {
+            Some("providers") => {
+                // 列出内置 provider（地址 / 默认模型），便于后续接入更多 model。
+                for line in crate::llm::providers_text().lines() {
+                    println!("{}", line);
+                }
+            }
             None | Some("status") => {
                 let keys = self.handler.consciousness.api_keys();
                 if keys.is_empty() {
@@ -1769,7 +1794,7 @@ impl Shell {
                         return;
                     }
                 };
-                match crate::deepseek::chat(&key, &message) {
+                match crate::llm::chat(provider, &key, &message) {
                     Ok(reply) => {
                         // 方括号标识绿色，正文默认色。
                         tagged_out!(&format!("[llm:{}]", provider), "{}", reply);
@@ -1876,7 +1901,7 @@ impl Shell {
                 规则：先用 sense 了解状态，再决定 act / 创建资源 / 操作文件；不要执行破坏性操作除非必要；用简体中文回答，并在需要时在末尾给出 ACTION。",
             catalog
         );
-        let mut loop_ = crate::deepseek::ThoughtLoop::new(&system_prompt).with_limits(10, 8000);
+        let mut loop_ = crate::llm::ThoughtLoop::new(&system_prompt).with_limits(10, 8000);
         // 每个闭环实例绑定独立的 worktree —— 意识实例级工作区隔离。
         let seq = LOOP_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let wt_name = format!("loop-{}-{}", provider, seq);
@@ -1903,7 +1928,7 @@ impl Shell {
                     self.vfs.cwd_path(),
                     wt_root
                 );
-                match loop_.cycle(&key, &perception, &mut self.handler.consciousness) {
+                match loop_.cycle(provider, &key, &perception, &mut self.handler.consciousness) {
                     Ok(reply) => {
                         // 人类阅读节奏：先显示执行（行动落地），再显示回复文本。
                         self.execute_llm_actions(&reply, &wt_root);
@@ -1955,7 +1980,7 @@ impl Shell {
                         self.channels.len(),
                         wt_root
                     );
-                    match loop_.cycle(&key, &perception, &mut self.handler.consciousness) {
+                    match loop_.cycle(provider, &key, &perception, &mut self.handler.consciousness) {
                         Ok(reply) => {
                             // 人类阅读节奏：先显示执行（行动落地），再显示回复文本。
                             self.execute_llm_actions(&reply, &wt_root);
