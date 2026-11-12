@@ -75,6 +75,7 @@ pub mod syscall_handler;
 pub mod verification;
 pub mod vfs;
 pub mod loader;
+pub mod version;
 pub mod irq;
 pub mod mm;
 pub mod file_channel;
@@ -265,7 +266,11 @@ pub fn kernel_main() {
     // ---------- 7. 模块加载演示 ----------
     let entry = modules::ModuleEntry {
         name: "demo-gpu-driver".to_string(),
-        version: modules::Version::new(0, 1, 0),
+        version: modules::Version::new(
+            crate::version::VERSION_MAJOR,
+            crate::version::VERSION_MINOR,
+            crate::version::VERSION_PATCH,
+        ),
         init: || Ok(()),
         cleanup: || {},
     };

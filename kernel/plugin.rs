@@ -64,7 +64,7 @@ impl PluginSpec {
     pub fn new(name: &str) -> Self {
         Self {
             name: name.to_string(),
-            version: "0.2.0".to_string(),
+            version: crate::version::VERSION.to_string(),
             kind: PluginKind::Generic,
             caps: 0,
             channel: format!("plugin://{}", name),

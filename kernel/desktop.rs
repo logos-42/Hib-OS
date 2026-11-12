@@ -477,7 +477,13 @@ pub fn compose(info: &DesktopInfo) -> Screen {
     s.fill_row(0, ' ', color::TEXT, color::BASE);
     // 应用菜单 / 活动
     s.write_rgb(1, 0, "Activities", color::BLUE_RGB, color::BASE_RGB);
-    s.write(30, 0, "HIB OS  v0.2.0", color::SUBTEXT0, color::BASE);
+    s.write(
+        30,
+        0,
+        concat!("HIB OS  v", crate::version::hibos_version!()),
+        color::SUBTEXT0,
+        color::BASE,
+    );
     // 右侧系统状态
     let net = format!("{}", info.panel_net);
     s.write(COLS - net.chars().count() - 2, 0, &net, color::TEAL, color::BASE);

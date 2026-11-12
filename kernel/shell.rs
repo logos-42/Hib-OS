@@ -181,7 +181,14 @@ impl Shell {
     ///
     /// 极简 Linux 风启动画面（彩色；管道下自动去色）。
     fn linux_boot(&self) {
-        println!("{}", theme::bold("Hib OS 0.2.0 (linux)"));
+        println!(
+            "{}",
+            theme::bold(concat!(
+                "Hib OS ",
+                crate::version::hibos_version!(),
+                " (linux)"
+            ))
+        );
         println!(
             "{} hibos: GPU-Centric macro-kernel (by logos-42, MIT)",
             theme::grey("[    0.000000 ]")
@@ -1608,7 +1615,11 @@ impl Shell {
         };
         let entry = ModuleEntry {
             name: name.to_string(),
-            version: Version::new(0, 1, 0),
+            version: Version::new(
+                crate::version::VERSION_MAJOR,
+                crate::version::VERSION_MINOR,
+                crate::version::VERSION_PATCH,
+            ),
             init: || Ok(()),
             cleanup: || {},
         };
@@ -2014,25 +2025,47 @@ impl Shell {
 
                     // react 续跑：本轮只有感知、没有落地行动时，基于感知结果自动再跑一轮，
                     // 避免 AI 只说"接下来要行动"却把行动停在承诺里。
-                    const MAX_REACT_ROUNDS: usize = 4;
+                    // 上限与提示语均可通过环境变量覆盖：
+                    //   HIBOS_LLM_REACT_ROUNDS  —— 最多续跑轮数（默认 4，最小 1）
+                    //   HIBOS_LLM_REACT_PROMPT  —— 续跑时追加给 AI 的提示语
+                    let max_react_rounds: usize = std::env::var("HIBOS_LLM_REACT_ROUNDS")
+                        .ok()
+                        .and_then(|v| v.trim().parse::<usize>().ok())
+                        .unwrap_or(4)
+                        .max(1);
+                    let react_prompt: String = std::env::var("HIBOS_LLM_REACT_PROMPT")
+                        .ok()
+                        .filter(|v| !v.trim().is_empty())
+                        .unwrap_or_else(|| {
+                            "提示：上一轮只完成了感知，请直接基于感知结果给出行动 ACTION（不要只做感知）。".to_string()
+                        });
+
                     let mut round = 1usize;
-                    while round < MAX_REACT_ROUNDS && total > 0 && mutating == 0 {
+                    while round < max_react_rounds && total > 0 && mutating == 0 {
                         round += 1;
                         tagged_out!(
                             "[llm]",
-                            "react 续跑第 {} 轮（上一轮只有感知，继续推动行动）",
-                            round
+                            "── react 第 {}/{} 轮 ── 上一轮只有感知，继续推动行动",
+                            round,
+                            max_react_rounds
                         );
-                        let cont_perception = format!(
-                            "{}\n提示：上一轮只完成了感知，请直接基于感知结果给出行动 ACTION（不要只做感知）。",
-                            perception
-                        );
+                        let cont_perception = format!("{}\n{}", perception, react_prompt);
                         let (t, m) = self.run_cycle(&mut sessions, &cont_perception, wt_root);
                         total += t;
                         mutating += m;
                         if t == 0 {
                             break;
                         }
+                    }
+                    if round > 1 {
+                        tagged_out!(
+                            "[llm]",
+                            "本次命令共 {} 轮：执行 {} 条 ACTION（感知 {} 条 / 落地 {} 条）",
+                            round,
+                            total,
+                            total - mutating,
+                            mutating
+                        );
                     }
                 }
                 Ok(line_editor::ReadOutcome::Cancelled) => {

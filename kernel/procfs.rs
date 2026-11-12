@@ -50,13 +50,17 @@ impl ProcFs {
         let uptime_ns = stats.system_uptime_ns;
 
         format!(
-            "version: Hib OS 0.2.0 (GPU-Centric macro-kernel)\n\
-             uptime: {}ms ({}ns)\n\
-             loadavg: {} {} {} (procs={}, running={})\n\
-             meminfo: total={}MiB used={}MiB free={}MiB\n\
-             vram: total={}MiB used={}MiB free={}MiB\n\
-             tokens: total={} active={} completed={} failed={} avg={}ns\n\
-             procfs: refreshes={}",
+            concat!(
+                "version: Hib OS ",
+                crate::version::hibos_version!(),
+                " (GPU-Centric macro-kernel)\n\
+                 uptime: {}ms ({}ns)\n\
+                 loadavg: {} {} {} (procs={}, running={})\n\
+                 meminfo: total={}MiB used={}MiB free={}MiB\n\
+                 vram: total={}MiB used={}MiB free={}MiB\n\
+                 tokens: total={} active={} completed={} failed={} avg={}ns\n\
+                 procfs: refreshes={}"
+            ),
             uptime_ns / 1_000_000,
             uptime_ns,
             fmt_tenths(load_1),

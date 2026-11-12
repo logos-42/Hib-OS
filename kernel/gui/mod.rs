@@ -121,7 +121,11 @@ pub fn build_demo(comp: &mut Compositor) {
     if let Some(w) = comp.window_mut(console) {
         w.move_to(48, 56);
         if let Some(t) = w.terminal.as_mut() {
-            t.push_line("Hib OS 0.2.0 / real pixel compositor");
+            t.push_line(concat!(
+                "Hib OS ",
+                crate::version::hibos_version!(),
+                " / real pixel compositor"
+            ));
             t.push_line("type a command, press ENTER");
             t.push_line("channels: exec sync lease agent gui");
             t.push_line("hello, operator.");

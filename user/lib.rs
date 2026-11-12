@@ -6,7 +6,7 @@
 pub mod api;
 
 /// 版本信息
-pub const VERSION: &str = "0.2.0";
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Hib OS 系统信息
 #[derive(Debug, Clone)]

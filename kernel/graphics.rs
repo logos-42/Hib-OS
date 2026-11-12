@@ -151,7 +151,13 @@ pub fn init() {
     vga_text::init();
     let mut s = screen().lock();
     s.clear();
-    s.print_str(0, 0, "Hib OS 0.2.0 - GPU Primacy Graphics", Color::LightGreen, Color::Black);
+    s.print_str(
+        0,
+        0,
+        concat!("Hib OS ", crate::version::hibos_version!(), " - GPU Primacy Graphics"),
+        Color::LightGreen,
+        Color::Black,
+    );
     s.print_str(0, 1, "Text-mode graphics buffer active", Color::LightCyan, Color::Black);
     s.render();
 }
