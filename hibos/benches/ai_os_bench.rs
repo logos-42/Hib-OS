@@ -210,7 +210,7 @@ fn bench_dream_cycle(b: &mut criterion::Criterion) {
 
 fn bench_vfs_ai_write(b: &mut criterion::Criterion) {
     b.bench_function("vfs_ai_write", |b| {
-        let mut eng = vfs_ai::VFS_AI::new();
+        let mut eng = vfs_ai::VfsAi::new();
         let (_, file_id) = eng.create_file(black_box("bench.txt"), 1).unwrap();
         b.iter(|| {
             eng.write_file(black_box(file_id), black_box(0), black_box(b"benchmark data")).unwrap();

@@ -19,7 +19,7 @@
 //! 文件末尾附带 `#[cfg(test)]` 单元测试，覆盖规则匹配、syscall 过滤、文件访问、
 //! 网络访问、能力校验、循环/重复创建、缓存失效等。
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 

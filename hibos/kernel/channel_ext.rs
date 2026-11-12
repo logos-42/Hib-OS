@@ -12,7 +12,7 @@
 
 use crate::channels::{Access, ChannelError, ChannelKind, ChannelRegistry};
 use crate::lease::{self, Epoch};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 

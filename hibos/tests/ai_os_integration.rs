@@ -349,7 +349,7 @@ fn ethics_pipeline() {
 #[test]
 fn vfs_ai_to_semantic_pipeline() {
     // 语义文件系统 -> 语义向量 -> 语义检索
-    let mut eng = vfs_ai::VFS_AI::new();
+    let mut eng = vfs_ai::VfsAi::new();
 
     let (ino, file_id) = eng.create_file("readme.txt", 1).unwrap();
     eng.write_file(file_id, 0, b"Hello World").unwrap();
@@ -445,7 +445,7 @@ fn full_ai_os_integration() {
     let _ = ethics::EthicsEngine::new();
     let _ = evolution::EvolutionEngine::new();
     let _ = dream::DreamEngine::new();
-    let _ = vfs_ai::VFS_AI::new();
+    let _ = vfs_ai::VfsAi::new();
     let _ = net_ai::NetAI::new();
     let _ = driver_ai::DriverAI::new();
     let _ = shell_ai::ShellAI::new();

@@ -18,7 +18,7 @@
 //! 所有结构均为纯 Rust 原型，供内核统一核算与调度，
 //! 并通过 `memory://*` 通道接入 `sense`/`act` 感知层。
 
-use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::collections::{BTreeMap, VecDeque};
 use std::sync::{Mutex, OnceLock};
 
 // =====================================================================================

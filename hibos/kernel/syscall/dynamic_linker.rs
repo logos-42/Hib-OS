@@ -19,7 +19,7 @@
 //! 文件末尾附带 `#[cfg(test)]` 单元测试，覆盖库加载、符号解析、循环依赖、
 //! 重定位、搜索路径、init/fini 数组等。
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 
 // ========================================================================

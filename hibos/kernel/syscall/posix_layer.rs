@@ -15,7 +15,7 @@
 //! * 信号：简化的信号掩码与处理器登记，`kill`/`signal`/`sigaction`/`sigprocmask`；
 //! * 所有公共函数均有中文 doc comment，文件末尾附带 `#[cfg(test)]` 单元测试。
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 

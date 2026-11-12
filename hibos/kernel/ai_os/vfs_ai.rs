@@ -12,7 +12,7 @@
 //! * MemoryMount (记忆挂载点) —— 语义文件系统的挂载点，等价于挂载点；
 //! * SemanticFS (语义文件系统) —— 整个语义文件系统，等价于超级块；
 //! * AIFileWatcher (AI 文件监视器) —— 基于语义变化的文件监视，等价于 inotify；
-//! * VFS_AI (AI 原生 VFS 引擎) —— 统一入口，通过 vfs_ai://* 通道暴露。
+//! * VfsAi (AI 原生 VFS 引擎) —— 统一入口，通过 vfs_ai://* 通道暴露。
 //!
 //! 所有结构均为纯 Rust 原型，无磁盘依赖，供内核统一核算与调度。
 
@@ -412,11 +412,11 @@ impl AIFileWatcher {
 }
 
 // =====================================================================================
-// AI 原生 VFS 引擎 (VFS_AI) —— 统一入口
+// AI 原生 VFS 引擎 (VfsAi) —— 统一入口
 // =====================================================================================
 
 /// AI 原生 VFS 引擎：整合语义 inode、记忆文件、语义目录、语义路径、语义链接、AI 文件监视器。
-pub struct VFS_AI {
+pub struct VfsAi {
     pub inodes: BTreeMap<u64, SemanticInode>,
     pub files: BTreeMap<u64, MemoryFile>,
     pub directories: BTreeMap<u64, SemanticDirectory>,
@@ -430,7 +430,7 @@ pub struct VFS_AI {
     pub total_operations: u64,
 }
 
-impl VFS_AI {
+impl VfsAi {
     pub fn new() -> Self {
         let root_inode = 1;
         let mut inodes = BTreeMap::new();
@@ -601,7 +601,7 @@ impl VFS_AI {
     }
 }
 
-impl Default for VFS_AI {
+impl Default for VfsAi {
     fn default() -> Self {
         Self::new()
     }
@@ -611,10 +611,10 @@ impl Default for VFS_AI {
 // 全局单例
 // =====================================================================================
 
-static VFS_AI: OnceLock<Mutex<VFS_AI>> = OnceLock::new();
+static VfsAi: OnceLock<Mutex<VfsAi>> = OnceLock::new();
 
-pub fn vfs_ai() -> &'static Mutex<VFS_AI> {
-    VFS_AI.get_or_init(|| Mutex::new(VFS_AI::new()))
+pub fn vfs_ai() -> &'static Mutex<VfsAi> {
+    VfsAi.get_or_init(|| Mutex::new(VfsAi::new()))
 }
 
 // =====================================================================================
@@ -755,7 +755,7 @@ pub fn vfs_ai_act(payload: &str) -> Result<String, String> {
         Some("tick") => {
             let mut eng = vfs_ai().lock().unwrap();
             eng.tick();
-            Ok("VFS_AI 已推进".into())
+            Ok("VfsAi 已推进".into())
         }
         Some("status") | None => Ok(status()),
         Some(other) => Err(format!("未知 vfs_ai 动作: {}", other)),
@@ -776,7 +776,7 @@ mod tests {
 
     #[test]
     fn inode_creation() {
-        let mut vfs = VFS_AI::new();
+        let mut vfs = VfsAi::new();
         let ino = vfs.create_inode(AINodeType::Directory, "home", 1).unwrap();
         assert_eq!(ino, 2);
         assert_eq!(vfs.inode_count(), 2);
@@ -786,7 +786,7 @@ mod tests {
 
     #[test]
     fn file_create_write_read() {
-        let mut vfs = VFS_AI::new();
+        let mut vfs = VfsAi::new();
         let (ino, file_id) = vfs.create_file("test.txt", 1).unwrap();
         assert_eq!(ino, 2);
         assert_eq!(file_id, 1);
@@ -798,7 +798,7 @@ mod tests {
 
     #[test]
     fn file_append() {
-        let mut vfs = VFS_AI::new();
+        let mut vfs = VfsAi::new();
         let (_, file_id) = vfs.create_file("append.txt", 1).unwrap();
         vfs.write_file(file_id, 0, b"hello").unwrap();
         vfs.write_file(file_id, 5, b" world").unwrap();
@@ -808,7 +808,7 @@ mod tests {
 
     #[test]
     fn file_delete() {
-        let mut vfs = VFS_AI::new();
+        let mut vfs = VfsAi::new();
         let (_, file_id) = vfs.create_file("temp.txt", 1).unwrap();
         vfs.delete_file(file_id).unwrap();
         assert!(vfs.read_file(file_id, 0, 10).is_err());
@@ -816,7 +816,7 @@ mod tests {
 
     #[test]
     fn directory_insert_lookup() {
-        let mut vfs = VFS_AI::new();
+        let mut vfs = VfsAi::new();
         vfs.create_inode(AINodeType::Directory, "docs", 1).unwrap();
         let dir = vfs.directories.get(&1).unwrap();
         assert!(dir.get("docs").is_some());
@@ -824,7 +824,7 @@ mod tests {
 
     #[test]
     fn semantic_tag() {
-        let mut vfs = VFS_AI::new();
+        let mut vfs = VfsAi::new();
         let ino = vfs.create_inode(AINodeType::Regular, "file1", 1).unwrap();
         vfs.add_semantic_tag(ino, "important").unwrap();
         let inode = vfs.inodes.get(&ino).unwrap();
@@ -833,7 +833,7 @@ mod tests {
 
     #[test]
     fn semantic_vector() {
-        let mut vfs = VFS_AI::new();
+        let mut vfs = VfsAi::new();
         let ino = vfs.create_inode(AINodeType::Regular, "file1", 1).unwrap();
         vfs.set_semantic_vector(ino, vec![1.0, 0.0, 0.0]).unwrap();
         let inode = vfs.inodes.get(&ino).unwrap();
@@ -842,7 +842,7 @@ mod tests {
 
     #[test]
     fn semantic_search() {
-        let mut vfs = VFS_AI::new();
+        let mut vfs = VfsAi::new();
         vfs.create_inode(AINodeType::Regular, "file1", 1).unwrap();
         vfs.set_semantic_vector(2, vec![1.0, 0.0, 0.0]).unwrap();
         vfs.create_inode(AINodeType::Regular, "file2", 1).unwrap();
@@ -959,7 +959,7 @@ mod tests {
     fn vfs_ai_act_tick() {
         init();
         let res = vfs_ai_act("tick").unwrap();
-        assert!(res.contains("VFS_AI 已推进"));
+        assert!(res.contains("VfsAi 已推进"));
     }
 
     #[test]

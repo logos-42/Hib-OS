@@ -6,7 +6,7 @@
 //! 支持：8bit 灰度 / RGB / 调色板 / 灰度+α / RGBA，非隔行（Adam7 会明确报错）。
 //! 支持 DEFLATE 的 stored / fixed-Huffman / dynamic-Huffman 三种块。
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 
 use super::surface::{argb, Surface};
 

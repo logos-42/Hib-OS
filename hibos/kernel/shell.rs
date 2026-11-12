@@ -593,7 +593,7 @@ impl Shell {
         drop(vram);
         let gib = |b: u64| b as f64 / (1024.0 * 1024.0 * 1024.0);
 
-        let net_state = crate::net::net().lock().unwrap();
+        let net_state = crate::net::net().lock();
         let panel_net = if net_state.iface.link_up {
             format!("eth0 {} up", crate::net::fmt_ip(net_state.iface.ip))
         } else {
@@ -1285,7 +1285,7 @@ impl Shell {
                 let _ = self
                     .vfs
                     .write(&format!("{}/kernel_params", base), &format!("{}\n", params));
-                let ifs = crate::netif::ifaces().lock().unwrap().list();
+                let ifs = crate::netif::ifaces().lock().list();
                 let _ = self
                     .vfs
                     .write(&format!("{}/net_interfaces", base), &format!("{}\n", ifs));

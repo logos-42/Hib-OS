@@ -18,7 +18,7 @@
 //! 能力：swap 读写受 `kernel/caps.rs` 的 `CAP_SYS_ADMIN` 门禁。
 //! 通道：`swap://area` 映射到 `sense.rs` / `act_swap`。
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::fs::{self, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};

@@ -233,7 +233,7 @@ fn bench_dream_cycle() {
 }
 
 fn bench_vfs_ai_write() {
-    let mut eng = vfs_ai::VFS_AI::new();
+    let mut eng = vfs_ai::VfsAi::new();
     let (_, file_id) = eng.create_file("bench.txt", 1).unwrap();
     let start = Instant::now();
     for _ in 0..100000 {

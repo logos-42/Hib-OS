@@ -15,7 +15,7 @@
 //! 接口：`icmp_echo_request(dst, id, seq, payload)` / `icmp_echo_reply(...)` /
 //! `icmp_destination_unreachable(...)` / `icmp_time_exceeded(...)` / `icmp_process(...)`。
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use crate::ksync::{SpinLock, OnceLock};
 use core::time::Duration;
 

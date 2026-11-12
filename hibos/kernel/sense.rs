@@ -3,10 +3,8 @@
 //! `probe(name)` 返回该通道的实时快照；`act(name, payload)` 执行一次写操作。
 //! 返回 `None` 表示该通道由 shell 层负责 (文件、上下文、行动等需要可变的会话状态)。
 
-use alloc::collections::BTreeSet;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
-use core::time::Duration;
 use std::io::IsTerminal;
 
 use crate::desktop;
@@ -326,7 +324,6 @@ pub fn probe(name: &str) -> Option<String> {
         "tool://registry" => Some(tool_status()),
         "aios://status" => Some(ai_os_status()),
         "security://status" => Some(security::status()),
-        "sec://caps" => Some(caps().lock().list()),
         "deadlock://graph" => Some(deadlock::status()),
         "deadlock://wait" => Some(deadlock::status()),
         "container://status" => Some(container::status()),
@@ -411,7 +408,7 @@ pub fn probe(name: &str) -> Option<String> {
 fn power_wake_source_status() -> String {
     static WAKE_SOURCE: OnceLock<SpinLock<Option<String>>> = OnceLock::new();
     let ws = WAKE_SOURCE.get_or_init(|| SpinLock::new(None));
-    match ws.lock().unwrap().as_deref() {
+    match ws.lock().as_deref() {
         Some(ch) => format!("wake-source={}", ch),
         None => "wake-source=(none)".to_string(),
     }
@@ -421,14 +418,14 @@ fn power_wake_source_status() -> String {
 pub fn set_wake_source(channel: &str) {
     static WAKE_SOURCE: OnceLock<SpinLock<Option<String>>> = OnceLock::new();
     let ws = WAKE_SOURCE.get_or_init(|| SpinLock::new(None));
-    *ws.lock().unwrap() = Some(channel.to_string());
+    *ws.lock() = Some(channel.to_string());
 }
 
 /// 读取当前唤醒源。
 pub fn wake_source() -> Option<String> {
     static WAKE_SOURCE: OnceLock<SpinLock<Option<String>>> = OnceLock::new();
     let ws = WAKE_SOURCE.get_or_init(|| SpinLock::new(None));
-    ws.lock().unwrap().clone()
+    ws.lock().clone()
 }
 
 /// 感知一个通道，同时返回它当前的世界版本 (epoch)。
@@ -950,10 +947,6 @@ fn act_raw(name: &str, payload: &str) -> Option<Result<String, String>> {
         "gui_ai://create-window" | "gui_ai://close-window" | "gui_ai://focus-window" | "gui_ai://add-widget" | "gui_ai://add-layer" | "gui_ai://compose" | "gui_ai://inject-event" | "gui_ai://poll-event" | "gui_ai://set-theme" | "gui_ai://enable-modality" | "gui_ai://set-layout" => {
             Some(crate::ai_os::gui_ai::gui_ai_act_dispatch(payload))
         }
-        // —— AI 原生智能图形界面通道 ——
-        "gui_ai://create-window" | "gui_ai://close-window" | "gui_ai://focus-window" | "gui_ai://add-widget" | "gui_ai://add-layer" | "gui_ai://compose" | "gui_ai://inject-event" | "gui_ai://poll-event" | "gui_ai://set-theme" | "gui_ai://enable-modality" | "gui_ai://set-layout" => {
-            Some(crate::ai_os::gui_ai::gui_ai_act_dispatch(payload))
-        }
         _ => None,
     }
 }
@@ -1111,7 +1104,6 @@ fn act_realm(payload: &str) -> Result<String, String> {
             let verb = it.next().unwrap_or("w");
             realm::acl()
                 .lock().unwrap()
-                .unwrap()
                 .add_rule(pattern, verb, sub == "allow")
         }
         "check" => {
@@ -1531,7 +1523,7 @@ fn act_cron(payload: &str) -> Result<String, String> {
         }
         Some("del") => {
             let id = it.next().and_then(|s| s.parse::<u64>().ok()).ok_or("用法: del <id>")?;
-            "cron: 功能不可用".to_string()
+            Ok("cron: 功能不可用".to_string())
         }
         Some("run") => Ok("cron: 功能不可用".to_string()),
         _ => Ok("cron: 功能不可用".to_string()),

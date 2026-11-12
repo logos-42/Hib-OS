@@ -18,7 +18,7 @@
 //! * `yield_to(core_id)` —— 让出指定核心上的当前任务；
 //! * `load_balance()` —— 跨核负载均衡，迁移任务。
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use alloc::string::ToString;
 use crate::ksync::{SpinLock, OnceLock};
 

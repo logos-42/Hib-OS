@@ -18,12 +18,10 @@
 
 use alloc::collections::{BTreeMap, BTreeSet, VecDeque};
 use crate::ksync::{SpinLock, OnceLock};
-use std::sync::Mutex;
 
 use crate::drivers::dma::DmaEngine;
 use crate::drivers::devtree::devtree_insert;
 use crate::drivers::irq_ctrl::IrqController;
-use crate::drivers::pci_enumerate;
 
 // =====================================================================================
 // AI 设备 (AIDevice)

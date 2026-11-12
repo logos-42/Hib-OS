@@ -17,7 +17,7 @@
 //! 所有结构均为纯 Rust 原型，无外部依赖，供内核统一核算与调度，
 //! 并通过 `native://*` 通道接入 `sense`/`act` 感知层。
 
-use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::{Mutex, OnceLock};
 use std::time::SystemTime;
 

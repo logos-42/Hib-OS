@@ -20,7 +20,7 @@
 //!
 //! 所有结构均为纯内存原型，无外部 AI 框架依赖，供内核统一核算与调度。
 
-use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::sync::{Mutex, OnceLock};
@@ -2375,7 +2375,7 @@ impl ModelCalibrator {
 pub enum ExportFormat {
     ONNX,
     TorchScript,
-    TF_SavedModel,
+    TfSavedModel,
     GGML,
     EXL2,
 }
