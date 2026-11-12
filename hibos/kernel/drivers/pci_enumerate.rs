@@ -214,6 +214,11 @@ impl PciBus {
         BUS.get_or_init(|| SpinLock::new(Self::new()))
     }
 
+    /// 设备数量。
+    pub fn len(&self) -> usize {
+        self.devices.len()
+    }
+
     // ------ 配置空间读写 ------
 
     /// 读取指定设备配置空间一个 32-bit 字（offset 必须 4 字节对齐，0..256）。

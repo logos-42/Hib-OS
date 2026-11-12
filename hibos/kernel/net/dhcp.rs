@@ -797,3 +797,67 @@ mod tests {
         assert!(dhcp_act_raw("request").is_err()); // 无 offer
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // 辅助：在不引入 borrow 检查问题下，从 DhcpClient 读取消息类型。
+    impl DhcpClient {
+        fn get_msg_type(&self, msg: &DhcpMessage) -> Option<u8> {
+            msg.get_option_u8(DHCP_OPT_MSG_TYPE)
+        }
+    }
+
+    /// 构造一个 DHCP OFFER 报文（测试用）。
+    fn build_offer_msg(offer: &DhcpOffer) -> DhcpMessage {
+        let mut msg = DhcpMessage {
+            op: 2, htype: 1, hlen: 6, hops: 0,
+            xid: offer.xid, secs: 0, flags: 0x8000,
+            ciaddr: [0,0,0,0], yiaddr: offer.offered_ip, siaddr: offer.server_id, giaddr: [0,0,0,0],
+            chaddr: [0x02,0,0,0,0,0x01], chaddr_pad: [0;10], xid_pad: [0;64],
+            sname: [0;64], file: [0;128],
+            magic_cookie: [0x63,0x82,0x53,0x63],
+            options: Vec::new(),
+        };
+        msg.add_option_u8(DHCP_OPT_MSG_TYPE, DHCP_OFFER);
+        msg.add_option_ip(DHCP_OPT_SUBNET_MASK, offer.subnet_mask);
+        msg.add_option_ip(DHCP_OPT_ROUTER, offer.gateway);
+        msg.add_option_ip(DHCP_OPT_DNS_SERVER, offer.dns_servers[0]);
+        msg.add_option_u32_opt(DHCP_OPT_LEASE_TIME, offer.lease_time);
+        msg.add_option_ip(DHCP_OPT_SERVER_ID, offer.server_id);
+        msg.add_option_end();
+        msg
+    }
+
+    /// 构造一个 DHCP ACK 报文（测试用）。
+    fn build_ack_msg(xid: u32, ip: [u8;4], mask: [u8;4], gw: [u8;4], dns: Vec<[u8;4]>, lease_time: u32) -> DhcpMessage {
+        let mut msg = DhcpMessage {
+            op: 2, htype: 1, hlen: 6, hops: 0,
+            xid, secs: 0, flags: 0,
+            ciaddr: [0,0,0,0], yiaddr: ip, siaddr: gw, giaddr: [0,0,0,0],
+            chaddr: [0x02,0,0,0,0,0x01], chaddr_pad: [0;10], xid_pad: [0;64],
+            sname: [0;64], file: [0;128],
+            magic_cookie: [0x63,0x82,0x53,0x63],
+            options: Vec::new(),
+        };
+        msg.add_option_u8(DHCP_OPT_MSG_TYPE, DHCP_ACK);
+        msg.add_option_ip(DHCP_OPT_SUBNET_MASK, mask);
+        msg.add_option_ip(DHCP_OPT_ROUTER, gw);
+        for d in &dns { msg.add_option_ip(DHCP_OPT_DNS_SERVER, *d); }
+        msg.add_option_u32_opt(DHCP_OPT_LEASE_TIME, lease_time);
+        msg.add_option_ip(DHCP_OPT_SERVER_ID, gw);
+        msg.add_option_end();
+        msg
+    }
+
+    /// 添加 u32 选项（测试用辅助）。
+    trait DhcpMsgOptU32 {
+        fn add_option_u32_opt(&mut self, code: u8, value: u32);
+    }
+    impl DhcpMsgOptU32 for DhcpMessage {
+        fn add_option_u32_opt(&mut self, code: u8, value: u32) {
+            self.add_option_bytes(code, &value.to_be_bytes());
+        }
+    }
+}
