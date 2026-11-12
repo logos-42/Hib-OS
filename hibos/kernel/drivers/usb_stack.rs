@@ -438,9 +438,9 @@ impl UsbBus {
                 let desc_type = (request.w_value >> 8) as u8;
                 let desc_index = (request.w_value & 0xFF) as u8;
                 let payload = match desc_type {
-                    USB_DESC_DEVICE => self.serialize_device_descriptor(&dev.descriptor),
+                    USB_DESC_DEVICE => UsbBus::serialize_device_descriptor(&dev.descriptor),
                     USB_DESC_CONFIG => {
-                        dev.configs.get(desc_index as usize).map(|c| self.serialize_config_descriptor(c)).unwrap_or_default()
+                        dev.configs.get(desc_index as usize).map(|c| UsbBus::serialize_config_descriptor(c)).unwrap_or_default()
                     }
                     _ => Vec::new(),
                 };
@@ -489,7 +489,7 @@ impl UsbBus {
         format!("USB devices={}\n{}", self.devices.len(), lines.join("\n"))
     }
 
-    fn serialize_device_descriptor(&self, desc: &DeviceDescriptor) -> Vec<u8> {
+    fn serialize_device_descriptor(desc: &DeviceDescriptor) -> Vec<u8> {
         let mut b = Vec::new();
         b.push(desc.b_length);
         b.push(desc.b_descriptor_type);
@@ -508,7 +508,7 @@ impl UsbBus {
         b
     }
 
-    fn serialize_config_descriptor(&self, config: &ConfigDescriptor) -> Vec<u8> {
+    fn serialize_config_descriptor(config: &ConfigDescriptor) -> Vec<u8> {
         let mut b = Vec::new();
         b.push(config.b_length);
         b.push(config.b_descriptor_type);
