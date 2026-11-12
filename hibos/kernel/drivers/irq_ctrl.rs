@@ -23,6 +23,16 @@ use crate::time::get_time_ns;
 use crate::caps;
 use crate::exec::ExecId;
 
+/// no_std 环境下的 Instant 替代：基于纳秒时间戳。
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Instant(u64);
+
+impl Instant {
+    pub fn now() -> Self {
+        Instant(get_time_ns())
+    }
+}
+
 // =======================================================================
 // 中断线句柄
 // =======================================================================

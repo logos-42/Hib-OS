@@ -239,7 +239,7 @@ pub fn probe(name: &str) -> Option<String> {
         "init://services" => Some(init_mgr().lock().unwrap().list()),
         "time://clock" => Some(format!("{}ns", get_time_ns())),
         "time://cron" => Some("cron: 功能不可用".to_string()),
-        "pkg://store" => Some(pkgstore().lock().unwrap().list()),
+        "pkg://store" => Some(pkgstore().lock().list()),
         "tty://jobs" => {
             let mut t = tty().lock().unwrap();
             Some(t.jobs())
@@ -409,8 +409,8 @@ pub fn probe(name: &str) -> Option<String> {
 
 /// 电源唤醒源状态（供 `sense power://wake-source`）。
 fn power_wake_source_status() -> String {
-    static WAKE_SOURCE: OnceLock<Mutex<Option<String>>> = OnceLock::new();
-    let ws = WAKE_SOURCE.get_or_init(|| Mutex::new(None));
+    static WAKE_SOURCE: OnceLock<SpinLock<Option<String>>> = OnceLock::new();
+    let ws = WAKE_SOURCE.get_or_init(|| SpinLock::new(None));
     match ws.lock().unwrap().as_deref() {
         Some(ch) => format!("wake-source={}", ch),
         None => "wake-source=(none)".to_string(),
@@ -419,15 +419,15 @@ fn power_wake_source_status() -> String {
 
 /// 设置电源唤醒源（供 `act power://wake-source <通道>`）。
 pub fn set_wake_source(channel: &str) {
-    static WAKE_SOURCE: OnceLock<Mutex<Option<String>>> = OnceLock::new();
-    let ws = WAKE_SOURCE.get_or_init(|| Mutex::new(None));
+    static WAKE_SOURCE: OnceLock<SpinLock<Option<String>>> = OnceLock::new();
+    let ws = WAKE_SOURCE.get_or_init(|| SpinLock::new(None));
     *ws.lock().unwrap() = Some(channel.to_string());
 }
 
 /// 读取当前唤醒源。
 pub fn wake_source() -> Option<String> {
-    static WAKE_SOURCE: OnceLock<Mutex<Option<String>>> = OnceLock::new();
-    let ws = WAKE_SOURCE.get_or_init(|| Mutex::new(None));
+    static WAKE_SOURCE: OnceLock<SpinLock<Option<String>>> = OnceLock::new();
+    let ws = WAKE_SOURCE.get_or_init(|| SpinLock::new(None));
     ws.lock().unwrap().clone()
 }
 
@@ -1543,17 +1543,17 @@ fn act_pkg(payload: &str) -> Result<String, String> {
     match it.next() {
         Some("install") => {
             let n = it.next().ok_or("用法: install <name>")?;
-            pkgstore().lock().unwrap().install(n)
+            pkgstore().lock().install(n)
         }
         Some("remove") => {
             let n = it.next().ok_or("用法: remove <name>")?;
-            pkgstore().lock().unwrap().remove(n)
+            pkgstore().lock().remove(n)
         }
         Some("search") => {
             let k = it.next().ok_or("用法: search <kw>")?;
-            Ok(pkgstore().lock().unwrap().search(k))
+            Ok(pkgstore().lock().search(k))
         }
-        _ => Ok(pkgstore().lock().unwrap().list()),
+        _ => Ok(pkgstore().lock().list()),
     }
 }
 
@@ -2730,10 +2730,9 @@ impl PkgStore {
     }
 }
 
-fn pkgstore() -> &'static std::sync::Mutex<PkgStore> {
-    static STORE: std::sync::OnceLock<std::sync::Mutex<PkgStore>> =
-        std::sync::OnceLock::new();
-    STORE.get_or_init(|| std::sync::Mutex::new(PkgStore {
+fn pkgstore() -> &'static SpinLock<PkgStore> {
+    static STORE: OnceLock<SpinLock<PkgStore>> = OnceLock::new();
+    STORE.get_or_init(|| SpinLock::new(PkgStore {
         installed: std::collections::BTreeSet::new(),
     }))
 }

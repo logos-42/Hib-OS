@@ -16,8 +16,8 @@
 //!
 //! 所有结构均为纯 Rust 原型，无真实硬件依赖，供内核统一核算与调度。
 
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
-use std::sync::{Mutex, OnceLock};
+use alloc::collections::{BTreeMap, BTreeSet, VecDeque};
+use crate::ksync::{SpinLock, OnceLock};
 
 use crate::drivers::dma::DmaEngine;
 use crate::drivers::devtree::devtree_insert;

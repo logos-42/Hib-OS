@@ -85,16 +85,16 @@ impl NetStack {
     pub fn sock_bind(&mut self, fd: SocketFd, addr: &SocketAddr) -> Result<(), String> {
         let our_ip = self.iface.ip;
         match self.sockets.sockets.get_mut(&fd).ok_or_else(|| "socket 不存在".to_string())? {
-            SockEntry::Tcp { key } => {
+            SockEntry::Tcp { mut key } => {
                 if key.local_port != 0 { return Err("已绑定".to_string()); }
                 self.tcp.bind(our_ip, addr.port)?;
-                *key = TcpConnKey { local_port: addr.port, remote_ip: [0, 0, 0, 0], remote_port: 0 };
+                key = TcpConnKey { local_port: addr.port, remote_ip: [0, 0, 0, 0], remote_port: 0 };
                 Ok(())
             }
-            SockEntry::Udp { port, .. } => {
-                if *port != 0 { return Err("已绑定".to_string()); }
+            SockEntry::Udp { mut port, .. } => {
+                if port != 0 { return Err("已绑定".to_string()); }
                 self.udp.bind(addr.port)?;
-                *port = addr.port;
+                port = addr.port;
                 Ok(())
             }
         }
@@ -140,9 +140,9 @@ impl NetStack {
     /// UDP connect：限定对端（后续 send/recv 仅与该对端）。
     pub fn sock_udp_connect(&mut self, fd: SocketFd, addr: &SocketAddr) -> Result<(), String> {
         match self.sockets.sockets.get_mut(&fd).ok_or_else(|| "socket 不存在".to_string())? {
-            SockEntry::Udp { port, connected } => {
-                if *port == 0 { return Err("未绑定本地端口".to_string()); }
-                *connected = Some(addr.clone());
+            SockEntry::Udp { mut port, mut connected } => {
+                if port == 0 { return Err("未绑定本地端口".to_string()); }
+                connected = Some(addr.clone());
                 Ok(())
             }
             SockEntry::Tcp { .. } => Err("TCP 请用 sock_connect".to_string()),
@@ -162,12 +162,12 @@ impl NetStack {
     pub fn sock_recv(&mut self, fd: SocketFd, buf: &mut [u8]) -> Result<usize, String> {
         match self.sockets.sockets.get_mut(&fd).ok_or_else(|| "socket 不存在".to_string())? {
             SockEntry::Tcp { key } => {
-                let data = self.tcp.recv(key, buf.len())?;
+                let data = self.tcp.recv(&key, buf.len())?;
                 buf[..data.len()].copy_from_slice(&data);
                 Ok(data.len())
             }
             SockEntry::Udp { port, .. } => {
-                let data = self.udp.recv(*port, buf.len())?;
+                let data = self.udp.recv(port, buf.len())?;
                 buf[..data.len()].copy_from_slice(&data);
                 Ok(data.len())
             }
@@ -178,7 +178,7 @@ impl NetStack {
         match self.sockets.sockets.get_mut(&fd).ok_or_else(|| "socket 不存在".to_string())? {
             SockEntry::Tcp { key } => {
                 let remote_ip = key.remote_ip;
-                let segments = self.tcp.send(key, buf)?;
+                let segments = self.tcp.send(&key, buf)?;
                 for seg in segments {
                     self.enqueue_tcp_segment(remote_ip, &seg)?;
                 }
@@ -186,11 +186,11 @@ impl NetStack {
                 Ok(buf.len())
             }
             SockEntry::Udp { port, connected } => {
-                if *port == 0 { return Err("未绑定本地端口".to_string()); }
+                if port == 0 { return Err("未绑定本地端口".to_string()); }
                 let remote = connected.as_mut().ok_or_else(|| "UDP 未连接对端".to_string())?;
                 let (rip, rport) = (remote.ip, remote.port);
                 let our_ip = self.iface.ip;
-                let datagram = self.udp.send(our_ip, *port, rip, rport, buf)?;
+                let datagram = self.udp.send(our_ip, port, rip, rport, buf)?;
                 let packets = self.ip.transmit(rip, IP_PROTO_UDP, &datagram, self.iface.mtu as usize)?;
                 self.frame_and_queue(rip, packets)?;
                 self.poll();
@@ -202,7 +202,7 @@ impl NetStack {
     pub fn sock_close(&mut self, fd: SocketFd) -> Result<(), String> {
         let key = match self.sockets.sockets.get_mut(&fd).ok_or_else(|| "socket 不存在".to_string())? {
             SockEntry::Tcp { key } => {
-                let segments = self.tcp.close(key)?;
+                let segments = self.tcp.close(&key)?;
                 let local_port = key.local_port;
                 let remote_ip = key.remote_ip;
                 let remote_port = key.remote_port;
@@ -225,39 +225,39 @@ impl NetStack {
 /// 公共 socket API（锁全局协议栈后调用）。
 
 pub fn socket(ty: SocketType) -> Result<SocketFd, String> {
-    net().lock().map_err(|e| format!("锁失败: {}", e))?.sock_socket(ty)
+    net().lock().sock_socket(ty)
 }
 
 pub fn bind(fd: SocketFd, addr: &SocketAddr) -> Result<(), String> {
-    net().lock().map_err(|e| format!("锁失败: {}", e))?.sock_bind(fd, addr)
+    net().lock().sock_bind(fd, addr)
 }
 
 pub fn listen(fd: SocketFd, backlog: usize) -> Result<(), String> {
-    net().lock().map_err(|e| format!("锁失败: {}", e))?.sock_listen(fd, backlog)
+    net().lock().sock_listen(fd, backlog)
 }
 
 pub fn connect(fd: SocketFd, addr: &SocketAddr) -> Result<(), String> {
-    net().lock().map_err(|e| format!("锁失败: {}", e))?.sock_connect(fd, addr)
+    net().lock().sock_connect(fd, addr)
 }
 
 pub fn udp_connect(fd: SocketFd, addr: &SocketAddr) -> Result<(), String> {
-    net().lock().map_err(|e| format!("锁失败: {}", e))?.sock_udp_connect(fd, addr)
+    net().lock().sock_udp_connect(fd, addr)
 }
 
 pub fn accept(fd: SocketFd) -> Result<(SocketFd, SocketAddr), String> {
-    net().lock().map_err(|e| format!("锁失败: {}", e))?.sock_accept(fd)
+    net().lock().sock_accept(fd)
 }
 
 pub fn recv(fd: SocketFd, buf: &mut [u8]) -> Result<usize, String> {
-    net().lock().map_err(|e| format!("锁失败: {}", e))?.sock_recv(fd, buf)
+    net().lock().sock_recv(fd, buf)
 }
 
 pub fn send(fd: SocketFd, buf: &[u8]) -> Result<usize, String> {
-    net().lock().map_err(|e| format!("锁失败: {}", e))?.sock_send(fd, buf)
+    net().lock().sock_send(fd, buf)
 }
 
 pub fn close(fd: SocketFd) -> Result<(), String> {
-    net().lock().map_err(|e| format!("锁失败: {}", e))?.sock_close(fd)
+    net().lock().sock_close(fd)
 }
 
 #[cfg(test)]
