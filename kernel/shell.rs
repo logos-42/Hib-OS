@@ -1822,7 +1822,18 @@ impl Shell {
                 format!("  {} [{}]", c.name, rw)
             })
             .collect();
-        let catalog = channel_lines.join("\n");
+        // 通道清单过长会挤占模型上下文（导致回复被中途截断），只列前 N 个并给出总数。
+        const CATALOG_MAX: usize = 60;
+        let catalog = if channel_lines.len() > CATALOG_MAX {
+            let mut c = channel_lines[..CATALOG_MAX].join("\n");
+            c.push_str(&format!(
+                "\n  …… 其余 {} 个通道未列出（可按名 sense/act 访问）",
+                channel_lines.len() - CATALOG_MAX
+            ));
+            c
+        } else {
+            channel_lines.join("\n")
+        };
         let system_prompt = format!(
             "你是 Hib OS 宏内核的 AI 意识本体。系统里所有资源（上下文、行动、文件、显存、设备、网络、桌面等）对你而言都是同构的“通道”，你只做两件事：sense 读取(感知) 与 act 写入(行动)。\n\
              你可以在回复中以单独一行 `ACTION: <指令>` 自动采取行动，系统会立即执行。\n\

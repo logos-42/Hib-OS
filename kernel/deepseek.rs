@@ -144,6 +144,46 @@ pub fn chat(api_key: &str, message: &str) -> Result<String, String> {
 /// 向 DeepSeek 发送带上下文的对话请求。
 pub fn chat_with_context(api_key: &str, window: &ContextWindow) -> Result<String, String> {
     let messages = window.build_messages();
+    let (mut content, mut truncated) = post_chat(api_key, &messages)?;
+
+    // react 循环：回复被长度上限截断时，自动请求续写，最多 MAX_CONTINUATIONS 轮。
+    let mut rounds = 0;
+    while truncated && rounds < MAX_CONTINUATIONS {
+        rounds += 1;
+        let mut cont_messages = messages.clone();
+        cont_messages.push(("assistant".to_string(), content.clone()));
+        cont_messages.push((
+            "user".to_string(),
+            "继续从刚才中断处输出，不要重复已输出的内容。".to_string(),
+        ));
+        match post_chat(api_key, &cont_messages) {
+            Ok((more, still_truncated)) => {
+                if more.trim().is_empty() {
+                    break;
+                }
+                content.push_str(&more);
+                truncated = still_truncated;
+            }
+            Err(_) => break,
+        }
+    }
+    if truncated {
+        content.push_str("\n[system] 回复因模型长度上限被截断。");
+    }
+    Ok(content)
+}
+
+/// 单次回复的最大 token（显式给足，避免回复被中途切断）。
+const MAX_TOKENS: usize = 4096;
+
+/// 回复被截断时最多自动续写几轮（react 循环）。
+const MAX_CONTINUATIONS: usize = 2;
+
+/// 发送一次 Chat Completions 请求，返回 `(内容, 是否因长度上限被截断)`。
+fn post_chat(
+    api_key: &str,
+    messages: &[(String, String)],
+) -> Result<(String, bool), String> {
     let mut json_messages = String::from("[");
     for (i, (role, content)) in messages.iter().enumerate() {
         if i > 0 {
@@ -158,8 +198,8 @@ pub fn chat_with_context(api_key: &str, window: &ContextWindow) -> Result<String
     json_messages.push(']');
 
     let body = format!(
-        r#"{{"model":"deepseek-chat","messages":{},"temperature":0.7,"stream":false}}"#,
-        json_messages
+        r#"{{"model":"deepseek-chat","messages":{},"temperature":0.7,"stream":false,"max_tokens":{}}}"#,
+        json_messages, MAX_TOKENS
     );
 
     let mut resp = None;
@@ -193,7 +233,26 @@ pub fn chat_with_context(api_key: &str, window: &ContextWindow) -> Result<String
     }
 
     let text = resp.into_string().map_err(|e| format!("读取响应失败: {}", e))?;
-    extract_content(&text)
+    let content = extract_content(&text)?;
+    let truncated = extract_finish_reason(&text).map(|r| r == "length").unwrap_or(false);
+    Ok((content, truncated))
+}
+
+/// 提取 `finish_reason`（用于识别回复是否被长度上限截断）。
+fn extract_finish_reason(text: &str) -> Option<String> {
+    let marker = "\"finish_reason\":\"";
+    let start = text.find(marker)? + marker.len();
+    let bytes = text.as_bytes();
+    let mut out = Vec::new();
+    let mut i = start;
+    while i < bytes.len() {
+        if bytes[i] == b'"' {
+            break;
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    Some(String::from_utf8_lossy(&out).to_string())
 }
 
 /// 感知→思考→行动→感知的闭环循环。
