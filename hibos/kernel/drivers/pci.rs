@@ -3,7 +3,7 @@
 //! 建模为 `dev://pci/<bus>:<device>.<function>` 通道，
 //! 每个 PCI 设备一个通道，`sense` 可读取其配置空间快照。
 
-use alloc::collections::BTreeMap; use alloc::string::String;
+use alloc::collections::BTreeMap; use alloc::string::String; use alloc::vec::Vec;
 use crate::ksync::{SpinLock, OnceLock};
 
 /// PCI 类代码（基类）。
@@ -77,11 +77,11 @@ pub fn enumerate_pci() -> Vec<PciDevice> {
     let mut bus = pci_bus().lock();
     // 原型阶段：注册若干代表性设备，供 sense/act 通道建模与测试使用。
     let samples = vec![
-        PciDevice { bus: 0, device: 2, function: 0, vendor_id: 0x8086, device_id: 0x5916, class_code: CLASS_DISPLAY, subclass: 0x00, irq_line: 16 },
-        PciDevice { bus: 0, device: 3, function: 0, vendor_id: 0x8086, device_id: 0x9d31, class_code: CLASS_STORAGE, subclass: 0x01, irq_line: 17 },
-        PciDevice { bus: 0, device: 4, function: 0, vendor_id: 0x8086, device_id: 0x15f2, class_code: CLASS_NETWORK, subclass: 0x00, irq_line: 18 },
-        PciDevice { bus: 0, device: 5, function: 0, vendor_id: 0x10de, device_id: 0x1f08, class_code: CLASS_DISPLAY, subclass: 0x00, irq_line: 19 },
-        PciDevice { bus: 0, device: 6, function: 0, vendor_id: 0x10ec, device_id: 0x8168, class_code: CLASS_NETWORK, subclass: 0x00, irq_line: 20 },
+        PciDevice { bus: 0, device: 2, function: 0, vendor_id: 0x8086, device_id: 0x5916, class_code: CLASS_DISPLAY, subclass: 0x00, irq_line: 16, bar0: 0 },
+        PciDevice { bus: 0, device: 3, function: 0, vendor_id: 0x8086, device_id: 0x9d31, class_code: CLASS_STORAGE, subclass: 0x01, irq_line: 17, bar0: 0 },
+        PciDevice { bus: 0, device: 4, function: 0, vendor_id: 0x8086, device_id: 0x15f2, class_code: CLASS_NETWORK, subclass: 0x00, irq_line: 18, bar0: 0 },
+        PciDevice { bus: 0, device: 5, function: 0, vendor_id: 0x10de, device_id: 0x1f08, class_code: CLASS_DISPLAY, subclass: 0x00, irq_line: 19, bar0: 0 },
+        PciDevice { bus: 0, device: 6, function: 0, vendor_id: 0x10ec, device_id: 0x8168, class_code: CLASS_NETWORK, subclass: 0x00, irq_line: 20, bar0: 0 },
     ];
     for dev in &samples {
         bus.insert(dev.clone());

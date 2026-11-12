@@ -1,6 +1,7 @@
 //! PCI 枚举器 —— P1-2 子模块。
 
 use crate::ksync::{SpinLock, OnceLock};
+use alloc::vec::Vec;
 
 use crate::drivers::pci::PciDevice;
 
@@ -27,6 +28,7 @@ pub fn pci_enumerate() -> Vec<PciDevice> {
                 vendor_id: 0x8086,
                 device_id: 0x1234,
                 class_code: crate::drivers::pci::CLASS_STORAGE,
+                subclass: 0,
                 irq_line: 11,
                 bar0: 0xF000_0000,
             },
@@ -37,6 +39,7 @@ pub fn pci_enumerate() -> Vec<PciDevice> {
                 vendor_id: 0x10DE,
                 device_id: 0x5678,
                 class_code: crate::drivers::pci::CLASS_DISPLAY,
+                subclass: 0,
                 irq_line: 12,
                 bar0: 0xE000_0000,
             },
@@ -47,6 +50,7 @@ pub fn pci_enumerate() -> Vec<PciDevice> {
                 vendor_id: 0x8086,
                 device_id: 0x9ABC,
                 class_code: crate::drivers::pci::CLASS_NETWORK,
+                subclass: 0,
                 irq_line: 13,
                 bar0: 0xD000_0000,
             },

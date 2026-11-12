@@ -187,7 +187,6 @@ pub struct DeviceId(pub u64);
 // ======================================================================
 
 /// 驱动注册项：驱动名 + ops 构造工厂。
-#[derive(Clone, Debug)]
 pub struct DriverRegistration {
     pub name: String,
     pub factory: Box<dyn Fn() -> Box<dyn NetDriverOps> + Send + Sync>,

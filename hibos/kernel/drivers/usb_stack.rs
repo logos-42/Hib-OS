@@ -11,7 +11,7 @@
 //! * 设备状态：附加/默认/地址/配置
 //! * sense/act 通道：`drv://usb`
 
-use alloc::collections::{BTreeMap, VecDeque}; use alloc::vec::Vec; use alloc::string::ToString;
+use alloc::collections::{BTreeMap, VecDeque}; use alloc::vec::Vec; use alloc::string::ToString; use alloc::string::String;
 use crate::ksync::{SpinLock, OnceLock};
 
 // =======================================================================
@@ -336,6 +336,7 @@ pub struct BusStats {
     pub transfers_total: u64,
     pub transfers_success: u64,
     pub transfers_error: u64,
+    pub control_transfers: u64,
 }
 
 impl UsbBus {
@@ -391,7 +392,10 @@ impl UsbBus {
 
     /// 普通传输（批量/中断/同步）。
     pub fn transfer(&mut self, dev_id: UsbDeviceId, ep_addr: u8, data: &[u8], direction: TransferDirection) -> TransferResult {
-        let dev = self.devices.get_mut(&dev_id).ok_or_else(|| TransferResult::Error("设备不存在".to_string()))?;
+        let dev = match self.devices.get_mut(&dev_id) {
+            Some(d) => d,
+            None => return TransferResult::Error("设备不存在".to_string()),
+        };
         if dev.state != DeviceState::Configured {
             self.stats.transfers_error += 1;
             return TransferResult::Error("设备未配置".to_string());
@@ -419,7 +423,10 @@ impl UsbBus {
 
     /// 控制传输（setup + data/status）。
     pub fn control_transfer(&mut self, dev_id: UsbDeviceId, request: &ControlRequest, data: &mut [u8]) -> TransferResult {
-        let dev = self.devices.get_mut(&dev_id).ok_or_else(|| TransferResult::Error("设备不存在".to_string()))?;
+        let dev = match self.devices.get_mut(&dev_id) {
+            Some(d) => d,
+            None => return TransferResult::Error("设备不存在".to_string()),
+        };
         if dev.state == DeviceState::Attached {
             self.stats.transfers_error += 1;
             return TransferResult::Error("设备未复位".to_string());
@@ -536,7 +543,7 @@ pub fn usb_act_raw(payload: &str) -> Result<String, String> {
         Some("enumerate") => {
             let id_s = it.next().ok_or("用法: enumerate <dev_id>")?;
             let id: u64 = id_s.parse().map_err(|e: core::num::ParseIntError| e.to_string())?;
-            let mut bus = UsbBus::bus().lock().unwrap();
+            let mut bus = UsbBus::bus().lock();
             bus.enumerate(UsbDeviceId(id)).map(|()| format!("设备 {:?} 已枚举", id))
         }
         Some("state") => {

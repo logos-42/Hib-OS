@@ -2,7 +2,7 @@
 //!
 //! 全局设备表，设备可绑定/解绑驱动，驱动支持热插拔。
 
-use alloc::collections::BTreeMap;
+use alloc::collections::BTreeMap; use alloc::vec::Vec; use alloc::string::ToString;
 use alloc::string::String;
 use crate::ksync::{SpinLock, OnceLock};
 

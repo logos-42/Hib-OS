@@ -3,6 +3,8 @@
 //! 设备中断通过 `irq://<设备>` 通道投递为 `signal` 事件，
 //! 唤醒等待该通道的执行体/纤程。
 
+use alloc::string::String;
+
 /// 绑定一个中断处理器到设备。
 pub fn bind_irq(device: &str, handler_exec_id: u64) {
     crate::irq::bind(device, handler_exec_id);

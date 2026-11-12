@@ -315,10 +315,11 @@ impl PciBus {
         while i < PCI_OFFSET_BAR_COUNT && idx < PCI_OFFSET_BAR_COUNT {
             let bar_offset = PCI_OFFSET_BAR0 + i * PCI_OFFSET_BAR_SPACING;
             let bar = self.parse_bar(bus, device, function, idx as u8, bar_offset);
+            let is_mem64 = bar.bar_type == BarType::Memory64;
             bars[idx] = bar;
             idx += 1;
             i += 1;
-            if bar.bar_type == BarType::Memory64 { i += 1; }
+            if is_mem64 { i += 1; }
         }
 
         Some(PciDevice {
@@ -380,7 +381,7 @@ impl PciBus {
         if !self.device_present(bus, device, function) { return false; }
         let cmd = self.read_config16(bus, device, function, PCI_OFFSET_COMMAND as u8);
         let new_cmd = cmd | PCI_COMMAND_BUS_MASTER | PCI_COMMAND_MEMORY_SPACE | PCI_COMMAND_IO_SPACE;
-        self.write_config(bus, device, function, PCI_OFFSET_COMMAND as u8, new_cmd);
+        self.write_config(bus, device, function, PCI_OFFSET_COMMAND as u8, new_cmd as u32);
         true
     }
 
