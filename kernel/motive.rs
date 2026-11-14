@@ -1,19 +1,19 @@
-//! 动机通道 —— AI 原生的「为什么想做」`motive://self`。
+//! 动机通道 —— AI 原生的「为什么想做」`motive/self`。
 //!
 //! 动机是**内在驱力**，用 0-100 的强度表示。它回答"我倾向于关注什么"，
 //! 但**不**负责判断一件事是否可信（那是信念通道），也**不**负责下结论
 //! （那是判断力通道）。三者分工：
 //!
 //! ```text
-//! motive://self  我做事的倾向      curiosity / order / safety / efficacy
-//! belief://self  我认为世界如何    命题 + 置信度 + 证据
-//! judgment://self 我据此怎么裁决    动机强度 × 信念置信度 -> commit/probe/hold
+//! motive/self  我做事的倾向      curiosity / order / safety / efficacy
+//! belief/self  我认为世界如何    命题 + 置信度 + 证据
+//! judgment/self 我据此怎么裁决    动机强度 × 信念置信度 -> commit/probe/hold
 //! ```
 //!
-//! * `sense motive://self`
-//! * `act motive://self urge <动机> <±增量>`
-//! * `act motive://self set <动机> <0-100>`
-//! * `act motive://self reset`
+//! * `sense motive/self`
+//! * `act motive/self urge <动机> <±增量>`
+//! * `act motive/self set <动机> <0-100>`
+//! * `act motive/self reset`
 
 use std::sync::{Mutex, OnceLock};
 
@@ -142,7 +142,7 @@ impl Motives {
 
 static MOTIVES: OnceLock<Mutex<Motives>> = OnceLock::new();
 
-/// 全局动机集合（`motive://self` 的实体）。
+/// 全局动机集合（`motive/self` 的实体）。
 pub fn motives() -> &'static Mutex<Motives> {
     MOTIVES.get_or_init(|| Mutex::new(Motives::new()))
 }

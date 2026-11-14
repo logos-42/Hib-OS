@@ -1,4 +1,4 @@
-﻿//! 触摸与手势 —— 多指触点跟踪与手势识别。
+//! 触摸与手势 —— 多指触点跟踪与手势识别。
 //!
 //! `GestureRecognizer` 接收 `touch_down` / `touch_move` / `touch_up`，在
 //! `recognize()` 时识别 Tap / DoubleTap / LongPress / Drag / Pinch / Zoom /
@@ -494,7 +494,7 @@ pub fn gesture_recognizer() -> &'static Mutex<GestureRecognizer> {
     GESTURE_RECOGNIZER.get_or_init(|| Mutex::new(GestureRecognizer::new()))
 }
 
-/// `sense gui://gesture`：返回手势识别器状态摘要。
+/// `sense gui/gesture`：返回手势识别器状态摘要。
 pub fn gesture_sense() -> String {
     let gr = gesture_recognizer().lock().unwrap();
     format!(
@@ -505,7 +505,7 @@ pub fn gesture_sense() -> String {
     )
 }
 
-/// `act gui://gesture <op> ...`：对手势识别器执行行动。
+/// `act gui/gesture <op> ...`：对手势识别器执行行动。
 pub fn gesture_act(payload: &str) -> Result<String, String> {
     let mut it = payload.split_whitespace();
     let gr = gesture_recognizer();

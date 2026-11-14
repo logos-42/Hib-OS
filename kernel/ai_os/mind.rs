@@ -16,7 +16,7 @@
 //! * MindTransition (心智转换) —— 心智状态间的切换（专注/分心/沉思/休息）。
 //!
 //! 所有结构均为纯 Rust 原型，供内核统一核算与调度，
-//! 并通过 `mind://*` 通道接入 `sense`/`act` 感知层。
+//! 并通过 `mind/*` 通道接入 `sense`/`act` 感知层。
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::{Mutex, OnceLock};
@@ -915,7 +915,7 @@ pub fn mind_act(payload: &str) -> Result<String, String> {
     let mut it = payload.split_whitespace();
     match it.next() {
         Some("mode") => {
-            let mode_str = it.next().ok_or("用法: mind:// mode <focused|distracted|contemplative|resting|flow|dreaming>")?;
+            let mode_str = it.next().ok_or("用法: mind/ mode <focused|distracted|contemplative|resting|flow|dreaming>")?;
             let mode = match mode_str {
                 "focused" => MindMode::Focused,
                 "distracted" => MindMode::Distracted,
@@ -930,7 +930,7 @@ pub fn mind_act(payload: &str) -> Result<String, String> {
             Ok(format!("心智模式已设置: {}", mode.name()))
         }
         Some("wm-write") => {
-            let content = it.next().ok_or("用法: mind:// wm-write <内容> <模态>")?;
+            let content = it.next().ok_or("用法: mind/ wm-write <内容> <模态>")?;
             let modality_str = it.next().unwrap_or("semantic");
             let modality = match modality_str {
                 "visual" => crate::ai_os::native::QualiaModality::Visual,
@@ -944,7 +944,7 @@ pub fn mind_act(payload: &str) -> Result<String, String> {
             Ok(format!("已写入工作记忆 id={} 使用率={:.2}", id, eng.working_memory.usage_ratio()))
         }
         Some("wm-read") => {
-            let id = it.next().and_then(|s| s.parse::<u64>().ok()).ok_or("用法: mind:// wm-read <id>")?;
+            let id = it.next().and_then(|s| s.parse::<u64>().ok()).ok_or("用法: mind/ wm-read <id>")?;
             let mut eng = mind_engine().lock().unwrap();
             match eng.read_working_memory(id) {
                 Some(c) => Ok(format!("工作记忆[id={}]: {}", id, c)),
@@ -952,7 +952,7 @@ pub fn mind_act(payload: &str) -> Result<String, String> {
             }
         }
         Some("wm-pin") => {
-            let id = it.next().and_then(|s| s.parse::<u64>().ok()).ok_or("用法: mind:// wm-pin <id>")?;
+            let id = it.next().and_then(|s| s.parse::<u64>().ok()).ok_or("用法: mind/ wm-pin <id>")?;
             let mut eng = mind_engine().lock().unwrap();
             if eng.working_memory.pin(id) {
                 Ok(format!("工作记忆[id={}] 已固定", id))
@@ -961,7 +961,7 @@ pub fn mind_act(payload: &str) -> Result<String, String> {
             }
         }
         Some("goal-push") => {
-            let desc = it.next().ok_or("用法: mind:// goal-push <描述> <优先级>")?;
+            let desc = it.next().ok_or("用法: mind/ goal-push <描述> <优先级>")?;
             let prio_str = it.next().unwrap_or("medium");
             let priority = match prio_str {
                 "critical" => GoalPriority::Critical,
@@ -976,7 +976,7 @@ pub fn mind_act(payload: &str) -> Result<String, String> {
             Ok(format!("已压入目标 id={} 优先级={:?}", id, priority))
         }
         Some("goal-complete") => {
-            let id = it.next().and_then(|s| s.parse::<u64>().ok()).ok_or("用法: mind:// goal-complete <id>")?;
+            let id = it.next().and_then(|s| s.parse::<u64>().ok()).ok_or("用法: mind/ goal-complete <id>")?;
             let mut eng = mind_engine().lock().unwrap();
             if eng.complete_goal(id) {
                 Ok(format!("目标[id={}] 已完成", id))
@@ -992,7 +992,7 @@ pub fn mind_act(payload: &str) -> Result<String, String> {
             }
         }
         Some("plan-register") => {
-            let name = it.next().ok_or("用法: mind:// plan-register <名称> <描述> <步骤...>")?;
+            let name = it.next().ok_or("用法: mind/ plan-register <名称> <描述> <步骤...>")?;
             let desc = it.next().ok_or("缺少描述")?;
             let steps: Vec<PlanStep> = it.map(|s| PlanStep { id: 0, action: s.to_string(), precondition: String::new(), effect: String::new(), estimated_cost: 1.0 }).collect();
             let mut eng = mind_engine().lock().unwrap();
@@ -1014,7 +1014,7 @@ pub fn mind_act(payload: &str) -> Result<String, String> {
             Ok(format!("决策结果: 选[id={}] {} 效用={:.2}", result.chosen, result.chosen_description, result.utility))
         }
         Some("episode") => {
-            let event_type = it.next().ok_or("用法: mind:// episode <类型> <内容> <显著性> <标签...>")?;
+            let event_type = it.next().ok_or("用法: mind/ episode <类型> <内容> <显著性> <标签...>")?;
             let content = it.next().ok_or("缺少内容")?;
             let salience = it.next().and_then(|s| s.parse().ok()).unwrap_or(0.5);
             let tags: Vec<&str> = it.collect();

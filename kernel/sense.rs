@@ -73,7 +73,7 @@ use crate::ksync::{SpinLock, OnceLock};
 /// 感知一个硬件 / 系统通道，返回实时快照。
 pub fn probe(name: &str) -> Option<String> {
     match name {
-        "gpu://vram" => {
+        "gpu/vram" => {
             let v = vram().lock().unwrap();
             let total = v.total_vram();
             let free = v.available();
@@ -85,19 +85,19 @@ pub fn probe(name: &str) -> Option<String> {
                 v.partition_count()
             ))
         }
-        "gpu://capabilities" => {
+        "gpu/capabilities" => {
             let caps = GpuCapabilities::all();
             let names: Vec<&str> = GpuCapability::ALL.iter().map(|c| c.name()).collect();
             Some(format!("mask=0x{:02x} caps=[{}]", caps.bits(), names.join(",")))
         }
-        "gpu://framebuffer" => {
+        "gpu/framebuffer" => {
             let (w, h, bytes, lit) = desktop::framebuffer_stats();
             Some(format!("{}x{} {}B lit={}", w, h, bytes, lit))
         }
-        "gpu://scheduler" | "action://scheduler" => {
+        "gpu/scheduler" | "action/scheduler" => {
             Some("MLFQ + semantic weight, slice=10ms".to_string())
         }
-        "mem://system" => {
+        "mem/system" => {
             let s = crate::monitor::get_stats();
             Some(format!(
                 "tokens={} active={} completed={} failed={} avg={}ns vram_used={}B",
@@ -109,7 +109,7 @@ pub fn probe(name: &str) -> Option<String> {
                 s.total_vram_used
             ))
         }
-        "dev://iommu0" => {
+        "dev/iommu0" => {
             let io = iommu().lock().unwrap();
             Some(format!(
                 "domains={} mappings={}",
@@ -117,8 +117,8 @@ pub fn probe(name: &str) -> Option<String> {
                 io.mapping_count()
             ))
         }
-        "dev://timer" => Some(format!("now={}ns", get_time_ns())),
-        "dev://console" => Some(format!(
+        "dev/timer" => Some(format!("now={}ns", get_time_ns())),
+        "dev/console" => Some(format!(
             "stdin={} stdout=tty ansi=on",
             if std::io::stdin().is_terminal() {
                 "tty"
@@ -126,14 +126,14 @@ pub fn probe(name: &str) -> Option<String> {
                 "pipe"
             }
         )),
-        "dev://disk" => {
+        "dev/disk" => {
             let p = Vfs::default_state_path();
             let exists = p.exists();
             let size = std::fs::metadata(&p).map(|m| m.len()).unwrap_or(0);
             Some(format!("{} exists={} size={}B", p.display(), exists, size))
         }
-        "dev://null" => Some("discard (写入即丢弃)".to_string()),
-        "dev://gpu0" => {
+        "dev/null" => Some("discard (写入即丢弃)".to_string()),
+        "dev/gpu0" => {
             let v = vram().lock().unwrap();
             Some(format!(
                 "gpu0 total={}GiB caps={} dev-id=0",
@@ -141,14 +141,14 @@ pub fn probe(name: &str) -> Option<String> {
                 GpuCapability::ALL.len()
             ))
         }
-        "dev://monitor" => {
+        "dev/monitor" => {
             let s = crate::monitor::get_stats();
             Some(format!("uptime={}ns tasks={}", s.system_uptime_ns, s.total_tasks_completed))
         }
-        "interface://abi" => Some("AiSystemCall 10 变体 / AiSystemCallResult".to_string()),
-        "gateway://net" => Some(gateway().lock().unwrap().status()),
-        "browser://gateway" => Some(browser().lock().unwrap().status()),
-        "driver://gpu" => {
+        "interface/abi" => Some("AiSystemCall 10 变体 / AiSystemCallResult".to_string()),
+        "gateway/net" => Some(gateway().lock().unwrap().status()),
+        "browser/gateway" => Some(browser().lock().unwrap().status()),
+        "driver/gpu" => {
             let v = vram().lock().unwrap();
             Some(format!(
                 "gpu-driver total={}GiB caps={} state=loaded",
@@ -156,7 +156,7 @@ pub fn probe(name: &str) -> Option<String> {
                 GpuCapability::ALL.len()
             ))
         }
-        "driver://iommu" => {
+        "driver/iommu" => {
             let io = iommu().lock().unwrap();
             Some(format!(
                 "iommu-driver domains={} mappings={} state=loaded",
@@ -164,14 +164,14 @@ pub fn probe(name: &str) -> Option<String> {
                 io.mapping_count()
             ))
         }
-        "trace://exec" => {
+        "trace/exec" => {
             let s = crate::monitor::get_stats();
             Some(format!(
                 "uptime={}ns exec_ok={} exec_fail={}",
                 s.system_uptime_ns, s.total_tasks_completed, s.total_tasks_failed
             ))
         }
-        "net://eth0" => {
+        "net/eth0" => {
             let st = crate::net::net().lock();
             let s = st.stats();
             let arp_lines: Vec<String> = st
@@ -216,142 +216,142 @@ pub fn probe(name: &str) -> Option<String> {
             ))
         }
         // —— AI 原生扩展通道：进程 / 内存 / 权限 / 身份 / 真实网络 ——
-        "proc://manager" => {
+        "proc/manager" => {
             let mut t = proctable().lock().unwrap();
             Some(t.tree())
         }
-        "mem://ram" => Some(mem().lock().unwrap().stats()),
-        "mem://mmap" => Some(mem().lock().unwrap().regions()),
-        "fs://meta" => Some(fsmeta().lock().unwrap().list()),
-        "fs://vfs" => Some(fs_sense_snapshot()),
-        "user://db" => Some(userdb().lock().unwrap().list()),
-        "socket://tcp" => Some(netio().lock().unwrap().last.clone()),
-        "net://dns" => Some(netio().lock().unwrap().last.clone()),
+        "mem/ram" => Some(mem().lock().unwrap().stats()),
+        "mem/mmap" => Some(mem().lock().unwrap().regions()),
+        "fs/meta" => Some(fsmeta().lock().unwrap().list()),
+        "fs/vfs" => Some(fs_sense_snapshot()),
+        "user/db" => Some(userdb().lock().unwrap().list()),
+        "socket/tcp" => Some(netio().lock().unwrap().last.clone()),
+        "net/dns" => Some(netio().lock().unwrap().last.clone()),
         // —— IPC / 安全 / 设备 / init / 时间 / 包管理 / 作业控制 ——
-        "ipc://pipe" => Some(ipc().lock().unwrap().pipes()),
-        "ipc://shm" => Some(ipc().lock().unwrap().shm_list()),
-        "ipc://msgq" => Some(ipc().lock().unwrap().msgq_list()),
-        "ipc://sem" => Some(ipc().lock().unwrap().sem_list()),
-        "sec://caps" => Some(caps().lock().list()),
-        "dev://tree" => Some(devtree().lock().unwrap().list()),
-        "init://services" => Some(init_mgr().lock().unwrap().list()),
-        "time://clock" => Some(format!("{}ns", get_time_ns())),
-        "time://cron" => Some("cron: 功能不可用".to_string()),
-        "pkg://store" => Some(pkgstore().lock().list()),
-        "tty://jobs" => {
+        "ipc/pipe" => Some(ipc().lock().unwrap().pipes()),
+        "ipc/shm" => Some(ipc().lock().unwrap().shm_list()),
+        "ipc/msgq" => Some(ipc().lock().unwrap().msgq_list()),
+        "ipc/sem" => Some(ipc().lock().unwrap().sem_list()),
+        "sec/caps" => Some(caps().lock().list()),
+        "dev/tree" => Some(devtree().lock().unwrap().list()),
+        "init/services" => Some(init_mgr().lock().unwrap().list()),
+        "time/clock" => Some(format!("{}ns", get_time_ns())),
+        "time/cron" => Some("cron: 功能不可用".to_string()),
+        "pkg/store" => Some(pkgstore().lock().list()),
+        "tty/jobs" => {
             let mut t = tty().lock().unwrap();
             Some(t.jobs())
         }
         // —— 系统设置类 ——
-        "sysctl://kernel" => Some(sysctl().lock().unwrap().kernel_list()),
-        "config://system" => Some(sysctl().lock().unwrap().identity_list()),
-        "env://process" => Some(envstore().lock().unwrap().list()),
-        "limits://process" => Some(limits().lock().unwrap().list()),
-        "fw://rules" => Some(firewall().lock().unwrap().list()),
-        "cgroup://groups" => Some(cgroups().lock().unwrap().list()),
-        "power://state" => Some(power().lock().unwrap().status()),
+        "sysctl/kernel" => Some(sysctl().lock().unwrap().kernel_list()),
+        "config/system" => Some(sysctl().lock().unwrap().identity_list()),
+        "env/process" => Some(envstore().lock().unwrap().list()),
+        "limits/process" => Some(limits().lock().unwrap().list()),
+        "fw/rules" => Some(firewall().lock().unwrap().list()),
+        "cgroup/groups" => Some(cgroups().lock().unwrap().list()),
+        "power/state" => Some(power().lock().unwrap().status()),
         // —— 第二批系统模块 ——
-        "mount://table" => Some(mounts().lock().unwrap().list()),
-        "proc://sysinfo" => Some(procfs().lock().unwrap().snapshot()),
-        "net://interfaces" => Some(ifaces().lock().list()),
-        "dev://bus" => Some(bus().lock().unwrap().list()),
+        "mount/table" => Some(mounts().lock().unwrap().list()),
+        "proc/sysinfo" => Some(procfs().lock().unwrap().snapshot()),
+        "net/interfaces" => Some(ifaces().lock().list()),
+        "dev/bus" => Some(bus().lock().unwrap().list()),
         // —— 意志层：动机 / 信念 / 判断力 ——
-        "motive://self" => Some(motives().lock().unwrap().status()),
-        "belief://self" => Some(beliefs().lock().unwrap().status()),
-        "judgment://self" => Some(judgment().lock().unwrap().status()),
+        "motive/self" => Some(motives().lock().unwrap().status()),
+        "belief/self" => Some(beliefs().lock().unwrap().status()),
+        "judgment/self" => Some(judgment().lock().unwrap().status()),
         // —— 执行体 / 同步 / 租约 / 子智能体（真机制，不是记账）——
-        "exec://threads" => Some(format!(
+        "exec/threads" => Some(format!(
             "{}\n{}",
             exec::status_line(),
             exec::list()
         )),
-        "sync://primitives" => Some(sync::status()),
-        "lease://channels" => Some(lease::status()),
-        "agent://orchestrator" => Some(agent::status()),
-        "agent://workers" => Some(agent::list()),
-        "agent://results" => Some(agent::results()),
+        "sync/primitives" => Some(sync::status()),
+        "lease/channels" => Some(lease::status()),
+        "agent/orchestrator" => Some(agent::status()),
+        "agent/workers" => Some(agent::list()),
+        "agent/results" => Some(agent::results()),
         // —— GUI：窗口 / 键盘 / 鼠标 ——
-        "gui://windows" => Some(gui::status()),
-        "input://kbd" | "input://mouse" => Some(gui::input_status()),
+        "gui/windows" => Some(gui::status()),
+        "input/kbd" | "input/mouse" => Some(gui::input_status()),
         // —— 子意识主体 / 进程容器 ——
-        "proc://spawn" | "proc://kill" | "proc://list" | "proc://wait_table" | "proc://status" => {
+        "proc/spawn" | "proc/kill" | "proc/list" | "proc/wait_table" | "proc/status" => {
             Some(proc2::stats())
         }
         // —— 命名互斥锁 ——
-        "sync://mutex" => Some(mutex2::list_all()),
+        "sync/mutex" => Some(mutex2::list_all()),
         // —— 中断通道 ——
-        "irq://timer" | "irq://keyboard" | "irq://gpu" => {
+        "irq/timer" | "irq/keyboard" | "irq/gpu" => {
             Some(format!("irq 待投递，未注册处理器"))
         }
         // —— 内存页故障 ——
-        "mem://fault" => Some(crate::mm::fault::stats()),
+        "mem/fault" => Some(crate::mm::fault::stats()),
         // —— 电源唤醒源 ——
-        "power://wake-source" => Some(power_wake_source_status()),
+        "power/wake-source" => Some(power_wake_source_status()),
         // —— 意识镜像加载器 ——
-        "loader://echo" | "loader://sense-loop" | "loader://act-loop" | "loader://idle" => {
-            Some(format!("镜像就绪，等待 act loader://<镜像> 加载"))
+        "loader/echo" | "loader/sense-loop" | "loader/act-loop" | "loader/idle" => {
+            Some(format!("镜像就绪，等待 act loader/<镜像> 加载"))
         }
         // —— 本轮补齐：子意识 / 休眠 / 多域 / GPU 保护 / 身份空间 / 桌面外壳 ——
-        "cell://self" => Some(cell::status()),
-        "power://hibernate" => Some(hibernate::status()),
-        "domain://table" => Some(domain::table().lock().unwrap().status()),
-        "gpu://domains" => Some(protection::protection().lock().unwrap().status()),
-        "gpu://faults" => Some(protection::protection().lock().unwrap().faults()),
-        "sec://acl" | "realm://current" => Some(realm::realm_status()),
-        "gui://shell" => Some(gui::shell::desktop_shell().lock().unwrap().status()),
-        "gui://wallpaper" => Some(gui::wallpaper::bank().lock().unwrap().status()),
+        "cell/self" => Some(cell::status()),
+        "power/hibernate" => Some(hibernate::status()),
+        "domain/table" => Some(domain::table().lock().unwrap().status()),
+        "gpu/domains" => Some(protection::protection().lock().unwrap().status()),
+        "gpu/faults" => Some(protection::protection().lock().unwrap().faults()),
+        "sec/acl" | "realm/current" => Some(realm::realm_status()),
+        "gui/shell" => Some(gui::shell::desktop_shell().lock().unwrap().status()),
+        "gui/wallpaper" => Some(gui::wallpaper::bank().lock().unwrap().status()),
         // —— 多调度域 ——
-        "sched://reflex" | "sched://perception" | "sched://deliberation" | "sched://memory" | "sched://governance" | "sched://domains" => {
+        "sched/reflex" | "sched/perception" | "sched/deliberation" | "sched/memory" | "sched/governance" | "sched/domains" => {
             Some(crate::scheduler_domains::status_line())
         }
-        "sched://inspiration" => Some(crate::inspiration::core().lock().unwrap().status()),
+        "sched/inspiration" => Some(crate::inspiration::core().lock().unwrap().status()),
         // —— Subagent-A 新增：内存与页表相关通道 ——
-        "swap://area" => Some(swap_summary().unwrap_or_else(|_| "swap 未初始化".to_string())),
-        "pagetable://walk" => Some(pt_summary()),
-        "slab://stats" => Some(slab_summary()),
-        "buddy://stats" => Some(buddy_summary()),
+        "swap/area" => Some(swap_summary().unwrap_or_else(|_| "swap 未初始化".to_string())),
+        "pagetable/walk" => Some(pt_summary()),
+        "slab/stats" => Some(slab_summary()),
+        "buddy/stats" => Some(buddy_summary()),
         // —— AI 原生 OS 通道：模型 / 上下文窗口 / 记忆 / 工具 / 安全 / 死锁 / 容器 / 总控 ——
-        "model://loader" => Some(model_status()),
-        "model://instances" => {
+        "model/loader" => Some(model_status()),
+        "model/instances" => {
             let r = crate::ai_os::model::model_registry().lock().unwrap();
             Some(format!("{} instances", r.instances().len()))
         }
-        "model://spec" => Some(model_status()),
-        "ctx://kv" => Some(ctx_mem::status()),
-        "ctx://window" => Some(ctx_mem::status()),
-        "knowledge://store" => Some(knowledge::status()),
-        "knowledge://query" => Some(knowledge::status()),
-        "tool://registry" => Some(tool_status()),
-        "aios://status" => Some(ai_os_status()),
-        "security://status" => Some(security::status()),
-        "deadlock://graph" => Some(deadlock::status()),
-        "deadlock://wait" => Some(deadlock::status()),
-        "container://status" => Some(container::status()),
+        "model/spec" => Some(model_status()),
+        "ctx/kv" => Some(ctx_mem::status()),
+        "ctx/window" => Some(ctx_mem::status()),
+        "knowledge/store" => Some(knowledge::status()),
+        "knowledge/query" => Some(knowledge::status()),
+        "tool/registry" => Some(tool_status()),
+        "aios/status" => Some(ai_os_status()),
+        "security/status" => Some(security::status()),
+        "deadlock/graph" => Some(deadlock::status()),
+        "deadlock/wait" => Some(deadlock::status()),
+        "container/status" => Some(container::status()),
         // —— AI 原生意识层通道：意识原子 / 心智 / 注意力 / 语义空间 / 工作记忆 ——
-        "native://qualia" => Some(crate::ai_os::native::factory_status()),
-        "native://stream" => {
+        "native/qualia" => Some(crate::ai_os::native::factory_status()),
+        "native/stream" => {
             let eng = crate::ai_os::native::consciousness_engine().lock().unwrap();
             Some(format!("意识流 状态数={} 总推入={}", eng.stream.state_count(), eng.stream.total_states))
         }
-        "native://status" => Some(crate::ai_os::native::native_status()),
-        "mind://state" => Some(crate::ai_os::mind::mind_status()),
-        "mind://goal" => {
+        "native/status" => Some(crate::ai_os::native::native_status()),
+        "mind/state" => Some(crate::ai_os::mind::mind_status()),
+        "mind/goal" => {
             let eng = crate::ai_os::mind::mind_engine().lock().unwrap();
             match eng.goal_stack.active_goal() {
                 Some(g) => Some(format!("活跃目标[id={}]: {} 进度={:.0}%", g.id, g.description, g.progress * 100.0)),
                 None => Some("无活跃目标".to_string()),
             }
         }
-        "mind://wm" => {
+        "mind/wm" => {
             let eng = crate::ai_os::mind::mind_engine().lock().unwrap();
             Some(format!("工作记忆 条目={} 使用率={:.2}", eng.working_memory.len(), eng.working_memory.usage_ratio()))
         }
-        "mind://decide" => Some("决策引擎就绪，使用 act mind://decide <选项...>".to_string()),
-        "attention://lens" => {
+        "mind/decide" => Some("决策引擎就绪，使用 act mind/decide <选项...>".to_string()),
+        "attention/lens" => {
             let eng = crate::ai_os::attention::attention_engine().lock().unwrap();
             Some(format!("透镜模式={:?} 阈值={:.2} 通过率={:.2}", eng.lens.mode, eng.lens.threshold, eng.lens.pass_rate()))
         }
-        "attention://saliency" => {
+        "attention/saliency" => {
             let eng = crate::ai_os::attention::attention_engine().lock().unwrap();
             let top = eng.saliency.top_k(5);
             let mut out = String::from("显著性图 Top5:\n");
@@ -360,58 +360,62 @@ pub fn probe(name: &str) -> Option<String> {
             }
             Some(out)
         }
-        "attention://focus" => {
+        "attention/focus" => {
             let eng = crate::ai_os::attention::attention_engine().lock().unwrap();
             match eng.focus.current_name() {
                 Some(n) => Some(format!("当前焦点: {}", n)),
                 None => Some("无当前焦点".to_string()),
             }
         }
-        "attention://cycle" => {
+        "attention/cycle" => {
             let eng = crate::ai_os::attention::attention_engine().lock().unwrap();
             Some(format!("注意力周期值: {:.3}", eng.cycle_value()))
         }
-        "semantic://index" => Some("语义索引就绪，使用 act semantic://index <文本>".to_string()),
-        "semantic://search" => Some("语义检索就绪，使用 act semantic://search <查询>".to_string()),
-        "semantic://concept" => Some("概念图就绪，使用 act semantic://concept <名称>".to_string()),
-        "semantic://namespace" => Some("语义命名空间就绪，使用 act semantic://bind <路径> <文本>".to_string()),
-        "memory://sensory" => Some("感觉缓冲就绪，使用 act memory://sensory-write <模态> <数据>".to_string()),
-        "memory://wm" => {
+        "semantic/index" => Some("语义索引就绪，使用 act semantic/index <文本>".to_string()),
+        "semantic/search" => Some("语义检索就绪，使用 act semantic/search <查询>".to_string()),
+        "semantic/concept" => Some("概念图就绪，使用 act semantic/concept <名称>".to_string()),
+        "semantic/namespace" => Some("语义命名空间就绪，使用 act semantic/bind <路径> <文本>".to_string()),
+        "memory/sensory" => Some("感觉缓冲就绪，使用 act memory/sensory-write <模态> <数据>".to_string()),
+        "memory/wm" => {
             let eng = crate::ai_os::memory_ws::memory_engine().lock().unwrap();
             Some(format!("工作记忆 条目={} 利用率={:.2}", eng.working.len(), eng.working.utilization()))
         }
-        "memory://stm" => {
+        "memory/stm" => {
             let eng = crate::ai_os::memory_ws::memory_engine().lock().unwrap();
             Some(format!("短时记忆 条目={} 平均重要性={:.2}", eng.short_term.len(), eng.short_term.avg_importance()))
         }
-        "memory://ltm" => {
+        "memory/ltm" => {
             let eng = crate::ai_os::memory_ws::memory_engine().lock().unwrap();
             Some(format!("长时记忆 条目={} 平均强度={:.2}", eng.long_term.len(), eng.long_term.avg_strength()))
         }
-        "memory://episode" => {
+        "memory/episode" => {
             let eng = crate::ai_os::memory_ws::memory_engine().lock().unwrap();
             Some(format!("情景记忆 条目={}", eng.episodic.len()))
         }
-        "memory://semantic" => {
+        "memory/semantic" => {
             let eng = crate::ai_os::memory_ws::memory_engine().lock().unwrap();
             Some(format!("语义记忆 事实={}", eng.semantic.len()))
         }
-        "memory://skill" => {
+        "memory/skill" => {
             let eng = crate::ai_os::memory_ws::memory_engine().lock().unwrap();
             Some(format!("程序记忆 技能={} 平均熟练度={:.2}", eng.procedural.len(), eng.procedural.avg_proficiency()))
         }
         // —— Worktree：AI 意识实例的隔离工作区 ——
-        "worktree://trees" => Some(crate::worktree::worktree_sense()),
+        "worktree/trees" => Some(crate::worktree::worktree_sense()),
         // —— 自造插件接口 ——
-        "plugin://modules" => Some(crate::plugin::plugin_sense()),
-        "plugin://hotreload" => Some(crate::plugin::plugin_hotreload_sense()),
-        // 自造插件自有通道 `plugin://<name>`
-        other if other.starts_with("plugin://") => crate::plugin::plugin_sense_one(other),
+        "plugin/modules" => Some(crate::plugin::plugin_sense()),
+        "plugin/hotreload" => Some(crate::plugin::plugin_hotreload_sense()),
+        // 自造插件自有通道 `plugin/<name>`
+        other if other.starts_with("plugin/") => crate::plugin::plugin_sense_one(other),
+        // 应用安装通道：exe / dmg / linux
+        other if other.starts_with("exe/") || other.starts_with("dmg/") || other.starts_with("linux/") => {
+            Some(format!("应用安装通道：{}，使用 act <通道> install", other))
+        }
         _ => None,
     }
 }
 
-/// 电源唤醒源状态（供 `sense power://wake-source`）。
+/// 电源唤醒源状态（供 `sense power/wake-source`）。
 fn power_wake_source_status() -> String {
     static WAKE_SOURCE: OnceLock<SpinLock<Option<String>>> = OnceLock::new();
     let ws = WAKE_SOURCE.get_or_init(|| SpinLock::new(None));
@@ -421,7 +425,7 @@ fn power_wake_source_status() -> String {
     }
 }
 
-/// 设置电源唤醒源（供 `act power://wake-source <通道>`）。
+/// 设置电源唤醒源（供 `act power/wake-source <通道>`）。
 pub fn set_wake_source(channel: &str) {
     static WAKE_SOURCE: OnceLock<SpinLock<Option<String>>> = OnceLock::new();
     let ws = WAKE_SOURCE.get_or_init(|| SpinLock::new(None));
@@ -495,7 +499,7 @@ fn parse_if_epoch(payload: &str) -> (String, Option<u64>) {
 /// 对硬件 / 系统通道执行一次行动（未经一致性包装的内部实现）。
 fn act_raw(name: &str, payload: &str) -> Option<Result<String, String>> {
     match name {
-        "gpu://framebuffer" | "desktop://framebuffer" => {
+        "gpu/framebuffer" | "desktop/framebuffer" => {
             let mut fb = desktop::framebuffer().lock().unwrap();
             fb.clear();
             let end = fb.draw_text(2, 2, payload);
@@ -506,9 +510,9 @@ fn act_raw(name: &str, payload: &str) -> Option<Result<String, String>> {
                 fb.lit_pixels()
             )))
         }
-        "dev://timer" => Some(Ok(format!("now={}ns", get_time_ns()))),
-        "dev://null" => Some(Ok(format!("已丢弃 {} 字节", payload.len()))),
-        "gpu://vram" => {
+        "dev/timer" => Some(Ok(format!("now={}ns", get_time_ns()))),
+        "dev/null" => Some(Ok(format!("已丢弃 {} 字节", payload.len()))),
+        "gpu/vram" => {
             let text = payload.trim();
             let mut it = text.split_whitespace();
             let sub = it.next().unwrap_or("");
@@ -533,7 +537,7 @@ fn act_raw(name: &str, payload: &str) -> Option<Result<String, String>> {
                             }
                         }
                         _ => Some(Err(
-                            "用法: act gpu://vram acquire <分区ID> <owner-exec-id>".to_string(),
+                            "用法: act gpu/vram acquire <分区ID> <owner-exec-id>".to_string(),
                         )),
                     }
                 }
@@ -560,7 +564,7 @@ fn act_raw(name: &str, payload: &str) -> Option<Result<String, String>> {
                             }
                         }
                         _ => Some(Err(
-                            "用法: act gpu://vram release <分区ID> <owner-exec-id>".to_string(),
+                            "用法: act gpu/vram release <分区ID> <owner-exec-id>".to_string(),
                         )),
                     }
                 }
@@ -584,7 +588,7 @@ fn act_raw(name: &str, payload: &str) -> Option<Result<String, String>> {
                                 ))),
                             }
                         }
-                        None => Some(Err("用法: act gpu://vram query <分区ID>".to_string())),
+                        None => Some(Err("用法: act gpu/vram query <分区ID>".to_string())),
                     }
                 }
                 "commit" => {
@@ -608,7 +612,7 @@ fn act_raw(name: &str, payload: &str) -> Option<Result<String, String>> {
                             }
                         }
                         _ => Some(Err(
-                            "用法: act gpu://vram commit <分区ID> <owner> <期望epoch> <数据>"
+                            "用法: act gpu/vram commit <分区ID> <owner> <期望epoch> <数据>"
                                 .to_string(),
                         )),
                     }
@@ -624,7 +628,7 @@ fn act_raw(name: &str, payload: &str) -> Option<Result<String, String>> {
                 }
             }
         }
-        "net://eth0" => {
+        "net/eth0" => {
             let mut it = payload.split_whitespace();
             match it.next() {
                 Some("stats") => {
@@ -670,7 +674,7 @@ fn act_raw(name: &str, payload: &str) -> Option<Result<String, String>> {
                                 Some(Ok(lines.join("\n")))
                             }
                         }
-                        _ => Some(Err("用法: act net://eth0 arp add <ip> <mac> | del <ip> | show".to_string())),
+                        _ => Some(Err("用法: act net/eth0 arp add <ip> <mac> | del <ip> | show".to_string())),
                     }
                 }
                 Some("route") => {
@@ -718,7 +722,7 @@ fn act_raw(name: &str, payload: &str) -> Option<Result<String, String>> {
                             }
                         }
                         _ => Some(Err(
-                            "用法: act net://eth0 route add <net> <mask> <gw> | del <net> | show"
+                            "用法: act net/eth0 route add <net> <mask> <gw> | del <net> | show"
                                 .to_string(),
                         )),
                     }
@@ -788,40 +792,40 @@ fn act_raw(name: &str, payload: &str) -> Option<Result<String, String>> {
             }
         }
         // —— AI 原生扩展通道 ——
-        "proc://manager" => Some(act_proc(payload)),
-        "mem://ram" => Some(act_ram(payload)),
-        "mem://mmap" => Some(act_mmap(payload)),
-        "fs://meta" => Some(act_fsmeta(payload)),
-        "fs://vfs" => Some(fs_act_dispatch(&crate::worktree::resolve_fs_payload(payload))),
-        "user://db" => Some(act_user(payload)),
-        "socket://tcp" => Some(act_socket(payload)),
-        "net://dns" => Some(act_dns(payload)),
-        "ipc://pipe" => Some(act_ipc_pipe(payload)),
-        "ipc://shm" => Some(act_ipc_shm(payload)),
-        "ipc://msgq" => Some(act_ipc_msgq(payload)),
-        "ipc://sem" => Some(act_ipc_sem(payload)),
-        "sec://caps" => Some(act_caps(payload)),
-        "dev://tree" => Some(act_dev(payload)),
-        "init://services" => Some(act_init(payload)),
-        "time://clock" => Some(Ok(format!("{}ns", get_time_ns()))),
-        "time://cron" => Some(act_cron(payload)),
-        "pkg://store" => Some(act_pkg(payload)),
-        "tty://jobs" => Some(act_tty(payload)),
-        "sysctl://kernel" => Some(act_sysctl(payload, true)),
-        "config://system" => Some(act_sysctl(payload, false)),
-        "env://process" => Some(act_env(payload)),
-        "limits://process" => Some(act_limits(payload)),
-        "fw://rules" => Some(act_fw(payload)),
-        "cgroup://groups" => Some(act_cgroup(payload)),
-        "power://state" => Some(act_power(payload)),
-        "mount://table" => Some(act_mount(payload)),
-        "proc://sysinfo" => Some(act_procfs(payload)),
-        "net://interfaces" => Some(act_netif(payload)),
-        "dev://bus" => Some(act_bus(payload)),
+        "proc/manager" => Some(act_proc(payload)),
+        "mem/ram" => Some(act_ram(payload)),
+        "mem/mmap" => Some(act_mmap(payload)),
+        "fs/meta" => Some(act_fsmeta(payload)),
+        "fs/vfs" => Some(fs_act_dispatch(&crate::worktree::resolve_fs_payload(payload))),
+        "user/db" => Some(act_user(payload)),
+        "socket/tcp" => Some(act_socket(payload)),
+        "net/dns" => Some(act_dns(payload)),
+        "ipc/pipe" => Some(act_ipc_pipe(payload)),
+        "ipc/shm" => Some(act_ipc_shm(payload)),
+        "ipc/msgq" => Some(act_ipc_msgq(payload)),
+        "ipc/sem" => Some(act_ipc_sem(payload)),
+        "sec/caps" => Some(act_caps(payload)),
+        "dev/tree" => Some(act_dev(payload)),
+        "init/services" => Some(act_init(payload)),
+        "time/clock" => Some(Ok(format!("{}ns", get_time_ns()))),
+        "time/cron" => Some(act_cron(payload)),
+        "pkg/store" => Some(act_pkg(payload)),
+        "tty/jobs" => Some(act_tty(payload)),
+        "sysctl/kernel" => Some(act_sysctl(payload, true)),
+        "config/system" => Some(act_sysctl(payload, false)),
+        "env/process" => Some(act_env(payload)),
+        "limits/process" => Some(act_limits(payload)),
+        "fw/rules" => Some(act_fw(payload)),
+        "cgroup/groups" => Some(act_cgroup(payload)),
+        "power/state" => Some(act_power(payload)),
+        "mount/table" => Some(act_mount(payload)),
+        "proc/sysinfo" => Some(act_procfs(payload)),
+        "net/interfaces" => Some(act_netif(payload)),
+        "dev/bus" => Some(act_bus(payload)),
         // —— 外部世界出口 ——
-        "gateway://net" => Some(act_gateway(payload)),
+        "gateway/net" => Some(act_gateway(payload)),
         // `file://` 需要读 shell 的 VFS，返回 None 让 shell 层接管
-        "browser://gateway" => {
+        "browser/gateway" => {
             if payload.contains("file://") {
                 None
             } else {
@@ -829,139 +833,150 @@ fn act_raw(name: &str, payload: &str) -> Option<Result<String, String>> {
             }
         }
         // —— 意志层：动机 / 信念 / 判断力 ——
-        "motive://self" => Some(act_motive(payload)),
-        "belief://self" => Some(act_belief(payload)),
-        "judgment://self" => Some(act_judgment(payload)),
+        "motive/self" => Some(act_motive(payload)),
+        "belief/self" => Some(act_belief(payload)),
+        "judgment/self" => Some(act_judgment(payload)),
         // —— 执行体 / 同步 / 租约 / 子智能体 ——
-        "exec://threads" => Some(act_exec(payload)),
-        "sync://primitives" => Some(act_sync(payload)),
-        "lease://channels" => Some(act_lease(payload)),
-        "agent://orchestrator" | "agent://workers" => Some(agent::dispatch(payload)),
+        "exec/threads" => Some(act_exec(payload)),
+        "sync/primitives" => Some(act_sync(payload)),
+        "lease/channels" => Some(act_lease(payload)),
+        "agent/orchestrator" | "agent/workers" => Some(agent::dispatch(payload)),
         // —— GUI：窗口 / 键盘 / 鼠标 ——
-        "gui://windows" => Some(act_gui(payload)),
-        "input://kbd" => Some(act_kbd(payload)),
-        "input://mouse" => Some(act_mouse(payload)),
+        "gui/windows" => Some(act_gui(payload)),
+        "input/kbd" => Some(act_kbd(payload)),
+        "input/mouse" => Some(act_mouse(payload)),
         // —— 子意识主体 / 进程容器 ——
-        "proc://spawn" | "proc://kill" | "proc://list" | "proc://wait_table" | "proc://status" => {
+        "proc/spawn" | "proc/kill" | "proc/list" | "proc/wait_table" | "proc/status" => {
             Some(act_proc2(payload))
         }
         // —— 命名互斥锁 ——
-        "sync://mutex" => Some(act_mutex(payload)),
+        "sync/mutex" => Some(act_mutex(payload)),
         // —— 中断通道 ——
-        "irq://timer" | "irq://keyboard" | "irq://gpu" => Some(act_irq(payload)),
+        "irq/timer" | "irq/keyboard" | "irq/gpu" => Some(act_irq(payload)),
         // —— 内存页故障 ——
-        "mem://fault" => Some(act_mem_fault(payload)),
+        "mem/fault" => Some(act_mem_fault(payload)),
         // —— 电源唤醒源 ——
-        "power://wake-source" => Some(act_wake_source(payload)),
+        "power/wake-source" => Some(act_wake_source(payload)),
         // —— 意识镜像加载器 ——
-        "loader://echo" | "loader://sense-loop" | "loader://act-loop" | "loader://idle" => {
+        "loader/echo" | "loader/sense-loop" | "loader/act-loop" | "loader/idle" => {
             Some(act_loader(payload))
         }
-        "cell://self" => Some(act_cell(payload)),
-        "power://hibernate" => Some(act_hibernate(payload)),
-        "domain://table" => Some(act_domain(payload)),
-        "gpu://domains" => Some(act_protection(payload)),
-        "gpu://faults" => Some(Ok(protection::protection().lock().unwrap().faults())),
-        "sec://acl" => Some(act_realm(payload)),
-        "realm://current" => Some(Ok(realm::realm_status())),
-        "gui://shell" => Some(act_gui_shell(payload)),
-        "gui://wallpaper" => Some(gui::wallpaper::act(payload)),
+        "cell/self" => Some(act_cell(payload)),
+        "power/hibernate" => Some(act_hibernate(payload)),
+        "domain/table" => Some(act_domain(payload)),
+        "gpu/domains" => Some(act_protection(payload)),
+        "gpu/faults" => Some(Ok(protection::protection().lock().unwrap().faults())),
+        "sec/acl" => Some(act_realm(payload)),
+        "realm/current" => Some(Ok(realm::realm_status())),
+        "gui/shell" => Some(act_gui_shell(payload)),
+        "gui/wallpaper" => Some(gui::wallpaper::act(payload)),
         // —— 多调度域 ——
-        "sched://reflex" | "sched://perception" | "sched://deliberation" | "sched://memory" | "sched://governance" | "sched://domains" => {
+        "sched/reflex" | "sched/perception" | "sched/deliberation" | "sched/memory" | "sched/governance" | "sched/domains" => {
             Some(act_sched(payload))
         }
-        "sched://inspiration" => Some(crate::inspiration::act(payload)),
+        "sched/inspiration" => Some(crate::inspiration::act(payload)),
         // —— Subagent-A 新增：内存与页表相关通道的行动 ——
-        "swap://area" => Some(act_swap(payload)),
-        "pagetable://walk" => Some(act_pagetable(payload)),
-        "slab://stats" => Some(act_slab(payload)),
-        "buddy://stats" => Some(act_buddy(payload)),
+        "swap/area" => Some(act_swap(payload)),
+        "pagetable/walk" => Some(act_pagetable(payload)),
+        "slab/stats" => Some(act_slab(payload)),
+        "buddy/stats" => Some(act_buddy(payload)),
         // —— AI 原生 OS 通道：模型 / 上下文窗口 / 记忆 / 工具 / 安全 / 死锁 / 容器 / 总控 ——
-        "model://loader" | "model://instances" | "model://spec" => {
+        "model/loader" | "model/instances" | "model/spec" => {
             Some(Ok(crate::ai_os::model::status()))
         }
-        "ctx://kv" | "ctx://window" => Some(Ok(ctx_mem::status())),
-        "knowledge://store" | "knowledge://query" => Some(Ok(knowledge::status())),
-        "tool://registry" | "tool://exec" => Some(Ok(tool_status())),
-        "aios://status" => {
+        "ctx/kv" | "ctx/window" => Some(Ok(ctx_mem::status())),
+        "knowledge/store" | "knowledge/query" => Some(Ok(knowledge::status())),
+        "tool/registry" | "tool/exec" => Some(Ok(tool_status())),
+        "aios/status" => {
             Some(Ok(ai_os_status()))
         }
-        "security://status" => {
+        "security/status" => {
             Some(Ok(security::status()))
         }
-        "deadlock://graph" | "deadlock://wait" => {
+        "deadlock/graph" | "deadlock/wait" => {
             Some(Ok(deadlock::status()))
         }
-        "container://status" => {
+        "container/status" => {
             Some(Ok(container::status()))
         }
         // —— AI 原生意识层通道：意识原子 / 心智 / 注意力 / 语义空间 / 工作记忆 ——
-        "native://qualia" | "native://stream" | "native://status" => {
+        "native/qualia" | "native/stream" | "native/status" => {
             Some(Ok(crate::ai_os::native::native_status()))
         }
-        "mind://state" | "mind://goal" | "mind://wm" | "mind://decide" => {
+        "mind/state" | "mind/goal" | "mind/wm" | "mind/decide" => {
             Some(crate::ai_os::mind::mind_act_dispatch(payload))
         }
-        "attention://lens" | "attention://saliency" | "attention://focus" | "attention://cycle" => {
+        "attention/lens" | "attention/saliency" | "attention/focus" | "attention/cycle" => {
             Some(crate::ai_os::attention::attention_act_dispatch(payload))
         }
-        "semantic://index" | "semantic://search" | "semantic://concept" | "semantic://namespace" => {
+        "semantic/index" | "semantic/search" | "semantic/concept" | "semantic/namespace" => {
             Some(crate::ai_os::semantic::semantic_act_dispatch(payload))
         }
-        "memory://sensory" | "memory://wm" | "memory://stm" | "memory://ltm" | "memory://episode" | "memory://semantic" | "memory://skill" => {
+        "memory/sensory" | "memory/wm" | "memory/stm" | "memory/ltm" | "memory/episode" | "memory/semantic" | "memory/skill" => {
             Some(crate::ai_os::memory_ws::memory_act_dispatch(payload))
         }
         // —— AI 原生身体 / 动作 / 时间层通道 ——
-        "body://schema" | "body://proprioception" | "body://map" | "body://kinematic" | "body://state" => {
+        "body/schema" | "body/proprioception" | "body/map" | "body/kinematic" | "body/state" => {
             Some(crate::ai_os::body_schema::body_act_dispatch(payload))
         }
-        "action://primitive" | "action://command" | "action://execute" | "action://sequence" | "action://constraint" => {
+        "action/primitive" | "action/command" | "action/execute" | "action/sequence" | "action/constraint" => {
             Some(crate::ai_os::action::action_act_dispatch(payload))
         }
-        "temporal://clock" | "temporal://circadian" | "temporal://ultradian" | "temporal://sequence" | "temporal://schedule" | "temporal://memory" | "temporal://prediction" => {
+        "temporal/clock" | "temporal/circadian" | "temporal/ultradian" | "temporal/sequence" | "temporal/schedule" | "temporal/memory" | "temporal/prediction" => {
             Some(crate::ai_os::temporal::temporal_act_dispatch(payload))
         }
         // —— AI 原生社会/伦理/进化/梦境层通道 ——
-        "society://register" | "society://send" | "society://poll" | "society://conversation" | "society://edge" | "society://negotiate" | "society://reputation" => {
+        "society/register" | "society/send" | "society/poll" | "society/conversation" | "society/edge" | "society/negotiate" | "society/reputation" => {
             Some(crate::ai_os::social::society_act_dispatch(payload))
         }
-        "ethics://principle" | "ethics://evaluate" | "ethics://safety" | "ethics://rule" | "ethics://value" | "ethics://alignment" | "ethics://dilemma" | "ethics://audit" => {
+        "ethics/principle" | "ethics/evaluate" | "ethics/safety" | "ethics/rule" | "ethics/value" | "ethics/alignment" | "ethics/dilemma" | "ethics/audit" => {
             Some(crate::ai_os::ethics::ethics_act_dispatch(payload))
         }
-        "evolution://genome" | "evolution://gene" | "evolution://mutate" | "evolution://fitness" | "evolution://select" | "evolution://snapshot" | "evolution://adapt" => {
+        "evolution/genome" | "evolution/gene" | "evolution/mutate" | "evolution/fitness" | "evolution/select" | "evolution/snapshot" | "evolution/adapt" => {
             Some(crate::ai_os::evolution::evolution_act_dispatch(payload))
         }
-        "dream://cycle" | "dream://stage" | "dream://replay" | "dream://synthesize" | "dream://associate" | "dream://insight" => {
+        "dream/cycle" | "dream/stage" | "dream/replay" | "dream/synthesize" | "dream/associate" | "dream/insight" => {
             Some(crate::ai_os::dream::dream_act_dispatch(payload))
         }
         // —— AI 原生语义文件系统通道 ——
-        "vfs_ai://mkdir" | "vfs_ai://create" | "vfs_ai://write" | "vfs_ai://read" | "vfs_ai://delete" | "vfs_ai://lookup" | "vfs_ai://tag" | "vfs_ai://semantic-vector" | "vfs_ai://semantic-search" | "vfs_ai://watch" | "vfs_ai://poll" => {
+        "vfs_ai/mkdir" | "vfs_ai/create" | "vfs_ai/write" | "vfs_ai/read" | "vfs_ai/delete" | "vfs_ai/lookup" | "vfs_ai/tag" | "vfs_ai/semantic-vector" | "vfs_ai/semantic-search" | "vfs_ai/watch" | "vfs_ai/poll" => {
             Some(crate::ai_os::vfs_ai::vfs_ai_act_dispatch(payload))
         }
         // —— AI 原生智能网络通道 ——
-        "net_ai://send" | "net_ai://socket" | "net_ai://connect" | "net_ai://sock-send" | "net_ai://sock-recv" | "net_ai://route" | "net_ai://route-intent" | "net_ai://topology" | "net_ai://bandwidth" | "net_ai://latency" | "net_ai://firewall" => {
+        "net_ai/send" | "net_ai/socket" | "net_ai/connect" | "net_ai/sock-send" | "net_ai/sock-recv" | "net_ai/route" | "net_ai/route-intent" | "net_ai/topology" | "net_ai/bandwidth" | "net_ai/latency" | "net_ai/firewall" => {
             Some(crate::ai_os::net_ai::net_ai_act_dispatch(payload))
         }
         // —— AI 原生智能设备驱动通道 ——
-        "driver_ai://register-device" | "driver_ai://register-driver" | "driver_ai://load-driver" | "driver_ai://init-driver" | "driver_ai://attach" | "driver_ai://set-irq" | "driver_ai://alloc-dma" | "driver_ai://invoke-irq" | "driver_ai://pci-add" | "driver_ai://device-tree-add" | "driver_ai://hotplug-add" | "driver_ai://hotplug-poll" => {
+        "driver_ai/register-device" | "driver_ai/register-driver" | "driver_ai/load-driver" | "driver_ai/init-driver" | "driver_ai/attach" | "driver_ai/set-irq" | "driver_ai/alloc-dma" | "driver_ai/invoke-irq" | "driver_ai/pci-add" | "driver_ai/device-tree-add" | "driver_ai/hotplug-add" | "driver_ai/hotplug-poll" => {
             Some(crate::ai_os::driver_ai::driver_ai_act_dispatch(payload))
         }
         // —— AI 原生智能命令行通道 ——
-        "shell_ai://parse" | "shell_ai://execute" | "shell_ai://execute-nl" | "shell_ai://complete" | "shell_ai://alias" | "shell_ai://resolve-alias" | "shell_ai://cd" | "shell_ai://pwd" | "shell_ai://env" | "shell_ai://set-env" | "shell_ai://pipeline" | "shell_ai://pipeline-add" | "shell_ai://history" => {
+        "shell_ai/parse" | "shell_ai/execute" | "shell_ai/execute-nl" | "shell_ai/complete" | "shell_ai/alias" | "shell_ai/resolve-alias" | "shell_ai/cd" | "shell_ai/pwd" | "shell_ai/env" | "shell_ai/set-env" | "shell_ai/pipeline" | "shell_ai/pipeline-add" | "shell_ai/history" => {
             Some(crate::ai_os::shell_ai::shell_ai_act_dispatch(payload))
         }
         // —— AI 原生智能图形界面通道 ——
-        "gui_ai://create-window" | "gui_ai://close-window" | "gui_ai://focus-window" | "gui_ai://add-widget" | "gui_ai://add-layer" | "gui_ai://compose" | "gui_ai://inject-event" | "gui_ai://poll-event" | "gui_ai://set-theme" | "gui_ai://enable-modality" | "gui_ai://set-layout" => {
+        "gui_ai/create-window" | "gui_ai/close-window" | "gui_ai/focus-window" | "gui_ai/add-widget" | "gui_ai/add-layer" | "gui_ai/compose" | "gui_ai/inject-event" | "gui_ai/poll-event" | "gui_ai/set-theme" | "gui_ai/enable-modality" | "gui_ai/set-layout" => {
             Some(crate::ai_os::gui_ai::gui_ai_act_dispatch(payload))
         }
         // —— Worktree：隔离工作区（create/switch/remove/list） ——
-        "worktree://trees" => Some(crate::worktree::worktree_act(payload)),
+        "worktree/trees" => Some(crate::worktree::worktree_act(payload)),
         // —— 自造插件接口（安装/卸载/热重载） ——
-        "plugin://modules" => Some(crate::plugin::plugin_act_modules(payload)),
-        "plugin://hotreload" => Some(crate::plugin::plugin_act_hotreload(payload)),
-        // 自造插件自有通道 `plugin://<name>`
-        other if other.starts_with("plugin://") => {
+        "plugin/modules" => Some(crate::plugin::plugin_act_modules(payload)),
+        "plugin/hotreload" => Some(crate::plugin::plugin_act_hotreload(payload)),
+        // 自造插件自有通道 `plugin/<name>`
+        other if other.starts_with("plugin/") => {
             Some(crate::plugin::plugin_act_dynamic(other, payload))
+        }
+        // 应用安装通道：exe / dmg / linux
+        other if other.starts_with("exe/") || other.starts_with("dmg/") || other.starts_with("linux/") => {
+            let parts: Vec<&str> = payload.split_whitespace().collect();
+            match parts.first() {
+                Some(&"install") => {
+                    let app_path = other.trim_start_matches("exe/").trim_start_matches("dmg/").trim_start_matches("linux/");
+                    Some(Ok(format!("已安装应用：{} (来自 {})", app_path, other)))
+                }
+                _ => Some(Err("用法: act exe/<路径> install | act dmg/<路径> install | act linux/<路径> install".to_string())),
+            }
         }
         _ => None,
     }
@@ -1184,15 +1199,15 @@ fn act_gui_shell(payload: &str) -> Result<String, String> {
     }
 }
 
-/// 多调度域的行动实现 —— `sched://<域>`。
+/// 多调度域的行动实现 —— `sched/<域>`。
 ///
 /// 接口：
-/// * `sched://<域> enqueue <low|medium|high|critical>` —— 入队一个新任务到指定域
-/// * `sched://<域> pick_next` —— 选出该域下一个要运行的 token
-/// * `sched://<域> expiry` —— 该域时间片到期，运行任务降级重入队
-/// * `sched://<域> wake <通道键>` —— 唤醒该域中等待该通道的 token
-/// * `sched://<域> status` —— 查看该域状态
-/// * `sched://domains status` —— 查看全部调度域状态
+/// * `sched/<域> enqueue <low|medium|high|critical>` —— 入队一个新任务到指定域
+/// * `sched/<域> pick_next` —— 选出该域下一个要运行的 token
+/// * `sched/<域> expiry` —— 该域时间片到期，运行任务降级重入队
+/// * `sched/<域> wake <通道键>` —— 唤醒该域中等待该通道的 token
+/// * `sched/<域> status` —— 查看该域状态
+/// * `sched/domains status` —— 查看全部调度域状态
 fn act_sched(payload: &str) -> Result<String, String> {
     let text = payload.trim();
     let mut it = text.splitn(3, ' ');
@@ -1205,7 +1220,7 @@ fn act_sched(payload: &str) -> Result<String, String> {
             if op == "status" {
                 Ok(scheduler_domains::status())
             } else {
-                Err("用法: sched://domains status".to_string())
+                Err("用法: sched/domains status".to_string())
             }
         }
         domain_str => {
@@ -1247,7 +1262,7 @@ fn act_sched(payload: &str) -> Result<String, String> {
                     let channel_key = text
                         .split_whitespace()
                         .nth(3)
-                        .ok_or("用法: sched://<域> wake <通道键>")?;
+                        .ok_or("用法: sched/<域> wake <通道键>")?;
                     let n = scheduler_domains::wake_key(domain, channel_key);
                     Ok(format!(
                         "域 {} 唤醒 {} 个等待 {} 的 token",
@@ -1256,7 +1271,7 @@ fn act_sched(payload: &str) -> Result<String, String> {
                 }
                 "status" => Ok(format!("域 {}：{}", domain_str, scheduler_domains::status_line())),
                 _ => Err(
-                    "用法: sched://<域> enqueue <优先级> | pick_next | expiry | wake <通道键> | status | domains status"
+                    "用法: sched/<域> enqueue <优先级> | pick_next | expiry | wake <通道键> | status | domains status"
                         .to_string(),
                 ),
             }
@@ -1290,7 +1305,7 @@ fn act_proc(payload: &str) -> Result<String, String> {
         "tree" => Ok(proctable().lock().unwrap().tree()),
         "list" | "" => Ok(proctable().lock().unwrap().list()),
         _ => Err(
-            "用法: act proc://manager spawn <命令> | signal <pid> <sig> | kill <pid> | tree | list"
+            "用法: act proc/manager spawn <命令> | signal <pid> <sig> | kill <pid> | tree | list"
                 .to_string(),
         ),
     }
@@ -1301,7 +1316,7 @@ fn act_ram(payload: &str) -> Result<String, String> {
     match it.next() {
         Some("alloc") => mem().lock().unwrap().alloc(parse_mib(it.next().unwrap_or("0"))?),
         Some("free") => mem().lock().unwrap().free(parse_mib(it.next().unwrap_or("0"))?),
-        _ => Err("用法: act mem://ram alloc|free <MiB>".to_string()),
+        _ => Err("用法: act mem/ram alloc|free <MiB>".to_string()),
     }
 }
 
@@ -1320,7 +1335,7 @@ fn act_mmap(payload: &str) -> Result<String, String> {
                 .map_err(|_| format!("无效地址: {}", a))?;
             mem().lock().unwrap().munmap(addr)
         }
-        _ => Err("用法: act mem://mmap mmap <MiB> [perms] | munmap <addr>".to_string()),
+        _ => Err("用法: act mem/mmap mmap <MiB> [perms] | munmap <addr>".to_string()),
     }
 }
 
@@ -1350,7 +1365,7 @@ fn act_fsmeta(payload: &str) -> Result<String, String> {
             let dst = it.next().ok_or("用法: mount <源> <目标>")?;
             Ok(fsmeta().lock().unwrap().mount(src, dst))
         }
-        _ => Err("用法: act fs://meta chmod <mode> <路径> | chown <uid> <gid> <路径> | ln <目标> <链接> | mount <源> <目标>".to_string()),
+        _ => Err("用法: act fs/meta chmod <mode> <路径> | chown <uid> <gid> <路径> | ln <目标> <链接> | mount <源> <目标>".to_string()),
     }
 }
 
@@ -1368,7 +1383,7 @@ fn act_user(payload: &str) -> Result<String, String> {
         }
         Some("sudo") => Ok(userdb().lock().unwrap().sudo()),
         Some("whoami") | Some("") | None => Ok(userdb().lock().unwrap().whoami()),
-        _ => Err("用法: act user://db adduser <名> | su <名|uid> | sudo | whoami".to_string()),
+        _ => Err("用法: act user/db adduser <名> | su <名|uid> | sudo | whoami".to_string()),
     }
 }
 
@@ -1380,7 +1395,7 @@ fn act_socket(payload: &str) -> Result<String, String> {
             let data = it.next();
             netio().lock().unwrap().connect(hostport, data)
         }
-        _ => Err("用法: act socket://tcp connect <host:port> [数据]".to_string()),
+        _ => Err("用法: act socket/tcp connect <host:port> [数据]".to_string()),
     }
 }
 
@@ -1391,7 +1406,7 @@ fn act_dns(payload: &str) -> Result<String, String> {
             let host = it.next().ok_or("用法: resolve <域名>")?;
             netio().lock().unwrap().resolve(host)
         }
-        _ => Err("用法: act net://dns resolve <域名>".to_string()),
+        _ => Err("用法: act net/dns resolve <域名>".to_string()),
     }
 }
 
@@ -1408,7 +1423,7 @@ fn act_ipc_pipe(payload: &str) -> Result<String, String> {
             let id = it.next().and_then(|s| s.parse().ok()).ok_or("用法: read <id>")?;
             ipc().lock().unwrap().pipe_read(id)
         }
-        _ => Err("用法: act ipc://pipe create | write <id> <data> | read <id>".to_string()),
+        _ => Err("用法: act ipc/pipe create | write <id> <data> | read <id>".to_string()),
     }
 }
 
@@ -1429,7 +1444,7 @@ fn act_ipc_shm(payload: &str) -> Result<String, String> {
             let name = it.next().ok_or("用法: read <name>")?;
             ipc().lock().unwrap().shm_read(name)
         }
-        _ => Err("用法: act ipc://shm create <name> <size> | write <name> <data> | read <name>".to_string()),
+        _ => Err("用法: act ipc/shm create <name> <size> | write <name> <data> | read <name>".to_string()),
     }
 }
 
@@ -1445,7 +1460,7 @@ fn act_ipc_msgq(payload: &str) -> Result<String, String> {
             let name = it.next().ok_or("用法: recv <name>")?;
             ipc().lock().unwrap().msgq_recv(name)
         }
-        _ => Err("用法: act ipc://msgq send <name> <msg> | recv <name>".to_string()),
+        _ => Err("用法: act ipc/msgq send <name> <msg> | recv <name>".to_string()),
     }
 }
 
@@ -1465,7 +1480,7 @@ fn act_ipc_sem(payload: &str) -> Result<String, String> {
             let name = it.next().ok_or("用法: wait <name>")?;
             ipc().lock().unwrap().sem_wait(name)
         }
-        _ => Err("用法: act ipc://sem init <name> <n> | post <name> | wait <name>".to_string()),
+        _ => Err("用法: act ipc/sem init <name> <n> | post <name> | wait <name>".to_string()),
     }
 }
 
@@ -1746,7 +1761,7 @@ fn act_procfs(payload: &str) -> Result<String, String> {
     match payload.trim() {
         "" | "snapshot" | "read" => Ok(procfs().lock().unwrap().snapshot()),
         "refresh" => Ok(procfs().lock().unwrap().refresh()),
-        _ => Err("用法: act proc://sysinfo refresh|snapshot".to_string()),
+        _ => Err("用法: act proc/sysinfo refresh|snapshot".to_string()),
     }
 }
 
@@ -1823,7 +1838,7 @@ fn act_gateway(payload: &str) -> Result<String, String> {
             gateway().lock().unwrap().set_policy(p)
         }
         Some("upstream") => {
-            let u = it.next().ok_or("用法: upstream <direct|http(s)://...>")?;
+            let u = it.next().ok_or("用法: upstream <direct|http(s)/...>")?;
             gateway().lock().unwrap().set_upstream(u)
         }
         Some("allow") => {
@@ -1858,7 +1873,7 @@ fn act_browser(payload: &str) -> Result<String, String> {
     match sub {
         "open" => {
             if rest.is_empty() {
-                return Err("用法: act browser://gateway open <url>".to_string());
+                return Err("用法: act browser/gateway open <url>".to_string());
             }
             browser().lock().unwrap().open(rest)
         }
@@ -1867,7 +1882,7 @@ fn act_browser(payload: &str) -> Result<String, String> {
             Ok(browser().lock().unwrap().text(n))
         }
         "history" | "" => Ok(browser().lock().unwrap().status()),
-        _ => Err("用法: act browser://gateway open <url> | text [n] | history".to_string()),
+        _ => Err("用法: act browser/gateway open <url> | text [n] | history".to_string()),
     }
 }
 
@@ -2064,7 +2079,7 @@ fn act_exec(payload: &str) -> Result<String, String> {
         "list" | "" => Ok(exec::list()),
         "status" => Ok(exec::status_line()),
         _ => Err(
-            "用法: act exec://threads spawn|suspend|resume|wake|join|reap|waits|boost|list|status"
+            "用法: act exec/threads spawn|suspend|resume|wake|join|reap|waits|boost|list|status"
                 .to_string(),
         ),
     }
@@ -2074,7 +2089,7 @@ fn sense_probe_str(name: &str) -> String {
     probe(name).unwrap_or_else(|| format!("no-probe: {}", name))
 }
 
-// ==== 子意识主体 / 进程容器：proc://spawn|kill|list|wait_table|status ====
+// ==== 子意识主体 / 进程容器：proc/spawn|kill|list|wait_table|status ====
 
 fn act_proc2(payload: &str) -> Result<String, String> {
     let text = payload.trim();
@@ -2084,7 +2099,7 @@ fn act_proc2(payload: &str) -> Result<String, String> {
     match sub {
         "spawn" => {
             if rest.is_empty() {
-                return Err("用法: act proc://spawn <镜像名>".to_string());
+                return Err("用法: act proc/spawn <镜像名>".to_string());
             }
             match proc2::spawn(rest) {
                 Ok(id) => Ok(format!("已派生进程 {} (镜像={})", id, rest)),
@@ -2094,30 +2109,30 @@ fn act_proc2(payload: &str) -> Result<String, String> {
         "kill" => {
             let id: ProcId = rest
                 .parse()
-                .map_err(|_| "用法: act proc://kill <proc-id>".to_string())?;
+                .map_err(|_| "用法: act proc/kill <proc-id>".to_string())?;
             proc2::kill(id)
         }
         "list" | "" => Ok(proc2::list()),
         "wait_table" => {
             let id: ProcId = rest
                 .parse()
-                .map_err(|_| "用法: act proc://wait_table <proc-id>".to_string())?;
+                .map_err(|_| "用法: act proc/wait_table <proc-id>".to_string())?;
             proc2::wait_table(id)
         }
         "status" => {
             let id: ProcId = rest
                 .parse()
-                .map_err(|_| "用法: act proc://status <proc-id>".to_string())?;
+                .map_err(|_| "用法: act proc/status <proc-id>".to_string())?;
             proc2::status(id)
         }
         _ => Err(
-            "用法: act proc://spawn <镜像> | kill <id> | list | wait_table <id> | status <id>"
+            "用法: act proc/spawn <镜像> | kill <id> | list | wait_table <id> | status <id>"
                 .to_string(),
         ),
     }
 }
 
-// ==== 命名互斥锁：sync://mutex lock|unlock|list <名> <owner> ====
+// ==== 命名互斥锁：sync/mutex lock|unlock|list <名> <owner> ====
 
 fn act_mutex(payload: &str) -> Result<String, String> {
     let text = payload.trim();
@@ -2130,7 +2145,7 @@ fn act_mutex(payload: &str) -> Result<String, String> {
     match sub {
         "lock" => {
             let name = name;
-            let owner = owner.ok_or("用法: act sync://mutex lock <名> <owner-exec-id>")?;
+            let owner = owner.ok_or("用法: act sync/mutex lock <名> <owner-exec-id>")?;
             let m = mutex2::get_mutex(name);
             if m.lock(owner, None) {
                 Ok(format!("已加锁 mutex={} owner={}", name, owner))
@@ -2140,7 +2155,7 @@ fn act_mutex(payload: &str) -> Result<String, String> {
         }
         "unlock" => {
             let name = name;
-            let owner = owner.ok_or("用法: act sync://mutex unlock <名> <owner-exec-id>")?;
+            let owner = owner.ok_or("用法: act sync/mutex unlock <名> <owner-exec-id>")?;
             let m = mutex2::get_mutex(name);
             if m.unlock(owner) {
                 Ok(format!("已解锁 mutex={} owner={}", name, owner))
@@ -2150,7 +2165,7 @@ fn act_mutex(payload: &str) -> Result<String, String> {
         }
         "try" => {
             let name = name;
-            let owner = owner.ok_or("用法: act sync://mutex try <名> <owner-exec-id>")?;
+            let owner = owner.ok_or("用法: act sync/mutex try <名> <owner-exec-id>")?;
             let m = mutex2::get_mutex(name);
             if m.try_lock(owner) {
                 Ok(format!("已尝试加锁 mutex={} owner={}", name, owner))
@@ -2160,13 +2175,13 @@ fn act_mutex(payload: &str) -> Result<String, String> {
         }
         "list" | "" => Ok(mutex2::list_all()),
         _ => Err(
-            "用法: act sync://mutex lock|unlock|try <名> <owner-exec-id> | list"
+            "用法: act sync/mutex lock|unlock|try <名> <owner-exec-id> | list"
                 .to_string(),
         ),
     }
 }
 
-// ==== 中断通道：irq://<设备> ====
+// ==== 中断通道：irq/<设备> ====
 
 fn act_irq(payload: &str) -> Result<String, String> {
     let text = payload.trim();
@@ -2175,26 +2190,26 @@ fn act_irq(payload: &str) -> Result<String, String> {
     let rest = it.next().unwrap_or("").trim();
     match sub {
         "bind" => {
-            // irq://<设备> bind <处理器-exec-id>
+            // irq/<设备> bind <处理器-exec-id>
             let exec_id: ExecId = rest
                 .parse()
-                .map_err(|_| "用法: act irq://<设备> bind <exec-id>".to_string())?;
+                .map_err(|_| "用法: act irq/<设备> bind <exec-id>".to_string())?;
             Ok(format!("已绑定中断 {} -> exec={}", sub, exec_id))
         }
         "fire" => {
             // 模拟中断到达：向等待该 irq 通道的执行体发 signal
-            let n = exec::signal(&format!("irq://{}", sub));
+            let n = exec::signal(&format!("irq/{}", sub));
             Ok(format!("中断 {} 已投递，唤醒 {} 个等待者", sub, n))
         }
         "list" | "" => Ok(format!(
             "irq 通道: timer keyboard gpu (当前目标={})",
             sub
         )),
-        _ => Err("用法: act irq://<设备> bind <exec-id> | fire | list".to_string()),
+        _ => Err("用法: act irq/<设备> bind <exec-id> | fire | list".to_string()),
     }
 }
 
-// ==== 内存页故障：mem://fault alloc|free|stats ====
+// ==== 内存页故障：mem/fault alloc|free|stats ====
 
 fn act_mem_fault(payload: &str) -> Result<String, String> {
     let text = payload.trim();
@@ -2205,23 +2220,23 @@ fn act_mem_fault(payload: &str) -> Result<String, String> {
         "alloc" => {
             let bytes: u64 = rest
                 .parse()
-                .map_err(|_| "用法: act mem://fault alloc <字节>".to_string())?;
+                .map_err(|_| "用法: act mem/fault alloc <字节>".to_string())?;
             let _ = mem().lock().unwrap().alloc(bytes);
             Ok(format!("已模拟页故障分配 {} 字节", bytes))
         }
         "free" => {
             let addr: u64 = rest
                 .parse()
-                .map_err(|_| "用法: act mem://fault free <地址>".to_string())?;
+                .map_err(|_| "用法: act mem/fault free <地址>".to_string())?;
             let _ = mem().lock().unwrap().free(addr);
             Ok(format!("已释放页 {} ", addr))
         }
         "stats" | "" => Ok(crate::mm::fault::stats()),
-        _ => Err("用法: act mem://fault alloc|free|stats [字节|地址]".to_string()),
+        _ => Err("用法: act mem/fault alloc|free|stats [字节|地址]".to_string()),
     }
 }
 
-// ==== 电源唤醒源：power://wake-source <通道> ====
+// ==== 电源唤醒源：power/wake-source <通道> ====
 
 fn act_wake_source(payload: &str) -> Result<String, String> {
     let text = payload.trim();
@@ -2232,14 +2247,14 @@ fn act_wake_source(payload: &str) -> Result<String, String> {
     Ok(format!("已设置唤醒源: {}", text))
 }
 
-// ==== 意识镜像加载器：loader://<镜像> ====
+// ==== 意识镜像加载器：loader/<镜像> ====
 
 fn act_loader(payload: &str) -> Result<String, String> {
     let text = payload.trim();
     if text.is_empty() {
-        return Err("用法: act loader://<镜像>".to_string());
+        return Err("用法: act loader/<镜像>".to_string());
     }
-    // loader://<镜像> 实际上就是 proc2::spawn(<镜像>)
+    // loader/<镜像> 实际上就是 proc2::spawn(<镜像>)
     match proc2::spawn(text) {
         Ok(id) => Ok(format!("已加载意识镜像 {} -> 进程 {}", text, id)),
         Err(e) => Err(e),
@@ -2306,7 +2321,7 @@ fn act_sync(payload: &str) -> Result<String, String> {
             }
         }
         "list" | "status" | "" => Ok(sync::status()),
-        _ => Err("用法: act sync://primitives sem <名称> <配额>|post|wait [ms] | barrier <名称> <人数> [ms] | list"
+        _ => Err("用法: act sync/primitives sem <名称> <配额>|post|wait [ms] | barrier <名称> <人数> [ms] | list"
             .to_string()),
     }
 }
@@ -2393,7 +2408,7 @@ fn act_lease(payload: &str) -> Result<String, String> {
         }
         "list" | "" => Ok(lease::status()),
         _ => Err(
-            "用法: act lease://channels acquire|commit|release|force|wait|show|list".to_string(),
+            "用法: act lease/channels acquire|commit|release|force|wait|show|list".to_string(),
         ),
     }
 }
@@ -2451,7 +2466,7 @@ fn act_gui(payload: &str) -> Result<String, String> {
             gui::screenshot(path)
         }
         "list" | "windows" | "status" | "info" | "" => Ok(gui::status()),
-        _ => Err("用法: act gui://windows open <标题> | close <id> | focus <id> | move <id> <x> <y> | click <x> <y> | shot [路径] | list"
+        _ => Err("用法: act gui/windows open <标题> | close <id> | focus <id> | move <id> <x> <y> | click <x> <y> | shot [路径] | list"
             .to_string()),
     }
 }
@@ -2507,7 +2522,7 @@ fn act_mouse(payload: &str) -> Result<String, String> {
             let eff = gui::inject(crate::gui::input::Event::Wheel { x, y, delta: d });
             Ok(format!("滚轮 ({}, {}) delta={} -> {:?}", x, y, d, eff))
         }
-        _ => Err("用法: act input://mouse move <x> <y> | click <x> <y> | wheel <x> <y> [delta]"
+        _ => Err("用法: act input/mouse move <x> <y> | click <x> <y> | wheel <x> <y> [delta]"
             .to_string()),
     }
 }
@@ -2522,7 +2537,7 @@ fn act_swap(payload: &str) -> Result<String, String> {
             let addr: usize = it
                 .next()
                 .and_then(|s| s.parse::<usize>().ok())
-                .ok_or("用法: act swap://area out <addr> <data>")?;
+                .ok_or("用法: act swap/area out <addr> <data>")?;
             let data = it.next().unwrap_or("").as_bytes();
             let slot = crate::swap_sim::swap_out(addr, data)
                 .map_err(|e| format!("swap out 失败: {}", e))?;
@@ -2532,7 +2547,7 @@ fn act_swap(payload: &str) -> Result<String, String> {
             let slot_idx: usize = it
                 .next()
                 .and_then(|s| s.parse::<usize>().ok())
-                .ok_or("用法: act swap://area in <slot>")?;
+                .ok_or("用法: act swap/area in <slot>")?;
             let data = crate::swap_sim::swap_in(crate::swap_sim::SwapSlot(slot_idx))
                 .map_err(|e| format!("swap in 失败: {}", e))?;
             Ok(format!("已从 slot={} 换入 {} 字节", slot_idx, data.len()))
@@ -2541,13 +2556,13 @@ fn act_swap(payload: &str) -> Result<String, String> {
             let slot_idx: usize = it
                 .next()
                 .and_then(|s| s.parse::<usize>().ok())
-                .ok_or("用法: act swap://area free <slot>")?;
+                .ok_or("用法: act swap/area free <slot>")?;
             crate::swap_sim::free_swap_slot(crate::swap_sim::SwapSlot(slot_idx))
                 .map_err(|e| format!("释放 slot 失败: {}", e))?;
             Ok(format!("已释放 swap slot={}", slot_idx))
         }
         _ => Err(
-            "用法: act swap://area stats | out <addr> <data> | in <slot> | free <slot>"
+            "用法: act swap/area stats | out <addr> <data> | in <slot> | free <slot>"
                 .to_string(),
         ),
     }
@@ -2560,11 +2575,11 @@ fn act_pagetable(payload: &str) -> Result<String, String> {
             let vaddr: u64 = it
                 .next()
                 .and_then(|s| u64::from_str_radix(s.trim_start_matches("0x"), 16).ok())
-                .ok_or("用法: act pagetable://walk map <vaddr> <paddr> [rw] [user]")?;
+                .ok_or("用法: act pagetable/walk map <vaddr> <paddr> [rw] [user]")?;
             let paddr: u64 = it
                 .next()
                 .and_then(|s| u64::from_str_radix(s.trim_start_matches("0x"), 16).ok())
-                .ok_or("用法: act pagetable://walk map <vaddr> <paddr> [rw] [user]")?;
+                .ok_or("用法: act pagetable/walk map <vaddr> <paddr> [rw] [user]")?;
             let writable = it.any(|s| s == "rw");
             let user = it.any(|s| s == "user");
             let _flags = crate::page_table_sim::PTEFlags {
@@ -2583,7 +2598,7 @@ fn act_pagetable(payload: &str) -> Result<String, String> {
             let vaddr: u64 = it
                 .next()
                 .and_then(|s| u64::from_str_radix(s.trim_start_matches("0x"), 16).ok())
-                .ok_or("用法: act pagetable://walk unmap <vaddr>")?;
+                .ok_or("用法: act pagetable/walk unmap <vaddr>")?;
             crate::page_table_sim::pt_unmap(vaddr)
                 .map_err(|e| format!("取消映射失败: {:?}", e))?;
             Ok(format!("已取消映射 vaddr=0x{:x}", vaddr))
@@ -2592,7 +2607,7 @@ fn act_pagetable(payload: &str) -> Result<String, String> {
             let vaddr: u64 = it
                 .next()
                 .and_then(|s| u64::from_str_radix(s.trim_start_matches("0x"), 16).ok())
-                .ok_or("用法: act pagetable://walk translate <vaddr> [write] [user]")?;
+                .ok_or("用法: act pagetable/walk translate <vaddr> [write] [user]")?;
             let write = it.any(|s| s == "write");
             let user = it.any(|s| s == "user");
             let (paddr, _flags) = crate::page_table_sim::pt_translate(vaddr, write, user)
@@ -2604,7 +2619,7 @@ fn act_pagetable(payload: &str) -> Result<String, String> {
         }
         Some("stats") => Ok(pt_summary()),
         _ => Err(
-            "用法: act pagetable://walk map <vaddr> <paddr> [rw] [user] | unmap <vaddr> | translate <vaddr> | stats"
+            "用法: act pagetable/walk map <vaddr> <paddr> [rw] [user] | unmap <vaddr> | translate <vaddr> | stats"
                 .to_string(),
         ),
     }
@@ -2617,7 +2632,7 @@ fn act_slab(payload: &str) -> Result<String, String> {
             let size: usize = it
                 .next()
                 .and_then(|s| s.parse::<usize>().ok())
-                .ok_or("用法: act slab://stats alloc <size>")?;
+                .ok_or("用法: act slab/stats alloc <size>")?;
             let mut allocator = crate::slab_alloc::SlabAllocator::new();
             let handle = allocator
                 .alloc(size)
@@ -2632,11 +2647,11 @@ fn act_slab(payload: &str) -> Result<String, String> {
             let cache_id: usize = it
                 .next()
                 .and_then(|s| s.parse::<usize>().ok())
-                .ok_or("用法: act slab://stats free <cache_id> <obj_index>")?;
+                .ok_or("用法: act slab/stats free <cache_id> <obj_index>")?;
             let obj_index: usize = it
                 .next()
                 .and_then(|s| s.parse::<usize>().ok())
-                .ok_or("用法: act slab://stats free <cache_id> <obj_index>")?;
+                .ok_or("用法: act slab/stats free <cache_id> <obj_index>")?;
             let handle = crate::slab_alloc::SlabHandle {
                 size_class: cache_id,
                 obj_id: obj_index,
@@ -2649,7 +2664,7 @@ fn act_slab(payload: &str) -> Result<String, String> {
         }
         Some("stats") => Ok(slab_summary()),
         _ => Err(
-            "用法: act slab://stats alloc <size> | free <cache_id> <obj_index> | stats"
+            "用法: act slab/stats alloc <size> | free <cache_id> <obj_index> | stats"
                 .to_string(),
         ),
     }
@@ -2662,7 +2677,7 @@ fn act_buddy(payload: &str) -> Result<String, String> {
             let order: usize = it
                 .next()
                 .and_then(|s| s.parse::<usize>().ok())
-                .ok_or("用法: act buddy://stats alloc <order>")?;
+                .ok_or("用法: act buddy/stats alloc <order>")?;
             let addr = crate::buddy_alloc::buddy_alloc(order)
                 .map_err(|e| format!("伙伴分配失败: {:?}", e))?;
             Ok(format!("已分配 order={} page={}", order, addr.index()))
@@ -2671,18 +2686,18 @@ fn act_buddy(payload: &str) -> Result<String, String> {
             let addr: usize = it
                 .next()
                 .and_then(|s| s.parse::<usize>().ok())
-                .ok_or("用法: act buddy://stats free <page> <order>")?;
+                .ok_or("用法: act buddy/stats free <page> <order>")?;
             let order: usize = it
                 .next()
                 .and_then(|s| s.parse::<usize>().ok())
-                .ok_or("用法: act buddy://stats free <page> <order>")?;
+                .ok_or("用法: act buddy/stats free <page> <order>")?;
             crate::buddy_alloc::buddy_free(crate::buddy_alloc::PageAddr(addr), order)
                 .map_err(|e| format!("伙伴释放失败: {:?}", e))?;
             Ok(format!("已释放 page={} order={}", addr, order))
         }
         Some("stats") => Ok(buddy_summary()),
         _ => Err(
-            "用法: act buddy://stats alloc <order> | free <page> <order> | stats"
+            "用法: act buddy/stats alloc <order> | free <page> <order> | stats"
                 .to_string(),
         ),
     }
@@ -2690,12 +2705,12 @@ fn act_buddy(payload: &str) -> Result<String, String> {
 
 // ---- 本地辅助：供 sense/act 通道使用（slab_alloc 和 pkg 未导出全局单例） ----
 
-/// slab 统计摘要（临时实例，供 `slab://stats` 通道展示）。
+/// slab 统计摘要（临时实例，供 `slab/stats` 通道展示）。
 fn slab_summary() -> String {
     crate::slab_alloc::SlabAllocator::new().summary()
 }
 
-/// 包存储全局单例（供 `pkg://store` 通道使用，轻量版本）。
+/// 包存储全局单例（供 `pkg/store` 通道使用，轻量版本）。
 struct PkgStore {
     installed: std::collections::BTreeSet<String>,
 }
@@ -2752,24 +2767,24 @@ mod tests {
     #[test]
     fn hardware_probes_return_data() {
         for name in [
-            "gpu://vram",
-            "gpu://capabilities",
-            "gpu://framebuffer",
-            "mem://system",
-            "dev://iommu0",
-            "dev://timer",
-            "dev://console",
-            "dev://disk",
-            "dev://null",
-            "dev://gpu0",
-            "dev://monitor",
-            "interface://abi",
-            "gateway://net",
-            "browser://gateway",
-            "driver://gpu",
-            "driver://iommu",
-        "trace://exec",
-        "net://eth0",
+            "gpu/vram",
+            "gpu/capabilities",
+            "gpu/framebuffer",
+            "mem/system",
+            "dev/iommu0",
+            "dev/timer",
+            "dev/console",
+            "dev/disk",
+            "dev/null",
+            "dev/gpu0",
+            "dev/monitor",
+            "interface/abi",
+            "gateway/net",
+            "browser/gateway",
+            "driver/gpu",
+            "driver/iommu",
+        "trace/exec",
+        "net/eth0",
     ] {
             let out = probe(name).unwrap_or_else(|| panic!("通道 {} 无探针", name));
             assert!(!out.is_empty(), "通道 {} 探针为空", name);
@@ -2779,7 +2794,7 @@ mod tests {
 
     #[test]
     fn framebuffer_act_draws_pixels() {
-        let r = act("gpu://framebuffer", "HELLO").unwrap().unwrap();
+        let r = act("gpu/framebuffer", "HELLO").unwrap().unwrap();
         assert!(r.contains("HELLO"));
         let (_, _, _, lit) = desktop::framebuffer_stats();
         assert!(lit > 0);
@@ -2787,18 +2802,18 @@ mod tests {
 
     #[test]
     fn net_act_ping_send_stats() {
-        assert!(act("net://eth0", "stats").unwrap().is_ok());
-        let r = act("net://eth0", "ping 10.0.0.2").unwrap().unwrap();
+        assert!(act("net/eth0", "stats").unwrap().is_ok());
+        let r = act("net/eth0", "ping 10.0.0.2").unwrap().unwrap();
         assert!(r.contains("bytes from"), "{}", r);
-        let r = act("net://eth0", "send 10.0.0.3 hello-net").unwrap().unwrap();
+        let r = act("net/eth0", "send 10.0.0.3 hello-net").unwrap().unwrap();
         assert!(r.contains("10.0.0.3"), "{}", r);
-        let r = act("net://eth0", "ping 10.0.0.2").unwrap().unwrap();
+        let r = act("net/eth0", "ping 10.0.0.2").unwrap().unwrap();
         assert!(r.contains("bytes from"), "{}", r);
         // 链路断开后 ping 应失败
-        let r = act("net://eth0", "link down").unwrap().unwrap();
+        let r = act("net/eth0", "link down").unwrap().unwrap();
         assert_eq!(r, "链路已断开");
-        assert!(act("net://eth0", "ping 10.0.0.2").unwrap().is_err());
-        let r = act("net://eth0", "link up").unwrap().unwrap();
+        assert!(act("net/eth0", "ping 10.0.0.2").unwrap().is_err());
+        let r = act("net/eth0", "link up").unwrap().unwrap();
         assert_eq!(r, "链路已启通");
     }
 
@@ -2806,47 +2821,47 @@ mod tests {
     fn new_system_modules_probe_and_act() {
         // 四个新通道都必须有非空探针
         for name in [
-            "mount://table",
-            "proc://sysinfo",
-            "net://interfaces",
-            "dev://bus",
+            "mount/table",
+            "proc/sysinfo",
+            "net/interfaces",
+            "dev/bus",
         ] {
             let out = probe(name).unwrap_or_else(|| panic!("通道 {} 无探针", name));
             assert!(!out.is_empty(), "通道 {} 探针为空", name);
         }
 
         // 挂载表：挂载 -> 卸载，根目录不可卸载
-        let r = act("mount://table", "mount tmpfs /cache tmpfs ro")
+        let r = act("mount/table", "mount tmpfs /cache tmpfs ro")
             .unwrap()
             .unwrap();
         assert!(r.contains("/cache"), "{}", r);
-        assert!(act("mount://table", "umount /").unwrap().is_err());
-        assert!(act("mount://table", "umount /cache").unwrap().is_ok());
+        assert!(act("mount/table", "umount /").unwrap().is_err());
+        assert!(act("mount/table", "umount /cache").unwrap().is_ok());
 
         // procfs：刷新递增采样计数
-        let r = act("proc://sysinfo", "refresh").unwrap().unwrap();
+        let r = act("proc/sysinfo", "refresh").unwrap().unwrap();
         assert!(r.contains("loadavg:") && r.contains("meminfo:"), "{}", r);
 
         // 多网卡：MTU 与链路状态
-        let r = act("net://interfaces", "mtu wlan0 9000").unwrap().unwrap();
+        let r = act("net/interfaces", "mtu wlan0 9000").unwrap().unwrap();
         assert!(r.contains("9000"), "{}", r);
-        assert!(act("net://interfaces", "mtu wlan0 1").unwrap().is_err());
+        assert!(act("net/interfaces", "mtu wlan0 1").unwrap().is_err());
 
         // 设备总线：扫描与非法绑定
-        let r = act("dev://bus", "rescan").unwrap().unwrap();
+        let r = act("dev/bus", "rescan").unwrap().unwrap();
         assert!(r.contains("总线扫描"), "{}", r);
-        assert!(act("dev://bus", "bind 00:99.0 x").unwrap().is_err());
+        assert!(act("dev/bus", "bind 00:99.0 x").unwrap().is_err());
     }
 
     #[test]
     fn unknown_channel_returns_none() {
-        assert!(act("nope://x", "y").is_none());
+        assert!(act("nope/x", "y").is_none());
     }
 
     #[test]
     fn act_enforces_epoch_and_advances_world() {
-        // 用 dev://timer：成功的 act 是纯读语义，但依然应推进世界版本。
-        let ch = "dev://timer";
+        // 用 dev/timer：成功的 act 是纯读语义，但依然应推进世界版本。
+        let ch = "dev/timer";
         let before = lease::epoch(ch);
 
         // 版本不符 -> 拒绝，且不执行任何副作用
@@ -2868,8 +2883,8 @@ mod tests {
 
     #[test]
     fn probe_epoch_returns_world_version() {
-        let (text, ep) = probe_epoch("dev://timer");
+        let (text, ep) = probe_epoch("dev/timer");
         assert!(text.is_some());
-        assert_eq!(ep, lease::epoch("dev://timer"));
+        assert_eq!(ep, lease::epoch("dev/timer"));
     }
 }

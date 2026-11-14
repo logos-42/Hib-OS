@@ -1,4 +1,4 @@
-//! 用户空间 / 超级开发者空间 —— `sec://acl` 与 `realm://current`。
+//! 用户空间 / 超级开发者空间 —— `sec/acl` 与 `realm/current`。
 //!
 //! Linux 用 uid/euid 区分用户态与 root；Hib 用 **Realm + 通道 ACL**：
 //!
@@ -9,10 +9,10 @@
 //! "当前意识体，有没有权力对这条通道做这个动作？"
 //! 这与"先跑起来再被内核拒绝"的 Linux 思路相反 —— **意图先过权限**。
 //!
-//! * `sense sec://acl` / `sense realm://current`
-//! * `act sec://acl realm <user|dev>`
-//! * `act sec://acl allow|deny <通道前缀> [r|w]`
-//! * `act sec://acl check <通道> <r|w>`
+//! * `sense sec/acl` / `sense realm/current`
+//! * `act sec/acl realm <user|dev>`
+//! * `act sec/acl allow|deny <通道前缀> [r|w]`
+//! * `act sec/acl check <通道> <r|w>`
 
 use std::sync::{Mutex, OnceLock};
 
@@ -62,7 +62,7 @@ impl Acl {
             // 否则一旦切入 user 就无法再管理权限，形成死锁。
             rules: vec![Rule {
                 realm: Realm::User,
-                pattern: "sec://acl".to_string(),
+                pattern: "sec/acl".to_string(),
                 verb: "w".to_string(),
                 allow: true,
             }],
@@ -101,7 +101,7 @@ impl Acl {
             None => {
                 self.denials += 1;
                 Err(format!(
-                    "ACL 拒绝: {} 空间默认不可写 {} (用 `act sec://acl allow {}` 授权)",
+                    "ACL 拒绝: {} 空间默认不可写 {} (用 `act sec/acl allow {}` 授权)",
                     self.current.name(), channel, channel
                 ))
             }
@@ -193,30 +193,30 @@ mod tests {
     fn dev_realm_allows_everything() {
         let mut a = Acl::new();
         assert_eq!(a.current, Realm::Dev);
-        assert!(a.check("gpu://vram", "w").is_ok());
-        assert!(a.check("sec://acl", "w").is_ok());
+        assert!(a.check("gpu/vram", "w").is_ok());
+        assert!(a.check("sec/acl", "w").is_ok());
     }
 
     #[test]
     fn user_realm_denies_writes_until_authorized() {
         let mut a = Acl::new();
         a.set_realm(Realm::User);
-        assert!(a.check("dev://timer", "r").is_ok(), "读应默认放行");
-        let e = a.check("dev://timer", "w").unwrap_err();
+        assert!(a.check("dev/timer", "r").is_ok(), "读应默认放行");
+        let e = a.check("dev/timer", "w").unwrap_err();
         assert!(e.contains("ACL 拒绝"), "{}", e);
         assert_eq!(a.denials, 1);
-        a.add_rule("dev://", "w", true).unwrap();
-        assert!(a.check("dev://timer", "w").is_ok());
+        a.add_rule("dev/", "w", true).unwrap();
+        assert!(a.check("dev/timer", "w").is_ok());
     }
 
     #[test]
     fn deny_wins_and_longest_prefix_wins() {
         let mut a = Acl::new();
         a.set_realm(Realm::User);
-        a.add_rule("gpu://", "w", true).unwrap();
-        a.add_rule("gpu://vram", "w", false).unwrap();
-        assert!(a.check("gpu://scheduler", "w").is_ok());
-        assert!(a.check("gpu://vram", "w").is_err());
+        a.add_rule("gpu/", "w", true).unwrap();
+        a.add_rule("gpu/vram", "w", false).unwrap();
+        assert!(a.check("gpu/scheduler", "w").is_ok());
+        assert!(a.check("gpu/vram", "w").is_err());
     }
 
     #[test]

@@ -10,7 +10,7 @@
 //! * EthicalDilemma (伦理困境) —— 冲突伦理原则的决策场景，等价于安全冲突；
 //! * AuditLog (审计日志) —— 伦理相关操作的不可篡改记录，等价于系统审计；
 //! * PolicyEngine (策略引擎) —— 伦理策略的评估与执行，等价于安全策略引擎；
-//! * EthicsEngine (伦理引擎) —— 统一入口，通过 ethics://* 通道暴露。
+//! * EthicsEngine (伦理引擎) —— 统一入口，通过 ethics/* 通道暴露。
 //!
 //! 所有结构均为纯 Rust 原型，供内核统一核算与调度。
 
@@ -743,7 +743,7 @@ pub fn ethics_act(payload: &str) -> Result<String, String> {
             Ok(format!("价值对齐度: {:.2} 已对齐={}", eng.alignment(), eng.is_aligned()))
         }
         Some("dilemma") => {
-            let description = it.next().ok_or("用法: ethics:// dilemma <描述> <原则...> <选项...>")?;
+            let description = it.next().ok_or("用法: ethics/ dilemma <描述> <原则...> <选项...>")?;
             let principles: Vec<EthicalPrincipleType> = it
                 .by_ref()
                 .filter_map(|s| match s {

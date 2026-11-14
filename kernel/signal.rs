@@ -1,4 +1,4 @@
-﻿//! 信号机制。
+//! 信号机制。
 //!
 //! 模拟类 Unix 信号：定义信号枚举（SIGKILL/SIGSTOP/SIGCONT/SIGTERM/SIGINT/
 //! SIGSEGV/SIGCHLD 等），支持为进程注册信号处理函数、发送信号、信号屏蔽

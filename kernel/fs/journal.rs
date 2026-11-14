@@ -1,4 +1,4 @@
-﻿//! 日志文件系统（WAL 预写日志 + 崩溃恢复）。
+//! 日志文件系统（WAL 预写日志 + 崩溃恢复）。
 //!
 //! 实现简化的预写日志：所有对块设备的修改先写入日志（事务），提交后
 //! 再回写到主文件系统。崩溃恢复时重放已提交事务、回滚未提交事务，
@@ -657,15 +657,15 @@ impl JournalCaps {
 }
 
 // ============================================================================
-// sense/act 通道接口：journal://<设备路径>
+// sense/act 通道接口：journal/<设备路径>
 // ============================================================================
 
 /// 感知日志通道：返回日志状态摘要。
 ///
-/// 通道名形式：`journal://<设备路径>`
+/// 通道名形式：`journal/<设备路径>`
 pub fn probe_journal(name: &str) -> Option<String> {
-    let dev = name.strip_prefix("journal://")?;
-    let channel = format!("journal://{}", dev);
+    let dev = name.strip_prefix("journal/")?;
+    let channel = format!("journal/{}", dev);
     let epoch = lease::epoch(&channel);
     Some(format!(
         "channel={} type=journal_wal epoch={} ops=begin|log_op|commit|replay|checkpoint|sync",
@@ -679,13 +679,13 @@ pub fn probe_journal(name: &str) -> Option<String> {
 /// - `status` —— 返回日志状态摘要（占位）
 /// - `epoch` —— 返回当前 epoch
 pub fn act_journal(name: &str, payload: &str) -> Option<Result<String, String>> {
-    let dev = name.strip_prefix("journal://")?;
+    let dev = name.strip_prefix("journal/")?;
     let mut tokens = payload.split_whitespace();
     let sub = tokens.next().unwrap_or("");
-    let channel = format!("journal://{}", dev);
+    let channel = format!("journal/{}", dev);
     match sub {
         "status" => Some(Ok(format!(
-            "journal://{} status=formatted epoch={}",
+            "journal/{} status=formatted epoch={}",
             dev,
             lease::epoch(&channel)
         ))),
@@ -834,7 +834,7 @@ mod tests {
         let journal = JournalLeased::new(
             Box::new(MemBlockDevice::new("ram0", 1024)),
             64,
-            "journal://test-lease",
+            "journal/test-lease",
         );
         assert!(journal.acquire_txn_lease(101).is_ok());
         let err = journal.acquire_txn_lease(102).unwrap_err();
@@ -849,7 +849,7 @@ mod tests {
         let journal = JournalLeased::new(
             Box::new(MemBlockDevice::new("ram0", 1024)),
             64,
-            "journal://test-lease2",
+            "journal/test-lease2",
         );
         journal.format().unwrap();
         let ep0 = journal.epoch();
@@ -870,7 +870,7 @@ mod tests {
         let journal = JournalLeased::new(
             Box::new(MemBlockDevice::new("ram0", 1024)),
             64,
-            "journal://test-lease3",
+            "journal/test-lease3",
         );
         journal.format().unwrap();
         let ep = journal.begin_transaction(301).unwrap();
@@ -890,7 +890,7 @@ mod tests {
         let journal = JournalLeased::new(
             Box::new(MemBlockDevice::new("ram0", 1024)),
             64,
-            "journal://test-lease4",
+            "journal/test-lease4",
         );
         journal.format().unwrap();
         let ep0 = journal.epoch();
@@ -937,17 +937,17 @@ mod tests {
 
     #[test]
     fn journal_probe_channel() {
-        let snap = probe_journal("journal://ram0").unwrap();
-        assert!(snap.contains("journal://ram0"));
+        let snap = probe_journal("journal/ram0").unwrap();
+        assert!(snap.contains("journal/ram0"));
         assert!(snap.contains("epoch="));
         assert!(snap.contains("ops="));
     }
 
     #[test]
     fn journal_act_channel_status_epoch() {
-        let r = act_journal("journal://ram0", "status").unwrap().unwrap();
+        let r = act_journal("journal/ram0", "status").unwrap().unwrap();
         assert!(r.contains("status=formatted"));
-        let r = act_journal("journal://ram0", "epoch").unwrap().unwrap();
+        let r = act_journal("journal/ram0", "epoch").unwrap().unwrap();
         assert!(r.contains("epoch="));
     }
 }

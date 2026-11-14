@@ -1,4 +1,4 @@
-//! 真实分页与地址空间 —— x86-64 四级页表（AI 原生包装为 `mem://paging`）。
+//! 真实分页与地址空间 —— x86-64 四级页表（AI 原生包装为 `mem/paging`）。
 //!
 //! 这是"补齐 Linux 设计"的第一块地基。它实现的是**真正的内核分页逻辑**：
 //!
@@ -16,15 +16,15 @@
 //!
 //! 通道契约：
 //! ```text
-//! sense mem://paging
-//! act mem://paging space new
-//! act mem://paging space switch <id>
-//! act mem://paging alloc <vaddr>            # 分配一物理帧并映射(读写/用户)
-//! act mem://paging map <vaddr> <paddr> <flags>
-//! act mem://paging unmap <vaddr>
-//! act mem://paging translate <vaddr>
-//! act mem://paging fault <vaddr> <r|w>
-//! act mem://paging fork <new_id>            # 复制当前空间为 COW
+//! sense mem/paging
+//! act mem/paging space new
+//! act mem/paging space switch <id>
+//! act mem/paging alloc <vaddr>            # 分配一物理帧并映射(读写/用户)
+//! act mem/paging map <vaddr> <paddr> <flags>
+//! act mem/paging unmap <vaddr>
+//! act mem/paging translate <vaddr>
+//! act mem/paging fault <vaddr> <r|w>
+//! act mem/paging fork <new_id>            # 复制当前空间为 COW
 //! ```
 
 use std::collections::BTreeMap;
@@ -396,7 +396,7 @@ impl GlobalPaging {
                         let owner = self.current.unwrap_or(0);
                         self.fault_waiters.entry(vaddr).or_default().push(owner as u64);
                         format!(
-                            "缺页阻塞: v={:#x} 无空闲帧，exec={} 已进入 wait_next(mem://fault/{:#x})",
+                            "缺页阻塞: v={:#x} 无空闲帧，exec={} 已进入 wait_next(mem/fault/{:#x})",
                             vaddr, owner, vaddr
                         )
                     }
@@ -418,7 +418,7 @@ impl GlobalPaging {
                         let owner = self.current.unwrap_or(0);
                         self.fault_waiters.entry(vaddr).or_default().push(owner as u64);
                         format!(
-                            "COW 阻塞: v={:#x} 无空闲帧，exec={} 已进入 wait_next(mem://fault/{:#x})",
+                            "COW 阻塞: v={:#x} 无空闲帧，exec={} 已进入 wait_next(mem/fault/{:#x})",
                             vaddr, owner, vaddr
                         )
                     }
@@ -485,7 +485,7 @@ impl GlobalPaging {
     }
 
     /// 唤醒等待该 vaddr 缺页的所有执行体：尝试分配一页并映射，成功后清除等待记录。
-    /// 模拟页框可用后 `signal` 唤醒 `wait_next(mem://fault/<vaddr>)` 的等待者。
+    /// 模拟页框可用后 `signal` 唤醒 `wait_next(mem/fault/<vaddr>)` 的等待者。
     pub fn wake_fault(&mut self, vaddr: u64) -> Result<String, String> {
         let root = self.current_root().ok_or("无当前地址空间")?;
         let paddr = self.frames.alloc().ok_or("无空闲帧")?;
@@ -499,7 +499,7 @@ impl GlobalPaging {
         ))
     }
 
-    /// 查询指定 vaddr 是否有缺页等待者（供 `act mem://paging fault_wait`）。
+    /// 查询指定 vaddr 是否有缺页等待者（供 `act mem/paging fault_wait`）。
     pub fn fault_waiters_count(&self, vaddr: u64) -> usize {
         self.fault_waiters.get(&vaddr).map(|v| v.len()).unwrap_or(0)
     }
@@ -559,7 +559,7 @@ pub fn status() -> String {
     core().lock().unwrap().status()
 }
 
-/// 页故障精简统计（供 `crate::mm` / `mem://fault` 通道）。
+/// 页故障精简统计（供 `crate::mm` / `mem/fault` 通道）。
 pub fn fault_stats() -> String {
     let g = core().lock().unwrap();
     format!(
@@ -612,7 +612,7 @@ pub fn act(payload: &str) -> Result<String, String> {
         "fault_wait" => {
             let v: u64 = it.next().and_then(parse_addr).ok_or("需要 vaddr")?;
             Ok(format!(
-                "缺页等待: v={:#x} 等待者数={} (模拟 wait_next(mem://fault/{:#x}))",
+                "缺页等待: v={:#x} 等待者数={} (模拟 wait_next(mem/fault/{:#x}))",
                 v,
                 g.fault_waiters_count(v),
                 v

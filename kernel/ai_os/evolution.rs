@@ -11,7 +11,7 @@
 //! * SelfModification (自我修改) —— 智能体对自身代码的改写，等价于内核热补丁；
 //! * VersionControl (版本控制) —— 架构版本的快照与回滚，等价于系统恢复点；
 //! * Adaptation (适应) —— 基于环境反馈的参数调优，等价于自动调参；
-//! * EvolutionEngine (进化引擎) —— 统一入口，通过 evolution://* 通道暴露。
+//! * EvolutionEngine (进化引擎) —— 统一入口，通过 evolution/* 通道暴露。
 //!
 //! 所有结构均为纯 Rust 原型，供内核统一核算与调度。
 

@@ -1,4 +1,4 @@
-//! 设备注册表与驱动绑定 —— `dev://drivers` 通道后端。
+//! 设备注册表与驱动绑定 —— `dev/drivers` 通道后端。
 //!
 //! 全局设备表，设备可绑定/解绑驱动，驱动支持热插拔。
 
@@ -95,7 +95,7 @@ pub fn unbind_driver(device: &str) -> bool {
     device_registry().lock().unbind_driver(device)
 }
 
-/// 列出所有设备的快照字符串（供 `sense dev://drivers` 使用）。
+/// 列出所有设备的快照字符串（供 `sense dev/drivers` 使用）。
 pub fn drivers_list() -> String {
     let reg = device_registry().lock();
     if reg.list().is_empty() {

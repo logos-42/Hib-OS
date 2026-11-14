@@ -1,7 +1,7 @@
 //! 文件系统元数据通道 —— AI 原生的「权限 / 挂载 / 链接」。
 //!
 //! 不复制 Linux 的 inode，而是把 mode / uid / gid / 挂载 / 链接
-//! 建模成可感知 / 可设置的通道 `fs://meta`。
+//! 建模成可感知 / 可设置的通道 `fs/meta`。
 
 use std::collections::BTreeMap;
 use std::sync::{Mutex, OnceLock};

@@ -1,4 +1,4 @@
-//! 判断力通道 —— AI 原生的「据此怎么裁决」`judgment://self`。
+//! 判断力通道 —— AI 原生的「据此怎么裁决」`judgment/self`。
 //!
 //! 前两个通道各管一半，本通道把它们**组合起来**产生结论：
 //!
@@ -12,9 +12,9 @@
 //! 也就是说：**动机决定有多想做，信念决定有多大把握，判断力决定做不做。**
 //! 本通道只做裁决，不修改动机与信念（那是它们各自的职责）。
 //!
-//! * `sense judgment://self`
-//! * `act judgment://self judge [命题]`（省略命题时自动挑最弱信念）
-//! * `act judgment://self decide`（自主判断，结果同样计入统计）
+//! * `sense judgment/self`
+//! * `act judgment/self judge [命题]`（省略命题时自动挑最弱信念）
+//! * `act judgment/self decide`（自主判断，结果同样计入统计）
 
 use std::sync::{Mutex, OnceLock};
 
@@ -98,7 +98,7 @@ impl Judgment {
             None => match bel.weakest() {
                 Some((p, c)) => (p.to_string(), c, true),
                 None => {
-                    return Err("没有可用信念，先走 act belief://self believe <命题> <置信度>".to_string());
+                    return Err("没有可用信念，先走 act belief/self believe <命题> <置信度>".to_string());
                 }
             },
         };
@@ -116,9 +116,9 @@ impl Judgment {
 
         let advice = match verdict {
             "commit" => "可以执行，无需额外验证".to_string(),
-            "probe" => format!("建议先 act belief://self observe \"{}\" +10 补充证据", prop),
+            "probe" => format!("建议先 act belief/self observe \"{}\" +10 补充证据", prop),
             _ => format!(
-                "建议先 act belief://self observe \"{}\" +20，或提升 motive://self 的相关动机",
+                "建议先 act belief/self observe \"{}\" +20，或提升 motive/self 的相关动机",
                 prop
             ),
         };
@@ -171,7 +171,7 @@ pub fn evaluate(confidence: u8, motive_level: u8) -> (u8, &'static str) {
 
 static JUDGMENT: OnceLock<Mutex<Judgment>> = OnceLock::new();
 
-/// 全局判断力（`judgment://self` 的实体）。
+/// 全局判断力（`judgment/self` 的实体）。
 pub fn judgment() -> &'static Mutex<Judgment> {
     JUDGMENT.get_or_init(|| Mutex::new(Judgment::new()))
 }

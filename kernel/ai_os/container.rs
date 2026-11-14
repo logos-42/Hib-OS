@@ -265,7 +265,7 @@ pub fn status() -> String {
     format!("containers={} escapes_blocked={}", m.len(), m.escapes_blocked)
 }
 
-/// `act container://*` 的后端动作：
+/// `act container/*` 的后端动作：
 /// * `create <name> [max_agents] [max_tokens] [max_tool_calls]` 创建容器
 /// * `start <id>` / `pause <id>` / `destroy <id>`
 /// * `add_agent <id> <agent>` 容器内派生智能体
@@ -277,7 +277,7 @@ pub fn container_act(payload: &str) -> Result<String, String> {
     let mut m = containers().lock().unwrap();
     match it.next() {
         Some("create") => {
-            let name = it.next().ok_or("用法: container://create <name> [max_agents] [max_tokens] [max_tool_calls]")?;
+            let name = it.next().ok_or("用法: container/create <name> [max_agents] [max_tokens] [max_tool_calls]")?;
             let mut q = Quota::default();
             if let Some(n) = it.next().and_then(|s| s.parse::<usize>().ok()) { q.max_agents = n; }
             if let Some(n) = it.next().and_then(|s| s.parse::<u64>().ok()) { q.max_tokens = n; }
@@ -286,40 +286,40 @@ pub fn container_act(payload: &str) -> Result<String, String> {
             Ok(format!("已创建容器 id={} name={}", id.0, name))
         }
         Some("start") => {
-            let id = it.next().and_then(|s| s.parse::<u64>().ok()).map(ContainerId).ok_or("用法: container://start <id>")?;
+            let id = it.next().and_then(|s| s.parse::<u64>().ok()).map(ContainerId).ok_or("用法: container/start <id>")?;
             m.start(id).map_err(|e| format!("{:?}", e))?;
             Ok(format!("已启动容器 id={}", id.0))
         }
         Some("pause") => {
-            let id = it.next().and_then(|s| s.parse::<u64>().ok()).map(ContainerId).ok_or("用法: container://pause <id>")?;
+            let id = it.next().and_then(|s| s.parse::<u64>().ok()).map(ContainerId).ok_or("用法: container/pause <id>")?;
             m.pause(id).map_err(|e| format!("{:?}", e))?;
             Ok(format!("已暂停容器 id={}", id.0))
         }
         Some("destroy") => {
-            let id = it.next().and_then(|s| s.parse::<u64>().ok()).map(ContainerId).ok_or("用法: container://destroy <id>")?;
+            let id = it.next().and_then(|s| s.parse::<u64>().ok()).map(ContainerId).ok_or("用法: container/destroy <id>")?;
             m.destroy(id).map_err(|e| format!("{:?}", e))?;
             Ok(format!("已销毁容器 id={}", id.0))
         }
         Some("add_agent") => {
-            let id = it.next().and_then(|s| s.parse::<u64>().ok()).map(ContainerId).ok_or("用法: container://add_agent <id> <agent>")?;
-            let agent = it.next().and_then(|s| s.parse::<u64>().ok()).ok_or("用法: container://add_agent <id> <agent>")?;
+            let id = it.next().and_then(|s| s.parse::<u64>().ok()).map(ContainerId).ok_or("用法: container/add_agent <id> <agent>")?;
+            let agent = it.next().and_then(|s| s.parse::<u64>().ok()).ok_or("用法: container/add_agent <id> <agent>")?;
             m.add_agent(id, agent).map_err(|e| format!("{:?}", e))?;
             Ok(format!("容器 id={} 已加入 agent={}", id.0, agent))
         }
         Some("charge_tokens") => {
-            let id = it.next().and_then(|s| s.parse::<u64>().ok()).map(ContainerId).ok_or("用法: container://charge_tokens <id> <n>")?;
-            let n = it.next().and_then(|s| s.parse::<u64>().ok()).ok_or("用法: container://charge_tokens <id> <n>")?;
+            let id = it.next().and_then(|s| s.parse::<u64>().ok()).map(ContainerId).ok_or("用法: container/charge_tokens <id> <n>")?;
+            let n = it.next().and_then(|s| s.parse::<u64>().ok()).ok_or("用法: container/charge_tokens <id> <n>")?;
             m.charge_tokens(id, n).map_err(|e| format!("{:?}", e))?;
             Ok(format!("容器 id={} 计费 tokens={}", id.0, n))
         }
         Some("charge_tool") => {
-            let id = it.next().and_then(|s| s.parse::<u64>().ok()).map(ContainerId).ok_or("用法: container://charge_tool <id>")?;
+            let id = it.next().and_then(|s| s.parse::<u64>().ok()).map(ContainerId).ok_or("用法: container/charge_tool <id>")?;
             m.charge_tool(id).map_err(|e| format!("{:?}", e))?;
             Ok(format!("容器 id={} 工具计费 +1", id.0))
         }
         Some("mount") => {
-            let id = it.next().and_then(|s| s.parse::<u64>().ok()).map(ContainerId).ok_or("用法: container://mount <id> <instance>")?;
-            let instance = it.next().and_then(|s| s.parse::<u64>().ok()).ok_or("用法: container://mount <id> <instance>")?;
+            let id = it.next().and_then(|s| s.parse::<u64>().ok()).map(ContainerId).ok_or("用法: container/mount <id> <instance>")?;
+            let instance = it.next().and_then(|s| s.parse::<u64>().ok()).ok_or("用法: container/mount <id> <instance>")?;
             m.mount_model(id, instance).map_err(|e| format!("{:?}", e))?;
             Ok(format!("容器 id={} 已挂载模型实例 {}", id.0, instance))
         }

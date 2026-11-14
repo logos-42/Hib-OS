@@ -1,8 +1,8 @@
-﻿//! BSD 风格 socket API，建立于 kernel/net 的 tcp/udp/ip 层之上。
+//! BSD 风格 socket API，建立于 kernel/net 的 tcp/udp/ip 层之上。
 //!
-//! 提供 socket/bind/connect/accept/recv/send/close，并与 `socket://tcp`
-//! 感知通道对齐（见 kernel/channels.rs 的 `socket://tcp` 通道注册以及
-//! kernel/sense.rs 的 socket://tcp 路由，与旧版 kernel/socket.rs 基于主机栈
+//! 提供 socket/bind/connect/accept/recv/send/close，并与 `socket/tcp`
+//! 感知通道对齐（见 kernel/channels.rs 的 `socket/tcp` 通道注册以及
+//! kernel/sense.rs 的 socket/tcp 路由，与旧版 kernel/socket.rs 基于主机栈
 //! 的实现并存）。NetStack 上的 poll/process_frame/frame_and_queue 等底层方法
 //! 定义在 kernel/net/mod.rs 中。
 

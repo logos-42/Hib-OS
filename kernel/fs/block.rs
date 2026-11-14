@@ -1,6 +1,6 @@
 //! 块设备抽象与请求调度。
 //!
-//! 建模为 `block://<设备>` 通道。块设备按固定大小块读写，内置请求队列
+//! 建模为 `block/<设备>` 通道。块设备按固定大小块读写，内置请求队列
 //! 与简易电梯调度器。内存设备（测试 / ram 盘）与文件设备（磁盘映像）
 //! 均实现 `BlockDevice`。
 
@@ -254,7 +254,7 @@ impl BlockScheduler {
     }
 }
 
-/// 块设备管理器：按名称持有多块设备，提供 `block://<设备>` 视图，
+/// 块设备管理器：按名称持有多块设备，提供 `block/<设备>` 视图，
 /// 并拥有请求队列与调度器。
 pub struct BlockManager {
     devices: BTreeMap<String, Box<dyn BlockDevice + Send>>,

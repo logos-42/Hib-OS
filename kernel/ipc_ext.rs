@@ -1,4 +1,4 @@
-﻿//! IPC 扩展：共享内存、消息队列、管道、Unix 套接字（简化版）。
+//! IPC 扩展：共享内存、消息队列、管道、Unix 套接字（简化版）。
 //!
 //! 提供四种进程间通信原语，全部以宿主内存模拟，不依赖真实操作系统 IPC：
 //!
@@ -1020,8 +1020,8 @@ mod tests {
     #[test]
     fn shm_create_attach_read_write_destroy() {
         let mut mgr = SharedMemoryManager::new();
-        let id = mgr.create("shm://test", 4096).unwrap();
-        let (aid, acnt) = mgr.attach("shm://test").unwrap();
+        let id = mgr.create("shm/test", 4096).unwrap();
+        let (aid, acnt) = mgr.attach("shm/test").unwrap();
         assert_eq!(aid, id);
         assert_eq!(acnt, 1);
         let data = b"hello shm";
@@ -1037,14 +1037,14 @@ mod tests {
     #[test]
     fn shm_duplicate_create_rejected() {
         let mut mgr = SharedMemoryManager::new();
-        let _ = mgr.create("shm://dup", 100);
-        assert_eq!(mgr.create("shm://dup", 100).unwrap_err().as_str(), "共享内存已存在: shm://dup");
+        let _ = mgr.create("shm/dup", 100);
+        assert_eq!(mgr.create("shm/dup", 100).unwrap_err().as_str(), "共享内存已存在: shm/dup");
     }
 
     #[test]
     fn msgq_send_recv_priority() {
         let mut mgr = MessageQueueManager::new();
-        let qid = mgr.create("mq://test", 10, 256).unwrap();
+        let qid = mgr.create("mq/test", 10, 256).unwrap();
         mgr.send(qid, b"low", 1).unwrap();
         mgr.send(qid, b"high", 10).unwrap();
         mgr.send(qid, b"mid", 5).unwrap();
@@ -1062,7 +1062,7 @@ mod tests {
     #[test]
     fn msgq_full_rejected() {
         let mut mgr = MessageQueueManager::new();
-        let qid = mgr.create("mq://full", 2, 64).unwrap();
+        let qid = mgr.create("mq/full", 2, 64).unwrap();
         mgr.send(qid, b"a", 1).unwrap();
         mgr.send(qid, b"b", 1).unwrap();
         assert_eq!(mgr.send(qid, b"c", 1).unwrap_err().as_str(), "消息队列已满");
@@ -1166,7 +1166,7 @@ mod tests {
     #[test]
     fn semaphore_wait_post() {
         let mut mgr = SemaphoreManager::new();
-        let id = mgr.create("sem://test", 1, 5).unwrap();
+        let id = mgr.create("sem/test", 1, 5).unwrap();
         assert_eq!(mgr.wait(id).unwrap(), true); // 计数器 1 -> 0
         assert_eq!(mgr.wait(id).unwrap(), false); // 计数器 0，失败
         assert_eq!(mgr.post(id).unwrap(), 1); // 计数器 0 -> 1
@@ -1177,7 +1177,7 @@ mod tests {
     #[test]
     fn semaphore_max_value_clamp() {
         let mut mgr = SemaphoreManager::new();
-        let id = mgr.create("sem://cap", 2, 3).unwrap();
+        let id = mgr.create("sem/cap", 2, 3).unwrap();
         // post 多次不应超过 max_value
         let _ = mgr.post(id);
         let _ = mgr.post(id);
@@ -1188,7 +1188,7 @@ mod tests {
     #[test]
     fn semaphore_destroyed_rejected() {
         let mut mgr = SemaphoreManager::new();
-        let id = mgr.create("sem://dead", 1, 5).unwrap();
+        let id = mgr.create("sem/dead", 1, 5).unwrap();
         mgr.destroy(id).unwrap();
         assert_eq!(mgr.wait(id).unwrap_err().as_str(), "信号量已销毁");
         assert_eq!(mgr.post(id).unwrap_err().as_str(), "信号量已销毁");
@@ -1197,10 +1197,10 @@ mod tests {
     #[test]
     fn semaphore_duplicate_create_rejected() {
         let mut mgr = SemaphoreManager::new();
-        let _ = mgr.create("sem://dup", 1, 5);
+        let _ = mgr.create("sem/dup", 1, 5);
         assert_eq!(
-            mgr.create("sem://dup", 1, 5).unwrap_err().as_str(),
-            "信号量已存在: sem://dup"
+            mgr.create("sem/dup", 1, 5).unwrap_err().as_str(),
+            "信号量已存在: sem/dup"
         );
     }
 

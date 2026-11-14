@@ -1,4 +1,4 @@
-﻿//! 模型子系统 —— AI 原生 OS 的「可执行镜像」。
+//! 模型子系统 —— AI 原生 OS 的「可执行镜像」。
 //!
 //! 对应《现代操作系统》中的**可执行文件与进程映像**：模型文件之于智能体，
 //! 如同 ELF 之于进程。模型注册表等价于内核的二进制格式注册表。
@@ -1341,7 +1341,7 @@ pub fn init() {
         return;
     }
     let _ = reg.load_with_spec(
-        "memory://hibos-core-7b",
+        "memory/hibos-core-7b",
         ModelFormat::RawTensor,
         ModelSpec {
             arch: ModelArch::TransformerDecoder,
@@ -1359,7 +1359,7 @@ pub fn init() {
         (7u64 << 30) / 2,
     );
     let _ = reg.load_with_spec(
-        "memory://hibos-vision",
+        "memory/hibos-vision",
         ModelFormat::Gguf,
         ModelSpec {
             arch: ModelArch::Diffusion,
@@ -1377,7 +1377,7 @@ pub fn init() {
         (2u64 << 30) / 4,
     );
     let _ = reg.load_with_spec(
-        "memory://hibos-clip",
+        "memory/hibos-clip",
         ModelFormat::SafeTensors,
         ModelSpec {
             arch: ModelArch::CLIP,
@@ -1401,7 +1401,7 @@ pub fn init() {
 // 状态摘要
 // =====================================================================================
 
-/// 状态摘要，供 `sense model://status` 使用。
+/// 状态摘要，供 `sense model/status` 使用。
 pub fn status() -> String {
     let reg = model_registry().lock().unwrap();
     format!(
@@ -1466,7 +1466,7 @@ pub fn model_instances_sense() -> String {
 // act 接口
 // =====================================================================================
 
-/// `act model://*` 的后端动作：
+/// `act model/*` 的后端动作：
 /// * `load <path> <format> <params> <ctx> <dtype> <vram>`
 /// * `load-spec <path> <format> <arch> <params> <layers> <hidden> <heads> <kv-heads> <head-dim> <intermediate> <vocab> <ctx> <quant> <vram>`
 /// * `instantiate <path> [kv_tokens]`
@@ -1486,7 +1486,7 @@ pub fn model_act(payload: &str) -> Result<String, String> {
     let mut reg = model_registry().lock().unwrap();
     match it.next() {
         Some("load") => {
-            let path = it.next().ok_or("用法: model://loader load <path> <format> <params> <ctx> <dtype> <vram>")?;
+            let path = it.next().ok_or("用法: model/loader load <path> <format> <params> <ctx> <dtype> <vram>")?;
             let fmt = ModelFormat::from_str(it.next().unwrap_or("raw"));
             let params = it.next().and_then(|s| s.parse().ok()).unwrap_or(0);
             let ctx = it.next().and_then(|s| s.parse().ok()).unwrap_or(4096);
@@ -1496,7 +1496,7 @@ pub fn model_act(payload: &str) -> Result<String, String> {
             Ok(format!("已加载模型 {} fmt={} params={} ctx={} vram={}B", name, fmt.name(), params, ctx, vram))
         }
         Some("load-spec") => {
-            let path = it.next().ok_or("用法: model://loader load-spec <path> <format> <arch> <params> <layers> <hidden> <heads> <kv-heads> <head-dim> <intermediate> <vocab> <ctx> <quant> <vram>")?;
+            let path = it.next().ok_or("用法: model/loader load-spec <path> <format> <arch> <params> <layers> <hidden> <heads> <kv-heads> <head-dim> <intermediate> <vocab> <ctx> <quant> <vram>")?;
             let fmt = ModelFormat::from_str(it.next().unwrap_or("raw"));
             let arch_str = it.next().unwrap_or("transformer-decoder");
             let arch = match arch_str {
@@ -1551,34 +1551,34 @@ pub fn model_act(payload: &str) -> Result<String, String> {
             Ok(format!("已加载模型 {} arch={} quant={} params={} vram={}B", name, arch_name, quant.name(), params, vram))
         }
         Some("instantiate") => {
-            let path = it.next().ok_or("用法: model://instances instantiate <path> [kv_tokens]")?;
+            let path = it.next().ok_or("用法: model/instances instantiate <path> [kv_tokens]")?;
             let kv = it.next().and_then(|s| s.parse().ok()).unwrap_or(0);
             let id = reg.instantiate(path, kv, None).map_err(|e| format!("实例化失败: {:?}", e))?;
             Ok(format!("已创建实例 inst={} model={}", id.0, path))
         }
         Some("destroy") => {
-            let id = it.next().and_then(|s| s.parse::<u64>().ok()).map(InstanceId).ok_or("用法: model://instances destroy <instance>")?;
+            let id = it.next().and_then(|s| s.parse::<u64>().ok()).map(InstanceId).ok_or("用法: model/instances destroy <instance>")?;
             reg.destroy(id).map_err(|e| format!("释放失败: {:?}", e))?;
             Ok(format!("已释放实例 inst={}", id.0))
         }
         Some("bind") => {
-            let id = it.next().and_then(|s| s.parse::<u64>().ok()).map(InstanceId).ok_or("用法: model://instances bind <instance> <owner>")?;
-            let owner = it.next().and_then(|s| s.parse::<u64>().ok()).ok_or("用法: model://instances bind <instance> <owner>")?;
+            let id = it.next().and_then(|s| s.parse::<u64>().ok()).map(InstanceId).ok_or("用法: model/instances bind <instance> <owner>")?;
+            let owner = it.next().and_then(|s| s.parse::<u64>().ok()).ok_or("用法: model/instances bind <instance> <owner>")?;
             reg.bind(id, owner).map_err(|e| format!("绑定失败: {:?}", e))?;
             Ok(format!("实例 inst={} 已绑定 owner={}", id.0, owner))
         }
         Some("unbind") => {
-            let id = it.next().and_then(|s| s.parse::<u64>().ok()).map(InstanceId).ok_or("用法: model://instances unbind <instance>")?;
+            let id = it.next().and_then(|s| s.parse::<u64>().ok()).map(InstanceId).ok_or("用法: model/instances unbind <instance>")?;
             reg.unbind(id).map_err(|e| format!("解绑失败: {:?}", e))?;
             Ok(format!("实例 inst={} 已解绑", id.0))
         }
         Some("unload") => {
-            let path = it.next().ok_or("用法: model://loader unload <path>")?;
+            let path = it.next().ok_or("用法: model/loader unload <path>")?;
             reg.unload(path).map_err(|e| format!("卸载失败: {:?}", e))?;
             Ok(format!("已卸载模型 {}", path))
         }
         Some("config") => {
-            let id = it.next().and_then(|s| s.parse::<u64>().ok()).map(InstanceId).ok_or("用法: model://instances config <instance> <temperature> <top_p> <top_k> <max_new>")?;
+            let id = it.next().and_then(|s| s.parse::<u64>().ok()).map(InstanceId).ok_or("用法: model/instances config <instance> <temperature> <top_p> <top_k> <max_new>")?;
             let temp = it.next().and_then(|s| s.parse().ok()).unwrap_or(0.7);
             let top_p = it.next().and_then(|s| s.parse().ok()).unwrap_or(0.9);
             let top_k = it.next().and_then(|s| s.parse().ok()).unwrap_or(40);
@@ -1588,7 +1588,7 @@ pub fn model_act(payload: &str) -> Result<String, String> {
             Ok(format!("实例 inst={} 生成配置已更新 temp={} top_p={} top_k={} max_new={}", id.0, temp, top_p, top_k, max_new))
         }
         Some("infer") => {
-            let id = it.next().and_then(|s| s.parse::<u64>().ok()).map(InstanceId).ok_or("用法: model://instances infer <instance> <token...>")?;
+            let id = it.next().and_then(|s| s.parse::<u64>().ok()).map(InstanceId).ok_or("用法: model/instances infer <instance> <token...>")?;
             let prompt: Vec<u32> = it.filter_map(|s| s.parse().ok()).collect();
             if prompt.is_empty() {
                 return Err("提示词 token 为空".into());
@@ -1604,13 +1604,13 @@ pub fn model_act(payload: &str) -> Result<String, String> {
             Ok(format!("推理引擎已推进 {}ns", ns))
         }
         Some("optimize") => {
-            let path = it.next().ok_or("用法: model://loader optimize <path>")?;
+            let path = it.next().ok_or("用法: model/loader optimize <path>")?;
             let _meta = reg.find(path).ok_or_else(|| ModelError::NotFound { name: path.to_string() }).map_err(|e| format!("{:?}", e))?;
             let report = reg.optimizer.optimize(&ModelSpec::default());
             Ok(format!("模型 {} 图优化完成:\n{}", path, report))
         }
         Some("verify") => {
-            let model = it.next().ok_or("用法: model://security verify <model> <version>")?;
+            let model = it.next().ok_or("用法: model/security verify <model> <version>")?;
             let ver_str = it.next().ok_or("缺少版本")?;
             let version = ModelVersion::parse(ver_str).map_err(|e| format!("版本解析失败: {}", e))?;
             let ok = reg.security.verify(model, &version);
@@ -1618,7 +1618,7 @@ pub fn model_act(payload: &str) -> Result<String, String> {
             Ok(format!("模型 {}@{} 签名验证：{}", model, ver_str_out, if ok { "通过" } else { "未签名/不信任" }))
         }
         Some("sign") => {
-            let model = it.next().ok_or("用法: model://security sign <model> <version> <algo>")?;
+            let model = it.next().ok_or("用法: model/security sign <model> <version> <algo>")?;
             let ver_str = it.next().ok_or("缺少版本")?;
             let version = ModelVersion::parse(ver_str).map_err(|e| format!("版本解析失败: {}", e))?;
             let algo_str = it.next().unwrap_or("ed25519");
@@ -1641,7 +1641,7 @@ pub fn model_act(payload: &str) -> Result<String, String> {
             Ok(format!("模型 {}@{} 已签名 algo={}", model, ver_str_out, algo_str))
         }
         Some("shard") => {
-            let name = it.next().ok_or("用法: model://distributor shard <name> <shard_id> <offset> <size> <checksum>")?;
+            let name = it.next().ok_or("用法: model/distributor shard <name> <shard_id> <offset> <size> <checksum>")?;
             let shard_id = it.next().and_then(|s| s.parse().ok()).ok_or("缺少 shard_id")?;
             let offset = it.next().and_then(|s| s.parse().ok()).unwrap_or(0);
             let size = it.next().and_then(|s| s.parse().ok()).unwrap_or(0);
@@ -1665,7 +1665,7 @@ pub fn model_act(payload: &str) -> Result<String, String> {
             }
         }
         Some("ollama-pull") => {
-            let model = it.next().ok_or("用法: model://ollama-pull <model_name>")?;
+            let model = it.next().ok_or("用法: model/ollama-pull <model_name>")?;
             let eng = model_serving_engine().lock().unwrap();
             match eng.ollama_client.pull_model(model) {
                 Ok(msg) => Ok(format!("模型 {} 已拉取: {}", model, msg)),
@@ -1673,7 +1673,7 @@ pub fn model_act(payload: &str) -> Result<String, String> {
             }
         }
         Some("ollama-chat") => {
-            let model = it.next().ok_or("用法: model://ollama-chat <model_name> <prompt>")?;
+            let model = it.next().ok_or("用法: model/ollama-chat <model_name> <prompt>")?;
             let prompt: String = it.collect::<Vec<&str>>().join(" ");
             if prompt.is_empty() {
                 return Err("缺少提示词".into());
@@ -1685,7 +1685,7 @@ pub fn model_act(payload: &str) -> Result<String, String> {
             }
         }
         Some("ollama-set-endpoint") => {
-            let url = it.next().ok_or("用法: model://ollama-set-endpoint <url>")?;
+            let url = it.next().ok_or("用法: model/ollama-set-endpoint <url>")?;
             let mut eng = model_serving_engine().lock().unwrap();
             eng.ollama_client.base_url = url.to_string();
             Ok(format!("Ollama 端点已设置: {}", url))
@@ -3451,7 +3451,7 @@ pub fn serving_act(payload: &str) -> Result<String, String> {
     let mut it = payload.split_whitespace();
     match it.next() {
         Some("submit") => {
-            let model = it.next().ok_or("用法: model_serving:// submit <model> <instance_id> <token...> [max_new] [temp] [top_p] [top_k] [priority]")?;
+            let model = it.next().ok_or("用法: model_serving/ submit <model> <instance_id> <token...> [max_new] [temp] [top_p] [top_k] [priority]")?;
             let instance_id = it.next().and_then(|s| s.parse::<u64>().ok()).map(InstanceId).unwrap_or(InstanceId(1));
             let tokens: Vec<u32> = it.by_ref().filter_map(|s| s.parse::<u32>().ok()).collect();
             if tokens.is_empty() {
@@ -3494,7 +3494,7 @@ pub fn serving_act(payload: &str) -> Result<String, String> {
             }
         }
         Some("cache") => {
-            let key = it.next().ok_or("用法: model_serving:// cache <key> [get|put]")?;
+            let key = it.next().ok_or("用法: model_serving/ cache <key> [get|put]")?;
             let op = it.next().unwrap_or("get");
             match op {
                 "get" => {

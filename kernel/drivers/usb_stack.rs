@@ -1,4 +1,4 @@
-﻿//! USB 栈简化版（kernel/drivers/usb_stack.rs）。
+//! USB 栈简化版（kernel/drivers/usb_stack.rs）。
 //!
 //! 本模块实现 USB 总线与设备模型：设备描述符、配置描述符、接口描述符、端点描述符、
 //! 四种传输类型（控制/批量/中断/同步）、设备状态（附加/默认/地址/配置）与枚举流程。
@@ -9,7 +9,7 @@
 //! * UsbDevice：设备描述符（厂商 ID、产品 ID、版本、类）、配置/接口/端点描述符
 //! * USB 传输类型：控制传输、批量传输、中断传输、同步传输（简化版）
 //! * 设备状态：附加/默认/地址/配置
-//! * sense/act 通道：`drv://usb`
+//! * sense/act 通道：`drv/usb`
 
 use alloc::collections::{BTreeMap, VecDeque}; use alloc::vec::Vec; use alloc::string::ToString; use alloc::string::String;
 use crate::ksync::{SpinLock, OnceLock};
@@ -346,7 +346,7 @@ impl UsbBus {
         Self { devices: BTreeMap::new(), next_address: 1, next_dev_id: 1, stats: BusStats::default() }
     }
 
-    /// 全局 USB 总线实例（`drv://usb` 通道后端）。
+    /// 全局 USB 总线实例（`drv/usb` 通道后端）。
     pub fn bus() -> &'static SpinLock<UsbBus> {
         static BUS: OnceLock<SpinLock<UsbBus>> = OnceLock::new();
         BUS.get_or_init(|| SpinLock::new(Self::new()))
@@ -523,16 +523,16 @@ impl UsbBus {
 }
 
 // =======================================================================
-// sense/act 接口（drv://usb）
+// sense/act 接口（drv/usb）
 // ======================================================================
 
-/// 查询 USB 总线状态快照（供 `sense drv://usb`）。
+/// 查询 USB 总线状态快照（供 `sense drv/usb`）。
 pub fn usb_sense_snapshot() -> String {
     let bus = UsbBus::bus().lock();
     bus.status()
 }
 
-/// 对 USB 通道执行行动（供 `act drv://usb`）。负载：`stats` / `list` / `enumerate <dev_id>` / `state <dev_id>`。
+/// 对 USB 通道执行行动（供 `act drv/usb`）。负载：`stats` / `list` / `enumerate <dev_id>` / `state <dev_id>`。
 pub fn usb_act_raw(payload: &str) -> Result<String, String> {
     let mut it = payload.split_whitespace();
     match it.next() {
@@ -556,7 +556,7 @@ pub fn usb_act_raw(payload: &str) -> Result<String, String> {
                 None => Err(format!("设备 {:?} 不存在", id)),
             }
         }
-        _ => Err("用法: act drv://usb stats | list | enumerate <dev_id> | state <dev_id>".to_string()),
+        _ => Err("用法: act drv/usb stats | list | enumerate <dev_id> | state <dev_id>".to_string()),
     }
 }
 

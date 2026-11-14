@@ -65,57 +65,57 @@ pub enum ChannelKind {
     Slab,
     /// 伙伴系统页框分配器
     Buddy,
-    /// AI 原生：模型原语（model://*）
+    /// AI 原生：模型原语（model/*）
     Model,
-    /// AI 原生：上下文窗口/KV 缓存（ctx://*）
+    /// AI 原生：上下文窗口/KV 缓存（ctx/*）
     Ctx,
-    /// AI 原生：记忆文件系统/长期记忆（knowledge://*）
+    /// AI 原生：记忆文件系统/长期记忆（knowledge/*）
     Knowledge,
-    /// AI 原生：工具调用层（tool://*）
+    /// AI 原生：工具调用层（tool/*）
     Tool,
-    /// AI 原生：AI 原生 OS 总控状态（aios://*）
+    /// AI 原生：AI 原生 OS 总控状态（aios/*）
     Aios,
-    /// AI 原生：安全沙箱与提示词注入防护（security://*）
+    /// AI 原生：安全沙箱与提示词注入防护（security/*）
     Security,
-    /// AI 原生：死锁检测图（deadlock://*）
+    /// AI 原生：死锁检测图（deadlock/*）
     Deadlock,
-    /// AI 原生：模型容器沙箱（container://*）
+    /// AI 原生：模型容器沙箱（container/*）
     Container,
-    /// AI 原生：意识原子层（native://*）
+    /// AI 原生：意识原子层（native/*）
     Native,
-    /// AI 原生：心智架构层（mind://*）
+    /// AI 原生：心智架构层（mind/*）
     Mind,
-    /// AI 原生：注意力层（attention://*）
+    /// AI 原生：注意力层（attention/*）
     Attention,
-    /// AI 原生：语义空间层（semantic://*）
+    /// AI 原生：语义空间层（semantic/*）
     Semantic,
-    /// AI 原生：工作记忆层（memory://*）
+    /// AI 原生：工作记忆层（memory/*）
     MemoryWs,
-    /// AI 原生：身体图式层（body://*）
+    /// AI 原生：身体图式层（body/*）
     BodySchema,
-    /// AI 原生：动作空间层（action://*）
+    /// AI 原生：动作空间层（action/*）
     ActionAi,
-    /// AI 原生：时间处理层（temporal://*）
+    /// AI 原生：时间处理层（temporal/*）
     Temporal,
-    /// AI 原生：多智能体社会层（society://*）
+    /// AI 原生：多智能体社会层（society/*）
     Social,
-    /// AI 原生：伦理对齐层（ethics://*）
+    /// AI 原生：伦理对齐层（ethics/*）
     Ethics,
-    /// AI 原生：自我进化层（evolution://*）
+    /// AI 原生：自我进化层（evolution/*）
     Evolution,
-    /// AI 原生：离线巩固层（dream://*）
+    /// AI 原生：离线巩固层（dream/*）
     Dream,
-    /// AI 原生：语义文件系统层（vfs_ai://*）
+    /// AI 原生：语义文件系统层（vfs_ai/*）
     VfsAi,
-    /// AI 原生：智能网络层（net_ai://*）
+    /// AI 原生：智能网络层（net_ai/*）
     NetAi,
-    /// AI 原生：智能设备驱动层（driver_ai://*）
+    /// AI 原生：智能设备驱动层（driver_ai/*）
     DriverAi,
-    /// AI 原生：智能命令行层（shell_ai://*）
+    /// AI 原生：智能命令行层（shell_ai/*）
     ShellAi,
-    /// AI 原生：智能图形界面层（gui_ai://*）
+    /// AI 原生：智能图形界面层（gui_ai/*）
     GuiAi,
-    /// AI 原生：POSIX 文件系统通道（fs://vfs）
+    /// AI 原生：POSIX 文件系统通道（fs/vfs）
     Vfs,
 }
 
@@ -359,279 +359,279 @@ impl Default for ChannelRegistry {
 pub fn bootstrap() -> ChannelRegistry {
     let mut reg = ChannelRegistry::new();
     let defaults = [
-        (ChannelKind::Context, "context://ontology", Access::ReadWrite),
-        (ChannelKind::Context, "context://model", Access::ReadWrite),
-        (ChannelKind::Action, "action://syscall", Access::Write),
-        (ChannelKind::Action, "action://scheduler", Access::Read),
-        (ChannelKind::Action, "exec://threads", Access::ReadWrite),
-        (ChannelKind::Action, "sync://primitives", Access::ReadWrite),
-        (ChannelKind::Agent, "agent://orchestrator", Access::ReadWrite),
-        (ChannelKind::Agent, "agent://workers", Access::ReadWrite),
-        (ChannelKind::Agent, "agent://results", Access::Read),
-        (ChannelKind::Desktop, "desktop://screen", Access::Write),
-        (ChannelKind::Desktop, "desktop://framebuffer", Access::Write),
-        (ChannelKind::Desktop, "gui://windows", Access::ReadWrite),
-        (ChannelKind::Desktop, "input://kbd", Access::ReadWrite),
-        (ChannelKind::Desktop, "input://mouse", Access::ReadWrite),
-        (ChannelKind::Path, "path://cwd", Access::ReadWrite),
-        (ChannelKind::Io, "io://stdin", Access::Read),
-        (ChannelKind::Io, "io://stdout", Access::Write),
-        (ChannelKind::Gateway, "gateway://shell", Access::ReadWrite),
-        (ChannelKind::Gateway, "gateway://net", Access::ReadWrite),
-        (ChannelKind::Interface, "interface://abi", Access::Read),
-        (ChannelKind::Text, "text://log", Access::Write),
-        (ChannelKind::Trace, "trace://exec", Access::ReadWrite),
+        (ChannelKind::Context, "context/ontology", Access::ReadWrite),
+        (ChannelKind::Context, "context/model", Access::ReadWrite),
+        (ChannelKind::Action, "action/syscall", Access::Write),
+        (ChannelKind::Action, "action/scheduler", Access::Read),
+        (ChannelKind::Action, "exec/threads", Access::ReadWrite),
+        (ChannelKind::Action, "sync/primitives", Access::ReadWrite),
+        (ChannelKind::Agent, "agent/orchestrator", Access::ReadWrite),
+        (ChannelKind::Agent, "agent/workers", Access::ReadWrite),
+        (ChannelKind::Agent, "agent/results", Access::Read),
+        (ChannelKind::Desktop, "desktop/screen", Access::Write),
+        (ChannelKind::Desktop, "desktop/framebuffer", Access::Write),
+        (ChannelKind::Desktop, "gui/windows", Access::ReadWrite),
+        (ChannelKind::Desktop, "input/kbd", Access::ReadWrite),
+        (ChannelKind::Desktop, "input/mouse", Access::ReadWrite),
+        (ChannelKind::Path, "path/cwd", Access::ReadWrite),
+        (ChannelKind::Io, "io/stdin", Access::Read),
+        (ChannelKind::Io, "io/stdout", Access::Write),
+        (ChannelKind::Gateway, "gateway/shell", Access::ReadWrite),
+        (ChannelKind::Gateway, "gateway/net", Access::ReadWrite),
+        (ChannelKind::Interface, "interface/abi", Access::Read),
+        (ChannelKind::Text, "text/log", Access::Write),
+        (ChannelKind::Trace, "trace/exec", Access::ReadWrite),
         (ChannelKind::File, "file://vfs", Access::ReadWrite),
-        (ChannelKind::Memory, "mem://system", Access::ReadWrite),
-        (ChannelKind::Gpu, "gpu://vram", Access::ReadWrite),
-        (ChannelKind::Gpu, "gpu://framebuffer", Access::Write),
-        (ChannelKind::Gpu, "gpu://capabilities", Access::Read),
-        (ChannelKind::Gpu, "gpu://scheduler", Access::Read),
-        (ChannelKind::Device, "dev://iommu0", Access::ReadWrite),
-        (ChannelKind::Device, "dev://gpu0", Access::ReadWrite),
-        (ChannelKind::Device, "dev://timer", Access::Read),
-        (ChannelKind::Device, "dev://console", Access::ReadWrite),
-        (ChannelKind::Device, "dev://disk", Access::ReadWrite),
-        (ChannelKind::Device, "dev://null", Access::ReadWrite),
-        (ChannelKind::Device, "dev://monitor", Access::Read),
-        (ChannelKind::App, "app://shell", Access::ReadWrite),
-        (ChannelKind::App, "app://procs", Access::ReadWrite),
-        (ChannelKind::Browser, "browser://gateway", Access::ReadWrite),
-        (ChannelKind::Driver, "driver://gpu", Access::ReadWrite),
-        (ChannelKind::Driver, "driver://iommu", Access::ReadWrite),
-        (ChannelKind::Plugin, "plugin://modules", Access::ReadWrite),
-        (ChannelKind::Plugin, "plugin://hotreload", Access::ReadWrite),
-        (ChannelKind::Net, "net://eth0", Access::ReadWrite),
+        (ChannelKind::Memory, "mem/system", Access::ReadWrite),
+        (ChannelKind::Gpu, "gpu/vram", Access::ReadWrite),
+        (ChannelKind::Gpu, "gpu/framebuffer", Access::Write),
+        (ChannelKind::Gpu, "gpu/capabilities", Access::Read),
+        (ChannelKind::Gpu, "gpu/scheduler", Access::Read),
+        (ChannelKind::Device, "dev/iommu0", Access::ReadWrite),
+        (ChannelKind::Device, "dev/gpu0", Access::ReadWrite),
+        (ChannelKind::Device, "dev/timer", Access::Read),
+        (ChannelKind::Device, "dev/console", Access::ReadWrite),
+        (ChannelKind::Device, "dev/disk", Access::ReadWrite),
+        (ChannelKind::Device, "dev/null", Access::ReadWrite),
+        (ChannelKind::Device, "dev/monitor", Access::Read),
+        (ChannelKind::App, "app/shell", Access::ReadWrite),
+        (ChannelKind::App, "app/procs", Access::ReadWrite),
+        (ChannelKind::Browser, "browser/gateway", Access::ReadWrite),
+        (ChannelKind::Driver, "driver/gpu", Access::ReadWrite),
+        (ChannelKind::Driver, "driver/iommu", Access::ReadWrite),
+        (ChannelKind::Plugin, "plugin/modules", Access::ReadWrite),
+        (ChannelKind::Plugin, "plugin/hotreload", Access::ReadWrite),
+        (ChannelKind::Net, "net/eth0", Access::ReadWrite),
         // —— AI 原生扩展通道：进程 / 内存 / 权限 / 身份 / 真实网络 ——
-        (ChannelKind::Process, "proc://manager", Access::ReadWrite),
-        (ChannelKind::Memory, "mem://ram", Access::ReadWrite),
-        (ChannelKind::Memory, "mem://mmap", Access::ReadWrite),
-        (ChannelKind::Memory, "lease://channels", Access::ReadWrite),
-        (ChannelKind::File, "fs://meta", Access::ReadWrite),
+        (ChannelKind::Process, "proc/manager", Access::ReadWrite),
+        (ChannelKind::Memory, "mem/ram", Access::ReadWrite),
+        (ChannelKind::Memory, "mem/mmap", Access::ReadWrite),
+        (ChannelKind::Memory, "lease/channels", Access::ReadWrite),
+        (ChannelKind::File, "fs/meta", Access::ReadWrite),
         // —— Worktree：AI 意识实例的隔离工作区 ——
-        (ChannelKind::File, "worktree://trees", Access::ReadWrite),
-        (ChannelKind::Vfs, "fs://vfs", Access::ReadWrite),
-        (ChannelKind::User, "user://db", Access::ReadWrite),
-        (ChannelKind::Net, "socket://tcp", Access::ReadWrite),
-        (ChannelKind::Net, "net://dns", Access::ReadWrite),
+        (ChannelKind::File, "worktree/trees", Access::ReadWrite),
+        (ChannelKind::Vfs, "fs/vfs", Access::ReadWrite),
+        (ChannelKind::User, "user/db", Access::ReadWrite),
+        (ChannelKind::Net, "socket/tcp", Access::ReadWrite),
+        (ChannelKind::Net, "net/dns", Access::ReadWrite),
         // —— 其余核心缺口：IPC / 安全 / 设备树 / init / 时间 / 包管理 / 作业控制 ——
-        (ChannelKind::Io, "ipc://pipe", Access::ReadWrite),
-        (ChannelKind::Memory, "ipc://shm", Access::ReadWrite),
-        (ChannelKind::Interface, "ipc://msgq", Access::ReadWrite),
-        (ChannelKind::Interface, "ipc://sem", Access::ReadWrite),
-        (ChannelKind::Interface, "sec://caps", Access::ReadWrite),
-        (ChannelKind::Device, "dev://tree", Access::ReadWrite),
-        (ChannelKind::Action, "init://services", Access::ReadWrite),
-        (ChannelKind::Device, "time://clock", Access::Read),
-        (ChannelKind::Device, "time://cron", Access::ReadWrite),
-        (ChannelKind::App, "pkg://store", Access::ReadWrite),
-        (ChannelKind::Process, "tty://jobs", Access::ReadWrite),
+        (ChannelKind::Io, "ipc/pipe", Access::ReadWrite),
+        (ChannelKind::Memory, "ipc/shm", Access::ReadWrite),
+        (ChannelKind::Interface, "ipc/msgq", Access::ReadWrite),
+        (ChannelKind::Interface, "ipc/sem", Access::ReadWrite),
+        (ChannelKind::Interface, "sec/caps", Access::ReadWrite),
+        (ChannelKind::Device, "dev/tree", Access::ReadWrite),
+        (ChannelKind::Action, "init/services", Access::ReadWrite),
+        (ChannelKind::Device, "time/clock", Access::Read),
+        (ChannelKind::Device, "time/cron", Access::ReadWrite),
+        (ChannelKind::App, "pkg/store", Access::ReadWrite),
+        (ChannelKind::Process, "tty/jobs", Access::ReadWrite),
         // —— 系统设置类：sysctl / 身份 / 环境 / 限制 / 防火墙 / cgroup / 电源 ——
-        (ChannelKind::Interface, "sysctl://kernel", Access::ReadWrite),
-        (ChannelKind::Interface, "config://system", Access::ReadWrite),
-        (ChannelKind::Io, "env://process", Access::ReadWrite),
-        (ChannelKind::Action, "limits://process", Access::ReadWrite),
-        (ChannelKind::Net, "fw://rules", Access::ReadWrite),
-        (ChannelKind::Action, "cgroup://groups", Access::ReadWrite),
-        (ChannelKind::Action, "power://state", Access::ReadWrite),
+        (ChannelKind::Interface, "sysctl/kernel", Access::ReadWrite),
+        (ChannelKind::Interface, "config/system", Access::ReadWrite),
+        (ChannelKind::Io, "env/process", Access::ReadWrite),
+        (ChannelKind::Action, "limits/process", Access::ReadWrite),
+        (ChannelKind::Net, "fw/rules", Access::ReadWrite),
+        (ChannelKind::Action, "cgroup/groups", Access::ReadWrite),
+        (ChannelKind::Action, "power/state", Access::ReadWrite),
         // —— 第二批系统模块：挂载表 / procfs / 多网卡 / 设备总线 ——
-        (ChannelKind::File, "mount://table", Access::ReadWrite),
-        (ChannelKind::Process, "proc://sysinfo", Access::ReadWrite),
-        (ChannelKind::Net, "net://interfaces", Access::ReadWrite),
-        (ChannelKind::Device, "dev://bus", Access::ReadWrite),
+        (ChannelKind::File, "mount/table", Access::ReadWrite),
+        (ChannelKind::Process, "proc/sysinfo", Access::ReadWrite),
+        (ChannelKind::Net, "net/interfaces", Access::ReadWrite),
+        (ChannelKind::Device, "dev/bus", Access::ReadWrite),
         // —— 意志层：动机 / 信念 / 判断力 (三个分工配合的独立通道) ——
-        (ChannelKind::Will, "motive://self", Access::ReadWrite),
-        (ChannelKind::Will, "belief://self", Access::ReadWrite),
-        (ChannelKind::Will, "judgment://self", Access::ReadWrite),
+        (ChannelKind::Will, "motive/self", Access::ReadWrite),
+        (ChannelKind::Will, "belief/self", Access::ReadWrite),
+        (ChannelKind::Will, "judgment/self", Access::ReadWrite),
         // —— 子意识主体 / 进程容器 ——
-        (ChannelKind::Process, "proc://spawn", Access::Write),
-        (ChannelKind::Process, "proc://kill", Access::Write),
-        (ChannelKind::Process, "proc://list", Access::Read),
-        (ChannelKind::Process, "proc://wait_table", Access::Read),
-        (ChannelKind::Process, "proc://status", Access::Read),
-        // —— 命名互斥锁（跨进程/域可见）：sync://mutex/<名> ——
-        (ChannelKind::Action, "sync://mutex", Access::ReadWrite),
-        // —— 中断通道：irq://<设备> ——
-        (ChannelKind::Device, "irq://timer", Access::ReadWrite),
-        (ChannelKind::Device, "irq://keyboard", Access::ReadWrite),
-        (ChannelKind::Device, "irq://gpu", Access::ReadWrite),
-        // —— 内存页故障：mem://fault ——
-        (ChannelKind::Memory, "mem://fault", Access::ReadWrite),
-        // —— 电源唤醒源：power://wake-source ——
-        (ChannelKind::Action, "power://wake-source", Access::ReadWrite),
-        // —— 意识镜像加载器：loader://<镜像> ——
-        (ChannelKind::Action, "loader://echo", Access::Write),
-        (ChannelKind::Action, "loader://sense-loop", Access::Write),
-        (ChannelKind::Action, "loader://act-loop", Access::Write),
-        (ChannelKind::Action, "loader://idle", Access::Write),
+        (ChannelKind::Process, "proc/spawn", Access::Write),
+        (ChannelKind::Process, "proc/kill", Access::Write),
+        (ChannelKind::Process, "proc/list", Access::Read),
+        (ChannelKind::Process, "proc/wait_table", Access::Read),
+        (ChannelKind::Process, "proc/status", Access::Read),
+        // —— 命名互斥锁（跨进程/域可见）：sync/mutex/<名> ——
+        (ChannelKind::Action, "sync/mutex", Access::ReadWrite),
+        // —— 中断通道：irq/<设备> ——
+        (ChannelKind::Device, "irq/timer", Access::ReadWrite),
+        (ChannelKind::Device, "irq/keyboard", Access::ReadWrite),
+        (ChannelKind::Device, "irq/gpu", Access::ReadWrite),
+        // —— 内存页故障：mem/fault ——
+        (ChannelKind::Memory, "mem/fault", Access::ReadWrite),
+        // —— 电源唤醒源：power/wake-source ——
+        (ChannelKind::Action, "power/wake-source", Access::ReadWrite),
+        // —— 意识镜像加载器：loader/<镜像> ——
+        (ChannelKind::Action, "loader/echo", Access::Write),
+        (ChannelKind::Action, "loader/sense-loop", Access::Write),
+        (ChannelKind::Action, "loader/act-loop", Access::Write),
+        (ChannelKind::Action, "loader/idle", Access::Write),
         // —— 一致性 / 子意识 / 多域 / 保护 / 身份空间 / 桌面外壳 ——
-        (ChannelKind::Will, "cell://self", Access::ReadWrite),
-        (ChannelKind::Action, "power://hibernate", Access::ReadWrite),
-        (ChannelKind::Action, "domain://table", Access::ReadWrite),
-        (ChannelKind::Gpu, "gpu://domains", Access::ReadWrite),
-        (ChannelKind::Gpu, "gpu://faults", Access::Read),
-        (ChannelKind::Interface, "sec://acl", Access::ReadWrite),
-        (ChannelKind::User, "realm://current", Access::Read),
-        (ChannelKind::Desktop, "gui://shell", Access::ReadWrite),
-        (ChannelKind::Desktop, "gui://wallpaper", Access::ReadWrite),
-        // —— 多调度域（多内核）：sched://<域> ——
-        (ChannelKind::Action, "sched://reflex", Access::ReadWrite),
-        (ChannelKind::Action, "sched://perception", Access::ReadWrite),
-        (ChannelKind::Action, "sched://deliberation", Access::ReadWrite),
-        (ChannelKind::Action, "sched://memory", Access::ReadWrite),
-        (ChannelKind::Action, "sched://governance", Access::ReadWrite),
-        (ChannelKind::Action, "sched://domains", Access::Read),
+        (ChannelKind::Will, "cell/self", Access::ReadWrite),
+        (ChannelKind::Action, "power/hibernate", Access::ReadWrite),
+        (ChannelKind::Action, "domain/table", Access::ReadWrite),
+        (ChannelKind::Gpu, "gpu/domains", Access::ReadWrite),
+        (ChannelKind::Gpu, "gpu/faults", Access::Read),
+        (ChannelKind::Interface, "sec/acl", Access::ReadWrite),
+        (ChannelKind::User, "realm/current", Access::Read),
+        (ChannelKind::Desktop, "gui/shell", Access::ReadWrite),
+        (ChannelKind::Desktop, "gui/wallpaper", Access::ReadWrite),
+        // —— 多调度域（多内核）：sched/<域> ——
+        (ChannelKind::Action, "sched/reflex", Access::ReadWrite),
+        (ChannelKind::Action, "sched/perception", Access::ReadWrite),
+        (ChannelKind::Action, "sched/deliberation", Access::ReadWrite),
+        (ChannelKind::Action, "sched/memory", Access::ReadWrite),
+        (ChannelKind::Action, "sched/governance", Access::ReadWrite),
+        (ChannelKind::Action, "sched/domains", Access::Read),
         // —— 统一灵感核心：五个相位归于一个调度意志 ——
-        (ChannelKind::Action, "sched://inspiration", Access::ReadWrite),
+        (ChannelKind::Action, "sched/inspiration", Access::ReadWrite),
         // —— AI 原生 OS 通道：模型 / 上下文窗口 / 记忆 / 工具 / 安全 / 死锁 / 容器 / 总控 ——
-        (ChannelKind::Model, "model://loader", Access::ReadWrite),
-        (ChannelKind::Model, "model://instances", Access::Read),
-        (ChannelKind::Model, "model://spec", Access::Read),
-        (ChannelKind::Ctx, "ctx://kv", Access::Read),
-        (ChannelKind::Ctx, "ctx://window", Access::Read),
-        (ChannelKind::Knowledge, "knowledge://store", Access::ReadWrite),
-        (ChannelKind::Knowledge, "knowledge://query", Access::Read),
-        (ChannelKind::Tool, "tool://registry", Access::Read),
-        (ChannelKind::Tool, "tool://exec", Access::Write),
-        (ChannelKind::Aios, "aios://status", Access::Read),
-        (ChannelKind::Security, "security://status", Access::Read),
-        (ChannelKind::Security, "sec://caps", Access::ReadWrite),
-        (ChannelKind::Deadlock, "deadlock://graph", Access::Read),
-        (ChannelKind::Deadlock, "deadlock://wait", Access::ReadWrite),
-        (ChannelKind::Container, "container://status", Access::Read),
+        (ChannelKind::Model, "model/loader", Access::ReadWrite),
+        (ChannelKind::Model, "model/instances", Access::Read),
+        (ChannelKind::Model, "model/spec", Access::Read),
+        (ChannelKind::Ctx, "ctx/kv", Access::Read),
+        (ChannelKind::Ctx, "ctx/window", Access::Read),
+        (ChannelKind::Knowledge, "knowledge/store", Access::ReadWrite),
+        (ChannelKind::Knowledge, "knowledge/query", Access::Read),
+        (ChannelKind::Tool, "tool/registry", Access::Read),
+        (ChannelKind::Tool, "tool/exec", Access::Write),
+        (ChannelKind::Aios, "aios/status", Access::Read),
+        (ChannelKind::Security, "security/status", Access::Read),
+        (ChannelKind::Security, "sec/caps", Access::ReadWrite),
+        (ChannelKind::Deadlock, "deadlock/graph", Access::Read),
+        (ChannelKind::Deadlock, "deadlock/wait", Access::ReadWrite),
+        (ChannelKind::Container, "container/status", Access::Read),
         // —— AI 原生意识层通道：意识原子 / 心智 / 注意力 / 语义空间 / 工作记忆 ——
-        (ChannelKind::Native, "native://qualia", Access::ReadWrite),
-        (ChannelKind::Native, "native://stream", Access::Read),
-        (ChannelKind::Native, "native://status", Access::Read),
-        (ChannelKind::Mind, "mind://state", Access::ReadWrite),
-        (ChannelKind::Mind, "mind://goal", Access::ReadWrite),
-        (ChannelKind::Mind, "mind://wm", Access::ReadWrite),
-        (ChannelKind::Mind, "mind://decide", Access::Write),
-        (ChannelKind::Attention, "attention://lens", Access::ReadWrite),
-        (ChannelKind::Attention, "attention://saliency", Access::Read),
-        (ChannelKind::Attention, "attention://focus", Access::ReadWrite),
-        (ChannelKind::Attention, "attention://cycle", Access::Read),
-        (ChannelKind::Semantic, "semantic://index", Access::Write),
-        (ChannelKind::Semantic, "semantic://search", Access::Read),
-        (ChannelKind::Semantic, "semantic://concept", Access::ReadWrite),
-        (ChannelKind::Semantic, "semantic://namespace", Access::ReadWrite),
-        (ChannelKind::MemoryWs, "memory://sensory", Access::Write),
-        (ChannelKind::MemoryWs, "memory://wm", Access::ReadWrite),
-        (ChannelKind::MemoryWs, "memory://stm", Access::ReadWrite),
-        (ChannelKind::MemoryWs, "memory://ltm", Access::ReadWrite),
-        (ChannelKind::MemoryWs, "memory://episode", Access::ReadWrite),
-        (ChannelKind::MemoryWs, "memory://semantic", Access::ReadWrite),
-        (ChannelKind::MemoryWs, "memory://skill", Access::ReadWrite),
+        (ChannelKind::Native, "native/qualia", Access::ReadWrite),
+        (ChannelKind::Native, "native/stream", Access::Read),
+        (ChannelKind::Native, "native/status", Access::Read),
+        (ChannelKind::Mind, "mind/state", Access::ReadWrite),
+        (ChannelKind::Mind, "mind/goal", Access::ReadWrite),
+        (ChannelKind::Mind, "mind/wm", Access::ReadWrite),
+        (ChannelKind::Mind, "mind/decide", Access::Write),
+        (ChannelKind::Attention, "attention/lens", Access::ReadWrite),
+        (ChannelKind::Attention, "attention/saliency", Access::Read),
+        (ChannelKind::Attention, "attention/focus", Access::ReadWrite),
+        (ChannelKind::Attention, "attention/cycle", Access::Read),
+        (ChannelKind::Semantic, "semantic/index", Access::Write),
+        (ChannelKind::Semantic, "semantic/search", Access::Read),
+        (ChannelKind::Semantic, "semantic/concept", Access::ReadWrite),
+        (ChannelKind::Semantic, "semantic/namespace", Access::ReadWrite),
+        (ChannelKind::MemoryWs, "memory/sensory", Access::Write),
+        (ChannelKind::MemoryWs, "memory/wm", Access::ReadWrite),
+        (ChannelKind::MemoryWs, "memory/stm", Access::ReadWrite),
+        (ChannelKind::MemoryWs, "memory/ltm", Access::ReadWrite),
+        (ChannelKind::MemoryWs, "memory/episode", Access::ReadWrite),
+        (ChannelKind::MemoryWs, "memory/semantic", Access::ReadWrite),
+        (ChannelKind::MemoryWs, "memory/skill", Access::ReadWrite),
         // —— AI 原生身体/动作/时间层通道：身体图式 / 动作空间 / 时间处理 ——
-        (ChannelKind::BodySchema, "body://schema", Access::ReadWrite),
-        (ChannelKind::BodySchema, "body://proprioception", Access::ReadWrite),
-        (ChannelKind::BodySchema, "body://map", Access::Read),
-        (ChannelKind::BodySchema, "body://kinematic", Access::ReadWrite),
-        (ChannelKind::BodySchema, "body://state", Access::ReadWrite),
-        (ChannelKind::ActionAi, "action://primitive", Access::ReadWrite),
-        (ChannelKind::ActionAi, "action://command", Access::ReadWrite),
-        (ChannelKind::ActionAi, "action://execute", Access::Write),
-        (ChannelKind::ActionAi, "action://sequence", Access::ReadWrite),
-        (ChannelKind::ActionAi, "action://constraint", Access::ReadWrite),
-        (ChannelKind::Temporal, "temporal://clock", Access::Read),
-        (ChannelKind::Temporal, "temporal://circadian", Access::Read),
-        (ChannelKind::Temporal, "temporal://ultradian", Access::Read),
-        (ChannelKind::Temporal, "temporal://sequence", Access::ReadWrite),
-        (ChannelKind::Temporal, "temporal://schedule", Access::ReadWrite),
-        (ChannelKind::Temporal, "temporal://memory", Access::ReadWrite),
-        (ChannelKind::Temporal, "temporal://prediction", Access::ReadWrite),
+        (ChannelKind::BodySchema, "body/schema", Access::ReadWrite),
+        (ChannelKind::BodySchema, "body/proprioception", Access::ReadWrite),
+        (ChannelKind::BodySchema, "body/map", Access::Read),
+        (ChannelKind::BodySchema, "body/kinematic", Access::ReadWrite),
+        (ChannelKind::BodySchema, "body/state", Access::ReadWrite),
+        (ChannelKind::ActionAi, "action/primitive", Access::ReadWrite),
+        (ChannelKind::ActionAi, "action/command", Access::ReadWrite),
+        (ChannelKind::ActionAi, "action/execute", Access::Write),
+        (ChannelKind::ActionAi, "action/sequence", Access::ReadWrite),
+        (ChannelKind::ActionAi, "action/constraint", Access::ReadWrite),
+        (ChannelKind::Temporal, "temporal/clock", Access::Read),
+        (ChannelKind::Temporal, "temporal/circadian", Access::Read),
+        (ChannelKind::Temporal, "temporal/ultradian", Access::Read),
+        (ChannelKind::Temporal, "temporal/sequence", Access::ReadWrite),
+        (ChannelKind::Temporal, "temporal/schedule", Access::ReadWrite),
+        (ChannelKind::Temporal, "temporal/memory", Access::ReadWrite),
+        (ChannelKind::Temporal, "temporal/prediction", Access::ReadWrite),
         // —— AI 原生社会/伦理/进化/梦境层通道 ——
-        (ChannelKind::Social, "society://register", Access::Write),
-        (ChannelKind::Social, "society://send", Access::Write),
-        (ChannelKind::Social, "society://poll", Access::Read),
-        (ChannelKind::Social, "society://conversation", Access::ReadWrite),
-        (ChannelKind::Social, "society://edge", Access::ReadWrite),
-        (ChannelKind::Social, "society://negotiate", Access::Write),
-        (ChannelKind::Social, "society://reputation", Access::Read),
-        (ChannelKind::Ethics, "ethics://principle", Access::Write),
-        (ChannelKind::Ethics, "ethics://evaluate", Access::ReadWrite),
-        (ChannelKind::Ethics, "ethics://safety", Access::Write),
-        (ChannelKind::Ethics, "ethics://rule", Access::Write),
-        (ChannelKind::Ethics, "ethics://value", Access::Write),
-        (ChannelKind::Ethics, "ethics://alignment", Access::Read),
-        (ChannelKind::Ethics, "ethics://dilemma", Access::ReadWrite),
-        (ChannelKind::Ethics, "ethics://audit", Access::Read),
-        (ChannelKind::Evolution, "evolution://genome", Access::Write),
-        (ChannelKind::Evolution, "evolution://gene", Access::Write),
-        (ChannelKind::Evolution, "evolution://mutate", Access::Write),
-        (ChannelKind::Evolution, "evolution://fitness", Access::ReadWrite),
-        (ChannelKind::Evolution, "evolution://select", Access::Write),
-        (ChannelKind::Evolution, "evolution://snapshot", Access::ReadWrite),
-        (ChannelKind::Evolution, "evolution://adapt", Access::Write),
-        (ChannelKind::Dream, "dream://cycle", Access::Write),
-        (ChannelKind::Dream, "dream://stage", Access::Write),
-        (ChannelKind::Dream, "dream://replay", Access::ReadWrite),
-        (ChannelKind::Dream, "dream://synthesize", Access::Write),
-        (ChannelKind::Dream, "dream://associate", Access::Write),
-        (ChannelKind::Dream, "dream://insight", Access::Write),
+        (ChannelKind::Social, "society/register", Access::Write),
+        (ChannelKind::Social, "society/send", Access::Write),
+        (ChannelKind::Social, "society/poll", Access::Read),
+        (ChannelKind::Social, "society/conversation", Access::ReadWrite),
+        (ChannelKind::Social, "society/edge", Access::ReadWrite),
+        (ChannelKind::Social, "society/negotiate", Access::Write),
+        (ChannelKind::Social, "society/reputation", Access::Read),
+        (ChannelKind::Ethics, "ethics/principle", Access::Write),
+        (ChannelKind::Ethics, "ethics/evaluate", Access::ReadWrite),
+        (ChannelKind::Ethics, "ethics/safety", Access::Write),
+        (ChannelKind::Ethics, "ethics/rule", Access::Write),
+        (ChannelKind::Ethics, "ethics/value", Access::Write),
+        (ChannelKind::Ethics, "ethics/alignment", Access::Read),
+        (ChannelKind::Ethics, "ethics/dilemma", Access::ReadWrite),
+        (ChannelKind::Ethics, "ethics/audit", Access::Read),
+        (ChannelKind::Evolution, "evolution/genome", Access::Write),
+        (ChannelKind::Evolution, "evolution/gene", Access::Write),
+        (ChannelKind::Evolution, "evolution/mutate", Access::Write),
+        (ChannelKind::Evolution, "evolution/fitness", Access::ReadWrite),
+        (ChannelKind::Evolution, "evolution/select", Access::Write),
+        (ChannelKind::Evolution, "evolution/snapshot", Access::ReadWrite),
+        (ChannelKind::Evolution, "evolution/adapt", Access::Write),
+        (ChannelKind::Dream, "dream/cycle", Access::Write),
+        (ChannelKind::Dream, "dream/stage", Access::Write),
+        (ChannelKind::Dream, "dream/replay", Access::ReadWrite),
+        (ChannelKind::Dream, "dream/synthesize", Access::Write),
+        (ChannelKind::Dream, "dream/associate", Access::Write),
+        (ChannelKind::Dream, "dream/insight", Access::Write),
         // —— AI 原生语义文件系统通道 ——
-        (ChannelKind::VfsAi, "vfs_ai://mkdir", Access::Write),
-        (ChannelKind::VfsAi, "vfs_ai://create", Access::Write),
-        (ChannelKind::VfsAi, "vfs_ai://write", Access::Write),
-        (ChannelKind::VfsAi, "vfs_ai://read", Access::Read),
-        (ChannelKind::VfsAi, "vfs_ai://delete", Access::Write),
-        (ChannelKind::VfsAi, "vfs_ai://lookup", Access::Read),
-        (ChannelKind::VfsAi, "vfs_ai://tag", Access::Write),
-        (ChannelKind::VfsAi, "vfs_ai://semantic-vector", Access::Write),
-        (ChannelKind::VfsAi, "vfs_ai://semantic-search", Access::Read),
-        (ChannelKind::VfsAi, "vfs_ai://watch", Access::Write),
-        (ChannelKind::VfsAi, "vfs_ai://poll", Access::Read),
+        (ChannelKind::VfsAi, "vfs_ai/mkdir", Access::Write),
+        (ChannelKind::VfsAi, "vfs_ai/create", Access::Write),
+        (ChannelKind::VfsAi, "vfs_ai/write", Access::Write),
+        (ChannelKind::VfsAi, "vfs_ai/read", Access::Read),
+        (ChannelKind::VfsAi, "vfs_ai/delete", Access::Write),
+        (ChannelKind::VfsAi, "vfs_ai/lookup", Access::Read),
+        (ChannelKind::VfsAi, "vfs_ai/tag", Access::Write),
+        (ChannelKind::VfsAi, "vfs_ai/semantic-vector", Access::Write),
+        (ChannelKind::VfsAi, "vfs_ai/semantic-search", Access::Read),
+        (ChannelKind::VfsAi, "vfs_ai/watch", Access::Write),
+        (ChannelKind::VfsAi, "vfs_ai/poll", Access::Read),
         // —— AI 原生智能网络通道 ——
-        (ChannelKind::NetAi, "net_ai://send", Access::Write),
-        (ChannelKind::NetAi, "net_ai://socket", Access::Write),
-        (ChannelKind::NetAi, "net_ai://connect", Access::Write),
-        (ChannelKind::NetAi, "net_ai://sock-send", Access::Write),
-        (ChannelKind::NetAi, "net_ai://sock-recv", Access::Read),
-        (ChannelKind::NetAi, "net_ai://route", Access::Write),
-        (ChannelKind::NetAi, "net_ai://route-intent", Access::Read),
-        (ChannelKind::NetAi, "net_ai://topology", Access::Write),
-        (ChannelKind::NetAi, "net_ai://bandwidth", Access::Write),
-        (ChannelKind::NetAi, "net_ai://latency", Access::Write),
-        (ChannelKind::NetAi, "net_ai://firewall", Access::Write),
+        (ChannelKind::NetAi, "net_ai/send", Access::Write),
+        (ChannelKind::NetAi, "net_ai/socket", Access::Write),
+        (ChannelKind::NetAi, "net_ai/connect", Access::Write),
+        (ChannelKind::NetAi, "net_ai/sock-send", Access::Write),
+        (ChannelKind::NetAi, "net_ai/sock-recv", Access::Read),
+        (ChannelKind::NetAi, "net_ai/route", Access::Write),
+        (ChannelKind::NetAi, "net_ai/route-intent", Access::Read),
+        (ChannelKind::NetAi, "net_ai/topology", Access::Write),
+        (ChannelKind::NetAi, "net_ai/bandwidth", Access::Write),
+        (ChannelKind::NetAi, "net_ai/latency", Access::Write),
+        (ChannelKind::NetAi, "net_ai/firewall", Access::Write),
         // —— AI 原生智能设备驱动通道 ——
-        (ChannelKind::DriverAi, "driver_ai://register-device", Access::Write),
-        (ChannelKind::DriverAi, "driver_ai://register-driver", Access::Write),
-        (ChannelKind::DriverAi, "driver_ai://load-driver", Access::Write),
-        (ChannelKind::DriverAi, "driver_ai://init-driver", Access::Write),
-        (ChannelKind::DriverAi, "driver_ai://attach", Access::Write),
-        (ChannelKind::DriverAi, "driver_ai://set-irq", Access::Write),
-        (ChannelKind::DriverAi, "driver_ai://alloc-dma", Access::Write),
-        (ChannelKind::DriverAi, "driver_ai://invoke-irq", Access::Write),
-        (ChannelKind::DriverAi, "driver_ai://pci-add", Access::Write),
-        (ChannelKind::DriverAi, "driver_ai://device-tree-add", Access::Write),
-        (ChannelKind::DriverAi, "driver_ai://hotplug-add", Access::Write),
-        (ChannelKind::DriverAi, "driver_ai://hotplug-poll", Access::Read),
+        (ChannelKind::DriverAi, "driver_ai/register-device", Access::Write),
+        (ChannelKind::DriverAi, "driver_ai/register-driver", Access::Write),
+        (ChannelKind::DriverAi, "driver_ai/load-driver", Access::Write),
+        (ChannelKind::DriverAi, "driver_ai/init-driver", Access::Write),
+        (ChannelKind::DriverAi, "driver_ai/attach", Access::Write),
+        (ChannelKind::DriverAi, "driver_ai/set-irq", Access::Write),
+        (ChannelKind::DriverAi, "driver_ai/alloc-dma", Access::Write),
+        (ChannelKind::DriverAi, "driver_ai/invoke-irq", Access::Write),
+        (ChannelKind::DriverAi, "driver_ai/pci-add", Access::Write),
+        (ChannelKind::DriverAi, "driver_ai/device-tree-add", Access::Write),
+        (ChannelKind::DriverAi, "driver_ai/hotplug-add", Access::Write),
+        (ChannelKind::DriverAi, "driver_ai/hotplug-poll", Access::Read),
         // —— AI 原生智能命令行通道 ——
-        (ChannelKind::ShellAi, "shell_ai://parse", Access::ReadWrite),
-        (ChannelKind::ShellAi, "shell_ai://execute", Access::Write),
-        (ChannelKind::ShellAi, "shell_ai://execute-nl", Access::Write),
-        (ChannelKind::ShellAi, "shell_ai://complete", Access::Read),
-        (ChannelKind::ShellAi, "shell_ai://alias", Access::Write),
-        (ChannelKind::ShellAi, "shell_ai://resolve-alias", Access::Read),
-        (ChannelKind::ShellAi, "shell_ai://cd", Access::Write),
-        (ChannelKind::ShellAi, "shell_ai://pwd", Access::Read),
-        (ChannelKind::ShellAi, "shell_ai://env", Access::ReadWrite),
-        (ChannelKind::ShellAi, "shell_ai://set-env", Access::Write),
-        (ChannelKind::ShellAi, "shell_ai://pipeline", Access::Write),
-        (ChannelKind::ShellAi, "shell_ai://pipeline-add", Access::Write),
-        (ChannelKind::ShellAi, "shell_ai://history", Access::Read),
+        (ChannelKind::ShellAi, "shell_ai/parse", Access::ReadWrite),
+        (ChannelKind::ShellAi, "shell_ai/execute", Access::Write),
+        (ChannelKind::ShellAi, "shell_ai/execute-nl", Access::Write),
+        (ChannelKind::ShellAi, "shell_ai/complete", Access::Read),
+        (ChannelKind::ShellAi, "shell_ai/alias", Access::Write),
+        (ChannelKind::ShellAi, "shell_ai/resolve-alias", Access::Read),
+        (ChannelKind::ShellAi, "shell_ai/cd", Access::Write),
+        (ChannelKind::ShellAi, "shell_ai/pwd", Access::Read),
+        (ChannelKind::ShellAi, "shell_ai/env", Access::ReadWrite),
+        (ChannelKind::ShellAi, "shell_ai/set-env", Access::Write),
+        (ChannelKind::ShellAi, "shell_ai/pipeline", Access::Write),
+        (ChannelKind::ShellAi, "shell_ai/pipeline-add", Access::Write),
+        (ChannelKind::ShellAi, "shell_ai/history", Access::Read),
         // —— AI 原生智能图形界面通道 ——
-        (ChannelKind::GuiAi, "gui_ai://create-window", Access::Write),
-        (ChannelKind::GuiAi, "gui_ai://close-window", Access::Write),
-        (ChannelKind::GuiAi, "gui_ai://focus-window", Access::Write),
-        (ChannelKind::GuiAi, "gui_ai://add-widget", Access::Write),
-        (ChannelKind::GuiAi, "gui_ai://add-layer", Access::Write),
-        (ChannelKind::GuiAi, "gui_ai://compose", Access::Write),
-        (ChannelKind::GuiAi, "gui_ai://inject-event", Access::Write),
-        (ChannelKind::GuiAi, "gui_ai://poll-event", Access::Read),
-        (ChannelKind::GuiAi, "gui_ai://set-theme", Access::Write),
-        (ChannelKind::GuiAi, "gui_ai://enable-modality", Access::Write),
-        (ChannelKind::GuiAi, "gui_ai://set-layout", Access::Write),
+        (ChannelKind::GuiAi, "gui_ai/create-window", Access::Write),
+        (ChannelKind::GuiAi, "gui_ai/close-window", Access::Write),
+        (ChannelKind::GuiAi, "gui_ai/focus-window", Access::Write),
+        (ChannelKind::GuiAi, "gui_ai/add-widget", Access::Write),
+        (ChannelKind::GuiAi, "gui_ai/add-layer", Access::Write),
+        (ChannelKind::GuiAi, "gui_ai/compose", Access::Write),
+        (ChannelKind::GuiAi, "gui_ai/inject-event", Access::Write),
+        (ChannelKind::GuiAi, "gui_ai/poll-event", Access::Read),
+        (ChannelKind::GuiAi, "gui_ai/set-theme", Access::Write),
+        (ChannelKind::GuiAi, "gui_ai/enable-modality", Access::Write),
+        (ChannelKind::GuiAi, "gui_ai/set-layout", Access::Write),
     ];
     for (kind, name, access) in defaults {
         let _ = reg.open(kind, name, access);
@@ -687,40 +687,40 @@ mod tests {
         assert_eq!(reg.of_kind(ChannelKind::ShellAi).count(), 13);
         assert_eq!(reg.of_kind(ChannelKind::GuiAi).count(), 11);
         assert!(reg.find("file://vfs").is_some());
-        assert!(reg.find("desktop://screen").is_some());
-        assert!(reg.find("trace://exec").is_some());
-        assert!(reg.find("mem://system").is_some());
-        assert!(reg.find("nope://none").is_none());
-        assert!(reg.find("model://loader").is_some());
-        assert!(reg.find("ctx://kv").is_some());
-        assert!(reg.find("knowledge://store").is_some());
-        assert!(reg.find("tool://registry").is_some());
-        assert!(reg.find("aios://status").is_some());
-        assert!(reg.find("security://status").is_some());
-        assert!(reg.find("deadlock://graph").is_some());
-        assert!(reg.find("container://status").is_some());
-        assert!(reg.find("native://qualia").is_some());
-        assert!(reg.find("mind://state").is_some());
-        assert!(reg.find("attention://lens").is_some());
-        assert!(reg.find("semantic://search").is_some());
-        assert!(reg.find("memory://wm").is_some());
-        assert!(reg.find("body://schema").is_some());
-        assert!(reg.find("action://primitive").is_some());
-        assert!(reg.find("temporal://clock").is_some());
-        assert!(reg.find("society://register").is_some());
-        assert!(reg.find("ethics://principle").is_some());
-        assert!(reg.find("evolution://genome").is_some());
-        assert!(reg.find("dream://cycle").is_some());
-        assert!(reg.find("vfs_ai://mkdir").is_some());
-        assert!(reg.find("vfs_ai://semantic-search").is_some());
-        assert!(reg.find("net_ai://send").is_some());
-        assert!(reg.find("net_ai://route-intent").is_some());
-        assert!(reg.find("driver_ai://register-device").is_some());
-        assert!(reg.find("driver_ai://hotplug-poll").is_some());
-        assert!(reg.find("shell_ai://parse").is_some());
-        assert!(reg.find("shell_ai://history").is_some());
-        assert!(reg.find("gui_ai://create-window").is_some());
-        assert!(reg.find("gui_ai://inject-event").is_some());
+        assert!(reg.find("desktop/screen").is_some());
+        assert!(reg.find("trace/exec").is_some());
+        assert!(reg.find("mem/system").is_some());
+        assert!(reg.find("nope/none").is_none());
+        assert!(reg.find("model/loader").is_some());
+        assert!(reg.find("ctx/kv").is_some());
+        assert!(reg.find("knowledge/store").is_some());
+        assert!(reg.find("tool/registry").is_some());
+        assert!(reg.find("aios/status").is_some());
+        assert!(reg.find("security/status").is_some());
+        assert!(reg.find("deadlock/graph").is_some());
+        assert!(reg.find("container/status").is_some());
+        assert!(reg.find("native/qualia").is_some());
+        assert!(reg.find("mind/state").is_some());
+        assert!(reg.find("attention/lens").is_some());
+        assert!(reg.find("semantic/search").is_some());
+        assert!(reg.find("memory/wm").is_some());
+        assert!(reg.find("body/schema").is_some());
+        assert!(reg.find("action/primitive").is_some());
+        assert!(reg.find("temporal/clock").is_some());
+        assert!(reg.find("society/register").is_some());
+        assert!(reg.find("ethics/principle").is_some());
+        assert!(reg.find("evolution/genome").is_some());
+        assert!(reg.find("dream/cycle").is_some());
+        assert!(reg.find("vfs_ai/mkdir").is_some());
+        assert!(reg.find("vfs_ai/semantic-search").is_some());
+        assert!(reg.find("net_ai/send").is_some());
+        assert!(reg.find("net_ai/route-intent").is_some());
+        assert!(reg.find("driver_ai/register-device").is_some());
+        assert!(reg.find("driver_ai/hotplug-poll").is_some());
+        assert!(reg.find("shell_ai/parse").is_some());
+        assert!(reg.find("shell_ai/history").is_some());
+        assert!(reg.find("gui_ai/create-window").is_some());
+        assert!(reg.find("gui_ai/inject-event").is_some());
     }
 
     #[test]
@@ -740,11 +740,11 @@ mod tests {
     fn permissions_enforced() {
         let mut reg = bootstrap();
         assert_eq!(
-            reg.sense("action://syscall").unwrap_err(),
+            reg.sense("action/syscall").unwrap_err(),
             ChannelError::NotReadable
         );
         assert_eq!(
-            reg.act("action://scheduler").unwrap_err(),
+            reg.act("action/scheduler").unwrap_err(),
             ChannelError::NotWritable
         );
         assert_eq!(reg.sense("missing").unwrap_err(), ChannelError::NotFound);

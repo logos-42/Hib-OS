@@ -1,4 +1,4 @@
-﻿//! 终端仿真器 —— ANSI 转义码解析、字符单元格缓冲、滚动历史、选中与剪贴板。
+//! 终端仿真器 —— ANSI 转义码解析、字符单元格缓冲、滚动历史、选中与剪贴板。
 //!
 //! `Terminal` 提供：
 //! * `write(data)` —— 写入原始字节，交给 `AnsiParser` 解析
@@ -1003,7 +1003,7 @@ pub fn terminal() -> &'static Mutex<Terminal> {
     TERMINAL.get_or_init(|| Mutex::new(Terminal::new(24, 80)))
 }
 
-/// `sense gui://terminal`：返回终端状态摘要。
+/// `sense gui/terminal`：返回终端状态摘要。
 pub fn terminal_sense() -> String {
     let t = terminal().lock().unwrap();
     let (r, c) = t.cursor_pos();
@@ -1019,7 +1019,7 @@ pub fn terminal_sense() -> String {
     )
 }
 
-/// `act gui://terminal <op> ...`：对终端执行行动。
+/// `act gui/terminal <op> ...`：对终端执行行动。
 pub fn terminal_act(payload: &str) -> Result<String, String> {
     let mut it = payload.split_whitespace();
     let t = terminal();

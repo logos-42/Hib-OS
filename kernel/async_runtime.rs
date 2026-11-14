@@ -1,4 +1,4 @@
-﻿//! 轻量级 async 运行时（futures + reactor）。
+//! 轻量级 async 运行时（futures + reactor）。
 //!
 //! 提供最小化的异步执行模型：
 //!

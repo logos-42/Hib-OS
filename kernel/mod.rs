@@ -83,6 +83,9 @@ pub mod worktree;
 
 // —— Subagent-A 新增：内核核心与通道系统扩充 ——
 pub mod channel_ext;
+pub mod capability;
+pub mod event;
+pub mod permission;
 pub mod buddy_alloc;
 pub mod slab_alloc;
 pub mod page_cache;

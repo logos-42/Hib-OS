@@ -577,10 +577,10 @@ mod tests {
         let t = TokenId::new();
         s.enqueue(t, CpuPriority::Medium, None);
         assert_eq!(s.ready_count(), 1);
-        s.mark_waiting(t, "gpu://vram");
+        s.mark_waiting(t, "gpu/vram");
         assert_eq!(s.ready_count(), 0);
         assert_eq!(s.waiting_count(), 1);
-        assert_eq!(s.wake_key("gpu://vram"), 1);
+        assert_eq!(s.wake_key("gpu/vram"), 1);
         assert_eq!(s.ready_count(), 1);
         assert_eq!(s.waiting_count(), 0);
         assert_eq!(s.pick_next(), Some(t));

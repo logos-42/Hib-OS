@@ -1,4 +1,4 @@
-﻿//! 通道元数据、订阅/通知、租约扩展 —— 为统一感知通道层提供元信息与事件总线。
+//! 通道元数据、订阅/通知、租约扩展 —— 为统一感知通道层提供元信息与事件总线。
 //!
 //! 本模块在 `kernel/channels.rs` 的 `ChannelRegistry` 之上叠加三层能力：
 //!
@@ -74,7 +74,7 @@ pub struct SubscriberEntry {
 // * sense 次数、act 次数、错误次数（用于可观测性与异常检测）。
 #[derive(Clone, Debug)]
 pub struct ChannelMeta {
-    /// 通道全名（如 `swap://area`）。
+    /// 通道全名（如 `swap/area`）。
     pub name: String,
     /// 通道种类。
     pub kind: ChannelKind,
@@ -775,21 +775,21 @@ mod tests {
 
     #[test]
     fn channel_meta_new_and_summary() {
-        let meta = ChannelMeta::new("swap://area", ChannelKind::Swap, Access::ReadWrite);
-        assert_eq!(meta.name, "swap://area");
+        let meta = ChannelMeta::new("swap/area", ChannelKind::Swap, Access::ReadWrite);
+        assert_eq!(meta.name, "swap/area");
         assert_eq!(meta.kind, ChannelKind::Swap);
         assert_eq!(meta.access, Access::ReadWrite);
         assert_eq!(meta.sense_count, 0);
         assert_eq!(meta.act_count, 0);
         assert_eq!(meta.error_count, 0);
         let s = meta.summary();
-        assert!(s.contains("swap://area"));
+        assert!(s.contains("swap/area"));
         assert!(s.contains("swap"));
     }
 
     #[test]
     fn channel_meta_record_counts() {
-        let mut meta = ChannelMeta::new("test://ch", ChannelKind::Memory, Access::ReadWrite);
+        let mut meta = ChannelMeta::new("test/ch", ChannelKind::Memory, Access::ReadWrite);
         meta.record_sense();
         meta.record_sense();
         meta.record_act();
@@ -821,36 +821,36 @@ mod tests {
     fn extended_registry_open_close_sense_act() {
         let reg = ExtendedChannelRegistry::new();
         let id = reg
-            .open(ChannelKind::Swap, "swap://area", Access::ReadWrite)
+            .open(ChannelKind::Swap, "swap/area", Access::ReadWrite)
             .unwrap();
         assert_eq!(id, 1);
         // 重复打开应失败
         assert_eq!(
-            reg.open(ChannelKind::Swap, "swap://area", Access::ReadWrite)
+            reg.open(ChannelKind::Swap, "swap/area", Access::ReadWrite)
                 .unwrap_err(),
             ChannelError::AlreadyOpen
         );
         // sense/act 计数
-        reg.sense("swap://area").unwrap();
-        reg.sense("swap://area").unwrap();
-        reg.act("swap://area").unwrap();
-        let meta = reg.meta("swap://area").unwrap();
+        reg.sense("swap/area").unwrap();
+        reg.sense("swap/area").unwrap();
+        reg.act("swap/area").unwrap();
+        let meta = reg.meta("swap/area").unwrap();
         assert_eq!(meta.sense_count, 2);
         assert_eq!(meta.act_count, 1);
         assert_eq!(meta.error_count, 0);
         // 关闭
-        reg.close("swap://area").unwrap();
-        assert!(reg.meta("swap://area").is_none());
+        reg.close("swap/area").unwrap();
+        assert!(reg.meta("swap/area").is_none());
     }
 
     #[test]
     fn extended_registry_permission_error_counted() {
         let reg = ExtendedChannelRegistry::new();
-        reg.open(ChannelKind::Action, "action://ro", Access::Read).unwrap();
-        // action://ro 只有 Read 权限，act 应报 NotWritable 并记录错误
-        let err = reg.act("action://ro").unwrap_err();
+        reg.open(ChannelKind::Action, "action/ro", Access::Read).unwrap();
+        // action/ro 只有 Read 权限，act 应报 NotWritable 并记录错误
+        let err = reg.act("action/ro").unwrap_err();
         assert_eq!(err, ChannelError::NotWritable);
-        let meta = reg.meta("action://ro").unwrap();
+        let meta = reg.meta("action/ro").unwrap();
         assert_eq!(meta.error_count, 1);
     }
 
@@ -882,9 +882,9 @@ mod tests {
     #[test]
     fn extended_registry_metas_of_kind() {
         let reg = ExtendedChannelRegistry::new();
-        reg.open(ChannelKind::Slab, "slab://cache1", Access::ReadWrite).unwrap();
-        reg.open(ChannelKind::Slab, "slab://cache2", Access::ReadWrite).unwrap();
-        reg.open(ChannelKind::Buddy, "buddy://sys", Access::ReadWrite).unwrap();
+        reg.open(ChannelKind::Slab, "slab/cache1", Access::ReadWrite).unwrap();
+        reg.open(ChannelKind::Slab, "slab/cache2", Access::ReadWrite).unwrap();
+        reg.open(ChannelKind::Buddy, "buddy/sys", Access::ReadWrite).unwrap();
 
         let slabs = reg.metas_of_kind(ChannelKind::Slab);
         assert_eq!(slabs.len(), 2);
@@ -894,7 +894,7 @@ mod tests {
 
     #[test]
     fn lease_ext_renew_and_force_release() {
-        let ch = "unittest://leaseext/renew";
+        let ch = "unittest/leaseext/renew";
         let owner = 701u64;
         // 获取租约
         assert!(lease::acquire(ch, owner, None).is_ok());
@@ -913,7 +913,7 @@ mod tests {
 
     #[test]
     fn lease_ext_wait_for_lease_acquires() {
-        let ch = "unittest://leaseext/wait";
+        let ch = "unittest/leaseext/wait";
         // 确保无人持有
         let _ = lease::release(ch, 801u64);
         let ep = LeaseExt::wait_for_lease(ch, 801u64, Duration::from_secs(1)).unwrap();
@@ -923,7 +923,7 @@ mod tests {
 
     #[test]
     fn lease_ext_wait_for_lease_timeout() {
-        let ch = "unittest://leaseext/timeout";
+        let ch = "unittest/leaseext/timeout";
         // 他人持有租约
         assert!(lease::acquire(ch, 901u64, None).is_ok());
         let err = LeaseExt::wait_for_lease(ch, 902u64, Duration::from_millis(50)).unwrap_err();
@@ -933,25 +933,25 @@ mod tests {
 
     #[test]
     fn global_convenience_functions() {
-        let _ = open_channel(ChannelKind::PageTable, "pagetable://walk", Access::ReadWrite);
-        assert!(sense_channel("pagetable://walk").is_ok());
-        assert!(act_channel("pagetable://walk").is_ok());
-        let meta = channel_meta("pagetable://walk").unwrap();
+        let _ = open_channel(ChannelKind::PageTable, "pagetable/walk", Access::ReadWrite);
+        assert!(sense_channel("pagetable/walk").is_ok());
+        assert!(act_channel("pagetable/walk").is_ok());
+        let meta = channel_meta("pagetable/walk").unwrap();
         assert_eq!(meta.kind, ChannelKind::PageTable);
-        let _ = close_channel("pagetable://walk");
-        assert!(channel_meta("pagetable://walk").is_none());
+        let _ = close_channel("pagetable/walk");
+        assert!(channel_meta("pagetable/walk").is_none());
     }
 
     #[test]
     fn notifier_subscriber_count() {
         let mut notifier = ChannelNotifier::new();
         let cb: ChannelSubscriber = Box::new(|_, _| {});
-        let id1 = notifier.subscribe("ch://a", cb);
+        let id1 = notifier.subscribe("ch/a", cb);
         let cb2: ChannelSubscriber = Box::new(|_, _| {});
-        let id2 = notifier.subscribe("ch://a", cb2);
-        assert_eq!(notifier.subscriber_count("ch://a"), 2);
-        notifier.notify_subscribers("ch://a", &ChannelEvent::Created);
-        assert_eq!(notifier.subscriber_count("ch://b"), 0);
+        let id2 = notifier.subscribe("ch/a", cb2);
+        assert_eq!(notifier.subscriber_count("ch/a"), 2);
+        notifier.notify_subscribers("ch/a", &ChannelEvent::Created);
+        assert_eq!(notifier.subscriber_count("ch/b"), 0);
         let _ = (id1, id2);
     }
 
@@ -959,14 +959,14 @@ mod tests {
     fn channel_group_add_remove() {
         let mut g = ChannelGroup::new("mem_group");
         assert_eq!(g.len(), 0);
-        g.add_channel("swap://area");
-        g.add_channel("pagetable://walk");
-        g.add_channel("swap://area"); // 重复添加应忽略
+        g.add_channel("swap/area");
+        g.add_channel("pagetable/walk");
+        g.add_channel("swap/area"); // 重复添加应忽略
         assert_eq!(g.len(), 2);
-        assert!(g.list_channels().contains(&"swap://area".to_string()));
-        g.remove_channel("pagetable://walk");
+        assert!(g.list_channels().contains(&"swap/area".to_string()));
+        g.remove_channel("pagetable/walk");
         assert_eq!(g.len(), 1);
-        assert!(!g.list_channels().contains(&"pagetable://walk".to_string()));
+        assert!(!g.list_channels().contains(&"pagetable/walk".to_string()));
     }
 
     #[test]
@@ -992,8 +992,8 @@ mod tests {
 
     #[test]
     fn global_channel_groups() {
-        group_add_channel("net_group", "net://eth0");
-        group_add_channel("net_group", "net://dns");
+        group_add_channel("net_group", "net/eth0");
+        group_add_channel("net_group", "net/dns");
         let s = group_summary("net_group").unwrap();
         assert!(s.contains("net_group"));
         assert!(s.contains("channels=2"));

@@ -16,7 +16,7 @@
 //! * Span (追踪跨度) —— 单个追踪跨度，等价于 Trace Span；
 //! * MetricAggregator (指标聚合器) —— 指标聚合/下采样，等价于录音规则；
 //! * SLOMonitor (SLO 监控) —— 服务等级目标监控，等价于 SLO 面板；
-//! * MonitoringEngine (监控引擎) —— 统一入口，通过 monitoring://* 通道暴露。
+//! * MonitoringEngine (监控引擎) —— 统一入口，通过 monitoring/* 通道暴露。
 //!
 //! 所有结构均为纯 Rust 原型，无外部依赖，供内核统一核算与调度。
 

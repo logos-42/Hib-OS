@@ -1,4 +1,4 @@
-﻿//! DMA 引擎（kernel/drivers/dma.rs）。
+//! DMA 引擎（kernel/drivers/dma.rs）。
 //!
 //! 实现散射聚合（Scatter-Gather，S-G）列表、DMA 通道、传输提交与完成中断。
 //! 与现有设备驱动框架并存，为网卡/块设备等提供高性能无 CPU 拷贝的数据传输原语。
@@ -10,7 +10,7 @@
 //! * 传输完成中断：传输完成后向注册的完成回调/中断线发信号，模拟硬件 DMA 完成中断。
 //! * 并发：通道表与传输队列由 `lease.rs` 单写者租约 + epoch CAS 保护。
 //! * 安全：提交 DMA 传输需 `caps.rs` 的 `CAP_SYS_RAWIO` / `CAP_DMA` 等能力（由调用方策略决定，此处预留入口）。
-//! * 感知通道：`drv://dma`（供 `sense`/`act` 查询通道状态、传输统计、提交/查询传输）。
+//! * 感知通道：`drv/dma`（供 `sense`/`act` 查询通道状态、传输统计、提交/查询传输）。
 //!
 //! 接口：`dma_submit(sg_list) -> Result<DmaTransferId, String>` / `dma_poll()` /
 //! `dma_register_completion_callback(...)` / `dma_transfer_status(id)`。
@@ -244,7 +244,7 @@ impl DmaEngine {
         }
     }
 
-    /// 全局 DMA 引擎单例（`drv://dma` 通道后端）。
+    /// 全局 DMA 引擎单例（`drv/dma` 通道后端）。
     pub fn engine() -> &'static SpinLock<DmaEngine> {
         static ENGINE: OnceLock<SpinLock<DmaEngine>> = OnceLock::new();
         ENGINE.get_or_init(|| SpinLock::new(Self::new()))
@@ -405,7 +405,7 @@ impl DmaEngine {
         Ok(())
     }
 
-    /// 状态快照（供 `sense drv://dma`）。
+    /// 状态快照（供 `sense drv/dma`）。
     pub fn status(&self) -> String {
         let mut ch_lines: Vec<String> = self.channels.values().map(|c| {
             format!("  ch={} state={} queued={} bytes={} done={} errors={}",
@@ -430,16 +430,16 @@ impl Default for DmaEngine {
 }
 
 // =======================================================================
-// sense/act 接口（drv://dma）
+// sense/act 接口（drv/dma）
 // =======================================================================
 
-/// 查询 DMA 引擎状态快照（供 `sense drv://dma`）。
+/// 查询 DMA 引擎状态快照（供 `sense drv/dma`）。
 pub fn dma_sense_snapshot() -> String {
     let e = DmaEngine::engine().lock();
     e.status()
 }
 
-/// 对 DMA 通道执行行动（供 `act drv://dma`）。
+/// 对 DMA 通道执行行动（供 `act drv/dma`）。
 /// 负载：`stats` / `list` / `chan <index>` / `submit <channel> <dir> <addr:len[,...]> <irq>` / `pause <ch>` / `resume <ch>` / `poll`。
 pub fn dma_act_raw(payload: &str) -> Result<String, String> {
     let mut it = payload.split_whitespace();
@@ -499,7 +499,7 @@ pub fn dma_act_raw(payload: &str) -> Result<String, String> {
             let completed = e.dma_poll();
             Ok(format!("DMA poll 完成 {} 个传输: {:?}", completed.len(), completed))
         }
-        _ => Err("用法: act drv://dma stats | list | chan <index> | submit <channel> <dir> <addr:len[,...]> [irq] | pause <ch> | resume <ch> | poll".to_string()),
+        _ => Err("用法: act drv/dma stats | list | chan <index> | submit <channel> <dir> <addr:len[,...]> [irq] | pause <ch> | resume <ch> | poll".to_string()),
     }
 }
 

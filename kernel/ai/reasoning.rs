@@ -1,4 +1,4 @@
-﻿//! 推理引擎 —— 正向/逆向推导、规则事实、不一致检测与置信度传播。
+//! 推理引擎 —— 正向/逆向推导、规则事实、不一致检测与置信度传播。
 //!
 //! `ReasoningEngine` 提供 `add_rule` / `add_fact` / `query` / `forward_chain` /
 //! `backward_chain` / `confidence`。
@@ -472,7 +472,7 @@ pub fn reasoning_engine() -> &'static Mutex<ReasoningEngine> {
     REASONING_ENGINE.get_or_init(|| Mutex::new(ReasoningEngine::new()))
 }
 
-/// `sense ai://reasoning`：返回推理引擎状态摘要。
+/// `sense ai/reasoning`：返回推理引擎状态摘要。
 pub fn reasoning_sense() -> String {
     let e = reasoning_engine().lock().unwrap();
     let contra = e.contradictions_found().len();
@@ -485,7 +485,7 @@ pub fn reasoning_sense() -> String {
     )
 }
 
-/// `act ai://reasoning <op> ...`：对推理引擎执行行动。
+/// `act ai/reasoning <op> ...`：对推理引擎执行行动。
 pub fn reasoning_act(payload: &str) -> Result<String, String> {
     let mut it = payload.split_whitespace();
     let e = reasoning_engine();

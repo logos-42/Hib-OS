@@ -12,7 +12,7 @@
 //! * 多处理机/调度/亲和性 → 多智能体并行、多调度域、模型实例亲和与负载均衡；
 //! * 微内核/外核 → 模型容器与智能体沙箱，内核只保留通道调度与能力核。
 //!
-//! 所有子系统通过 `aios://*`、`model://*`、`ctx://*`、`knowledge://*`、`tool://*` 通道
+//! 所有子系统通过 `aios/*`、`model/*`、`ctx/*`、`knowledge/*`、`tool/*` 通道
 //! 接入 Hib OS 的统一 `sense`/`act` 感知层，并沿用 `lease.rs` 的单写者租约 + epoch
 //! 乐观 CAS 与 `caps.rs` 的能力位权限模型。
 
@@ -75,7 +75,7 @@ pub fn init() {
     monitoring::init();
 }
 
-/// 聚合状态摘要，供 `sense aios://status` 使用。
+/// 聚合状态摘要，供 `sense aios/status` 使用。
 pub fn status() -> String {
     let mut lines = Vec::new();
     lines.push(format!("models={}", model::status()));

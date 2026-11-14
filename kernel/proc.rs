@@ -1,7 +1,7 @@
 //! 进程子系统 —— AI 原生的「行动执行」。
 //!
 //! fork/exec 映射为**真实的主机进程派生**（`std::process`），信号为终止语义，
-//! 进程树与状态可被 `sense proc://manager` 直接感知。
+//! 进程树与状态可被 `sense proc/manager` 直接感知。
 
 use std::process::{Child, Command};
 use std::sync::{Mutex, OnceLock};
@@ -42,7 +42,7 @@ impl ProcTable {
     pub fn spawn(&mut self, cmdline: &str) -> Result<String, String> {
         let cmdline = cmdline.trim();
         if cmdline.is_empty() {
-            return Err("用法: act proc://manager spawn <命令>".to_string());
+            return Err("用法: act proc/manager spawn <命令>".to_string());
         }
         let pid = self.next_pid;
         self.next_pid += 1;
@@ -143,7 +143,7 @@ impl ProcTable {
 
 static PROCTABLE: OnceLock<Mutex<ProcTable>> = OnceLock::new();
 
-/// 全局进程表（`proc://manager` 的实体）。
+/// 全局进程表（`proc/manager` 的实体）。
 pub fn proctable() -> &'static Mutex<ProcTable> {
     PROCTABLE.get_or_init(|| Mutex::new(ProcTable::new()))
 }

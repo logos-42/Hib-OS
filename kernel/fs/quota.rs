@@ -1,4 +1,4 @@
-﻿//! 磁盘配额（用户/组配额、块和 inode 限制）。
+//! 磁盘配额（用户/组配额、块和 inode 限制）。
 //!
 //! 提供 `QuotaManager`：按用户 ID 设置块/inode 上限，检查与扣费
 //!（charge/release），支持宽限期与警告阈值。项目配额（目录级）简化版。
@@ -556,14 +556,14 @@ impl QuotaManagerCaps {
 }
 
 // ============================================================================
-// sense/act 通道接口：quota://<设备名>
+// sense/act 通道接口：quota/<设备名>
 // ============================================================================
 
 /// 感知磁盘配额通道：返回配额管理器状态摘要。
 ///
-/// 通道名形式：`quota://<设备名>`
+/// 通道名形式：`quota/<设备名>`
 pub fn probe_quota(name: &str) -> Option<String> {
-    let channel = format!("quota://{}", name);
+    let channel = format!("quota/{}", name);
     let epoch = lease::epoch(&channel);
     Some(format!(
         "channel={} type=quota_manager epoch={} ops=set_quota|charge|release|get_quota|warn_users",
@@ -579,10 +579,10 @@ pub fn probe_quota(name: &str) -> Option<String> {
 pub fn act_quota(name: &str, payload: &str) -> Option<Result<String, String>> {
     let mut tokens = payload.split_whitespace();
     let sub = tokens.next().unwrap_or("");
-    let channel = format!("quota://{}", name);
+    let channel = format!("quota/{}", name);
     match sub {
         "status" => Some(Ok(format!(
-            "quota://{} status=active epoch={}",
+            "quota/{} status=active epoch={}",
             name,
             lease::epoch(&channel)
         ))),
@@ -753,7 +753,7 @@ mod tests {
 
     #[test]
     fn quota_leased_single_writer() {
-        let mgr = QuotaManagerLeased::new("quota://test-lease");
+        let mgr = QuotaManagerLeased::new("quota/test-lease");
         assert!(mgr.acquire_quota_lease(101).is_ok());
         let err = mgr.acquire_quota_lease(102).unwrap_err();
         assert_eq!(err.holder, crate::exec::101);
@@ -764,7 +764,7 @@ mod tests {
 
     #[test]
     fn quota_leased_set_charge_commit_epoch() {
-        let mgr = QuotaManagerLeased::new("quota://test-lease2");
+        let mgr = QuotaManagerLeased::new("quota/test-lease2");
         let ep0 = mgr.epoch();
         let ep1 = mgr.acquire_quota_lease(201).unwrap();
         assert_eq!(ep1, ep0);
@@ -779,7 +779,7 @@ mod tests {
 
     #[test]
     fn quota_leased_stale_epoch_rejected() {
-        let mgr = QuotaManagerLeased::new("quota://test-lease3");
+        let mgr = QuotaManagerLeased::new("quota/test-lease3");
         let ep = mgr.acquire_quota_lease(301).unwrap();
         let _ = mgr.set_quota_under_lease(301, ep, 2000, 5000, 100).unwrap();
         // 再用旧 epoch 设置应被拒绝。
@@ -791,7 +791,7 @@ mod tests {
 
     #[test]
     fn quota_leased_force_set_default() {
-        let mgr = QuotaManagerLeased::new("quota://test-lease4");
+        let mgr = QuotaManagerLeased::new("quota/test-lease4");
         let ep0 = mgr.epoch();
         let ep1 = mgr.force_set_default(401, 100000, 1000);
         assert!(ep1 > ep0);
@@ -828,17 +828,17 @@ mod tests {
 
     #[test]
     fn quota_probe_channel() {
-        let snap = probe_quota("quota://ram0").unwrap();
-        assert!(snap.contains("quota://ram0"));
+        let snap = probe_quota("quota/ram0").unwrap();
+        assert!(snap.contains("quota/ram0"));
         assert!(snap.contains("epoch="));
         assert!(snap.contains("ops="));
     }
 
     #[test]
     fn quota_act_channel_status_epoch() {
-        let r = act_quota("quota://ram0", "status").unwrap().unwrap();
+        let r = act_quota("quota/ram0", "status").unwrap().unwrap();
         assert!(r.contains("status=active"));
-        let r = act_quota("quota://ram0", "epoch").unwrap().unwrap();
+        let r = act_quota("quota/ram0", "epoch").unwrap().unwrap();
         assert!(r.contains("epoch="));
     }
 }

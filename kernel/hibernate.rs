@@ -1,16 +1,16 @@
-//! L3 系统休眠 —— `power://hibernate`。
+//! L3 系统休眠 —— `power/hibernate`。
 //!
-//! L1 = 执行体 sleep（`exec::block_on`）、L2 = 子意识冻结（`cell://self freeze`），
+//! L1 = 执行体 sleep（`exec::block_on`）、L2 = 子意识冻结（`cell/self freeze`），
 //! 本模块是 L3：把**全部子意识 + 世界版本**写成一份镜像，能从磁盘重建。
 //!
 //! 与 Linux suspend-to-disk 的差别：镜像里保存的不是寄存器，而是
 //! **意识状态**（动机 / 信念 / 裁决历史 / 冻结标志 / 血缘）与 `epoch`。
 //! 恢复时比对当前世界版本，就能知道"睡下去之后世界变了没有"。
 //!
-//! * `sense power://hibernate`
-//! * `act power://hibernate save [路径]`
-//! * `act power://hibernate restore [路径]`
-//! * `act power://hibernate snapshot`
+//! * `sense power/hibernate`
+//! * `act power/hibernate save [路径]`
+//! * `act power/hibernate restore [路径]`
+//! * `act power/hibernate snapshot`
 
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
@@ -52,7 +52,7 @@ pub fn default_path() -> PathBuf {
 /// 每行用 `\t` 分栏，避免中文命题里的空格破坏解析。
 pub fn snapshot() -> String {
     let mut out = vec![MAGIC.to_string()];
-    out.push(format!("epoch\t{}", lease::epoch("cell://self")));
+    out.push(format!("epoch\t{}", lease::epoch("cell/self")));
     let m = cell::subs().lock().unwrap();
     for c in m.values() {
         out.push(format!(
@@ -132,7 +132,7 @@ pub fn restore_text(text: &str) -> Result<String, String> {
         }
     }
     *cell::subs().lock().unwrap() = rebuilt;
-    let now = lease::epoch("cell://self");
+    let now = lease::epoch("cell/self");
     let delta = now.saturating_sub(saved_epoch);
     let report = format!(
         "已恢复 {} 个子意识; 休眠时 epoch={} 现在 epoch={} (世界变化 {} 版)",
@@ -153,7 +153,7 @@ pub fn save(path: &Path) -> Result<String, String> {
     std::fs::write(path, &text).map_err(|e| format!("写镜像失败: {}", e))?;
     let mut s = state().lock().unwrap();
     s.saves += 1;
-    s.last_saved_epoch = lease::epoch("cell://self");
+    s.last_saved_epoch = lease::epoch("cell/self");
     s.last_path = path.to_string_lossy().to_string();
     let r = format!("已保存意识镜像到 {} ({} 字节)", path.display(), text.len());
     s.last_report = r.clone();

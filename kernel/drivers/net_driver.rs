@@ -1,4 +1,4 @@
-﻿//! 网卡驱动框架（kernel/drivers/net_driver.rs）。
+//! 网卡驱动框架（kernel/drivers/net_driver.rs）。
 //!
 //! 本模块实现网卡驱动抽象：驱动注册/探测/移除、发送/接收队列（环缓冲区描述符）、
 //! 中断处理、MAC 地址管理、链路状态（up/down）、多队支持简化版与流量控制（XON/XOFF 简化）。
@@ -10,7 +10,7 @@
 //! * 发送/接收队列（环缓冲区描述符）
 //! * 中断处理、MAC 地址管理、链路状态
 //! * 多队支持简化版、流量控制（XON/XOFF 简化）
-//! * sense/act 通道：`drv://net`
+//! * sense/act 通道：`drv/net`
 
 use alloc::collections::BTreeMap; use alloc::vec::Vec; use alloc::string::{String, ToString}; use alloc::boxed::Box;
 use core::sync::atomic::{AtomicU64, Ordering}; use crate::ksync::{SpinLock, OnceLock};
@@ -218,7 +218,7 @@ impl NetDriver {
         }
     }
 
-    /// 全局网卡驱动框架实例（`drv://net` 通道后端）。
+    /// 全局网卡驱动框架实例（`drv/net` 通道后端）。
     pub fn driver() -> &'static SpinLock<NetDriver> {
         static DRV: OnceLock<SpinLock<NetDriver>> = OnceLock::new();
         DRV.get_or_init(|| SpinLock::new(Self::new()))
@@ -422,16 +422,16 @@ impl NetDriverOps for MockDriver {
 }
 
 // =======================================================================
-// sense/act 接口（drv://net）
+// sense/act 接口（drv/net）
 // ======================================================================
 
-/// 查询网卡驱动状态快照（供 `sense drv://net`）。
+/// 查询网卡驱动状态快照（供 `sense drv/net`）。
 pub fn net_driver_sense_snapshot() -> String {
     let drv = NetDriver::driver().lock();
     drv.status()
 }
 
-/// 对网卡驱动通道执行行动（供 `act drv://net`）。负载：`stats` / `list` / `probe <driver>` / `remove <id>` / `mac <id> <mac>` / `link <id> up|down` / `irq <id>`。
+/// 对网卡驱动通道执行行动（供 `act drv/net`）。负载：`stats` / `list` / `probe <driver>` / `remove <id>` / `mac <id> <mac>` / `link <id> up|down` / `irq <id>`。
 pub fn net_driver_act_raw(payload: &str) -> Result<String, String> {
     let mut it = payload.split_whitespace();
     match it.next() {
@@ -478,7 +478,7 @@ pub fn net_driver_act_raw(payload: &str) -> Result<String, String> {
             let mut drv = NetDriver::driver().lock();
             drv.trigger_irq(DeviceId(id)).map(|()| format!("已向设备 {:?} 投递中断", id))
         }
-        _ => Err("用法: act drv://net stats | list | probe <driver> | remove <id> | mac <id> <mac> | link <id> up|down | irq <id>".to_string()),
+        _ => Err("用法: act drv/net stats | list | probe <driver> | remove <id> | mac <id> <mac> | link <id> up|down | irq <id>".to_string()),
     }
 }
 

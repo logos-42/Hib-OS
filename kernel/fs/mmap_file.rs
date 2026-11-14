@@ -1,4 +1,4 @@
-﻿//! 文件内存映射（页故障按需加载）。
+//! 文件内存映射（页故障按需加载）。
 //!
 //! 提供 `MmapRegion` 与 `MmapManager`，模拟进程地址空间中的文件映射：
 //! 页故障时从文件加载页、映射到虚拟地址、脏页回写（MSYNC）。
@@ -692,14 +692,14 @@ impl MmapManagerCaps {
 }
 
 // ============================================================================
-// sense/act 通道接口：mmap://<设备名>
+// sense/act 通道接口：mmap/<设备名>
 // ============================================================================
 
 /// 感知内存映射通道：返回映射管理器状态摘要。
 ///
-/// 通道名形式：`mmap://<设备名>`
+/// 通道名形式：`mmap/<设备名>`
 pub fn probe_mmap(name: &str) -> Option<String> {
-    let channel = format!("mmap://{}", name);
+    let channel = format!("mmap/{}", name);
     let epoch = lease::epoch(&channel);
     Some(format!(
         "channel={} type=mmap_manager epoch={} ops=mmap|munmap|msync|find_region|list",
@@ -715,10 +715,10 @@ pub fn probe_mmap(name: &str) -> Option<String> {
 pub fn act_mmap(name: &str, payload: &str) -> Option<Result<String, String>> {
     let mut tokens = payload.split_whitespace();
     let sub = tokens.next().unwrap_or("");
-    let channel = format!("mmap://{}", name);
+    let channel = format!("mmap/{}", name);
     match sub {
         "status" => Some(Ok(format!(
-            "mmap://{} status=active epoch={}",
+            "mmap/{} status=active epoch={}",
             name,
             lease::epoch(&channel)
         ))),
@@ -934,7 +934,7 @@ mod tests {
 
     #[test]
     fn mmap_leased_single_writer() {
-        let mgr = MmapManagerLeased::new("mmap://test-lease");
+        let mgr = MmapManagerLeased::new("mmap/test-lease");
         assert!(mgr.acquire_map_lease(101).is_ok());
         let err = mgr.acquire_map_lease(102).unwrap_err();
         assert_eq!(err.holder, crate::exec::101);
@@ -945,7 +945,7 @@ mod tests {
 
     #[test]
     fn mmap_leased_mmap_munmap_commit_epoch() {
-        let mgr = MmapManagerLeased::new("mmap://test-lease2");
+        let mgr = MmapManagerLeased::new("mmap/test-lease2");
         let ep0 = mgr.epoch();
         let ep1 = mgr.acquire_map_lease(201).unwrap();
         assert_eq!(ep1, ep0);
@@ -963,7 +963,7 @@ mod tests {
 
     #[test]
     fn mmap_leased_stale_epoch_rejected() {
-        let mgr = MmapManagerLeased::new("mmap://test-lease3");
+        let mgr = MmapManagerLeased::new("mmap/test-lease3");
         let ep = mgr.acquire_map_lease(301).unwrap();
         let (_, new_ep) = mgr.mmap_under_lease(
             301, ep, 0x2000_0000, 4096,
@@ -981,7 +981,7 @@ mod tests {
 
     #[test]
     fn mmap_leased_force_unmap_all() {
-        let mgr = MmapManagerLeased::new("mmap://test-lease4");
+        let mgr = MmapManagerLeased::new("mmap/test-lease4");
         let ep0 = mgr.epoch();
         let ep1 = mgr.force_unmap_all(401);
         assert!(ep1 > ep0);
@@ -1027,17 +1027,17 @@ mod tests {
 
     #[test]
     fn mmap_probe_channel() {
-        let snap = probe_mmap("mmap://ram0").unwrap();
-        assert!(snap.contains("mmap://ram0"));
+        let snap = probe_mmap("mmap/ram0").unwrap();
+        assert!(snap.contains("mmap/ram0"));
         assert!(snap.contains("epoch="));
         assert!(snap.contains("ops="));
     }
 
     #[test]
     fn mmap_act_channel_status_epoch() {
-        let r = act_mmap("mmap://ram0", "status").unwrap().unwrap();
+        let r = act_mmap("mmap/ram0", "status").unwrap().unwrap();
         assert!(r.contains("status=active"));
-        let r = act_mmap("mmap://ram0", "epoch").unwrap().unwrap();
+        let r = act_mmap("mmap/ram0", "epoch").unwrap().unwrap();
         assert!(r.contains("epoch="));
     }
 }

@@ -1,4 +1,4 @@
-﻿//! 缓冲区缓存（Buffer Cache，LRU 淘汰 + 脏页写回）。
+//! 缓冲区缓存（Buffer Cache，LRU 淘汰 + 脏页写回）。
 //!
 //! 以扇区为单位缓存块设备数据，提供 `BufferHandle` 句柄与缓冲区锁
 //!（锁定/引用计数）。脏块在 `mark_dirty` 后标记，由 `sync_all` /
@@ -14,7 +14,7 @@
 //! - **能力位权限**：通过 `caps::CAP_SYS_RAWIO` / `caps::CAP_SYS_ADMIN` 校验缓存
 //!   回写与设备注册权限，而非 uid。
 //! - **通道接口**：提供 `probe_buffer_cache` / `act_buffer_cache`，供 `sense`/`act`
-//!   框架以 `buffercache://<设备>` 通道形式观测缓存统计。
+//!   框架以 `buffercache/<设备>` 通道形式观测缓存统计。
 //!
 //! 设计参考经典 Unix buf cache：每个扇区对应一个 `Buffer`，句柄持有
 //! 引用计数，释放句柄后缓冲区重新进入 LRU 链表。
@@ -669,16 +669,16 @@ impl BufferCacheCaps {
 }
 
 // ============================================================================
-// sense/act 通道接口：buffercache://<设备名>
+// sense/act 通道接口：buffercache/<设备名>
 // ============================================================================
 
 /// 感知缓冲区缓存通道：返回缓存统计快照。
 ///
-/// 通道名形式：`buffercache://<设备名>`（设备名可为 "all" 查看全部）
+/// 通道名形式：`buffercache/<设备名>`（设备名可为 "all" 查看全部）
 pub fn probe_buffer_cache(name: &str) -> Option<String> {
     // 此处为无状态探针：返回通道级元数据与当前 epoch。
     // 实际缓存实例由调用方持有，探针仅报告通道存在性与版本。
-    let channel = format!("buffercache://{}", name);
+    let channel = format!("buffercache/{}", name);
     let epoch = lease::epoch(&channel);
     Some(format!(
         "channel={} type=buffer_cache epoch={} ops=get_blk|brelse|mark_dirty|sync_device|sync_all",
@@ -694,12 +694,12 @@ pub fn probe_buffer_cache(name: &str) -> Option<String> {
 pub fn act_buffer_cache(name: &str, payload: &str) -> Option<Result<String, String>> {
     let mut tokens = payload.split_whitespace();
     let sub = tokens.next().unwrap_or("");
-    let channel = format!("buffercache://{}", name);
+    let channel = format!("buffercache/{}", name);
     match sub {
         "stats" => {
             let _ = tokens.next(); // 占位：实际应关联具体 BufferCache 实例
             Some(Ok(format!(
-                "buffercache://{} stats=placeholder epoch={}",
+                "buffercache/{} stats=placeholder epoch={}",
                 name,
                 lease::epoch(&channel)
             )))
@@ -869,7 +869,7 @@ mod tests {
 
     #[test]
     fn buffer_cache_leased_single_writer() {
-        let cache = BufferCacheLeased::new(16, "buffercache://test-lease");
+        let cache = BufferCacheLeased::new(16, "buffercache/test-lease");
         cache.register_device(Box::new(MemBlockDevice::new("ram0", 64)));
         assert!(cache.acquire_sync_lease(101).is_ok());
         let err = cache.acquire_sync_lease(102).unwrap_err();
@@ -881,7 +881,7 @@ mod tests {
 
     #[test]
     fn buffer_cache_leased_sync_commit_epoch() {
-        let cache = BufferCacheLeased::new(16, "buffercache://test-sync");
+        let cache = BufferCacheLeased::new(16, "buffercache/test-sync");
         let dev_id = cache.register_device(Box::new(MemBlockDevice::new("ram0", 64)));
         write_sector_inner(&cache, dev_id, 3, 0x00);
         let ep0 = cache.epoch();
@@ -901,7 +901,7 @@ mod tests {
 
     #[test]
     fn buffer_cache_leased_stale_epoch_rejected() {
-        let cache = BufferCacheLeased::new(16, "buffercache://test-stale");
+        let cache = BufferCacheLeased::new(16, "buffercache/test-stale");
         let dev_id = cache.register_device(Box::new(MemBlockDevice::new("ram0", 64)));
         let ep = cache.acquire_sync_lease(301).unwrap();
         let _ = cache.sync_device_under_lease(301, ep, dev_id).unwrap();
@@ -914,7 +914,7 @@ mod tests {
 
     #[test]
     fn buffer_cache_leased_force_sync() {
-        let cache = BufferCacheLeased::new(16, "buffercache://test-force");
+        let cache = BufferCacheLeased::new(16, "buffercache/test-force");
         let ep0 = cache.epoch();
         let ep1 = cache.sync_all_force(401);
         assert!(ep1 > ep0);
@@ -965,7 +965,7 @@ mod tests {
     #[test]
     fn buffer_cache_probe_channel() {
         let snap = probe_buffer_cache("ram0").unwrap();
-        assert!(snap.contains("buffercache://ram0"));
+        assert!(snap.contains("buffercache/ram0"));
         assert!(snap.contains("epoch="));
     }
 

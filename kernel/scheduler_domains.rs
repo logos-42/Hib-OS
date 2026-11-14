@@ -11,7 +11,7 @@
 //! 与 Linux 的差异（AI 原生）：
 //! * Linux 是一套 CFS 调度器管理所有 CPU；Hib OS 是五个独立调度域，每个域自己的 MLFQ。
 //! * 任务明确归属某个调度域，跨域切换需要显式迁移。
-//! * AI 意识通过 `sched://<域>` 通道感知与控制各域：查看状态、入队任务、唤醒等待者、抬升优先级。
+//! * AI 意识通过 `sched/<域>` 通道感知与控制各域：查看状态、入队任务、唤醒等待者、抬升优先级。
 
 use std::collections::BTreeMap;
 use std::sync::{Mutex, OnceLock};
@@ -143,7 +143,7 @@ pub fn status() -> String {
     out.trim_end().to_string()
 }
 
-/// 全部调度域的简要状态行（供 `sense sched://domains`）。
+/// 全部调度域的简要状态行（供 `sense sched/domains`）。
 pub fn status_line() -> String {
     let g = domains().lock().unwrap();
     let mut parts = Vec::new();
@@ -234,10 +234,10 @@ mod tests {
     fn wake_key_wakes_only_target_domain() {
         let t = TokenId::new();
         enqueue(SchedDomain::Deliberation, t, CpuPriority::Medium, None);
-        mark_waiting(SchedDomain::Deliberation, t, "gpu://vram");
+        mark_waiting(SchedDomain::Deliberation, t, "gpu/vram");
         assert_eq!(ready_count(SchedDomain::Deliberation), 0);
         assert_eq!(waiting_count(SchedDomain::Deliberation), 1);
-        let n = wake_key(SchedDomain::Deliberation, "gpu://vram");
+        let n = wake_key(SchedDomain::Deliberation, "gpu/vram");
         assert_eq!(n, 1);
         assert_eq!(ready_count(SchedDomain::Deliberation), 1);
         // 其他域不受影响

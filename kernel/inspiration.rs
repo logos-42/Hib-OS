@@ -1,4 +1,4 @@
-//! 灵感调度核心 —— 宏内核的「一个」调度意志 `sched://inspiration`。
+//! 灵感调度核心 —— 宏内核的「一个」调度意志 `sched/inspiration`。
 //!
 //! 五个调度域各自跑 MLFQ，但**宏内核不能因此有五个互相割裂的意志**。
 //! 本模块把五域收回为同一个核心的五个「相位」(phase)：
@@ -13,18 +13,18 @@
 //! ```
 //!
 //! 对外的变化：
-//! * **只有一个通道** `sched://inspiration` 表达调度意志；
+//! * **只有一个通道** `sched/inspiration` 表达调度意志；
 //! * **只有一个决策点** `pick()` 跨全部相位统一仲裁；
-//! * 五域仍保留（兼容既有 `sched://<域>` 与测试），但降级为内部相位，
+//! * 五域仍保留（兼容既有 `sched/<域>` 与测试），但降级为内部相位，
 //!   不再是五个并列的内核。
 //!
 //! 一次灵感循环：感知(perceive) → 起念(inspire) → 裁决(pick) → 回响(reflect)。
 //!
-//! * `sense sched://inspiration`
-//! * `act sched://inspiration inspire <任务描述>`
-//! * `act sched://inspiration pick`
-//! * `act sched://inspiration reflect`
-//! * `act sched://inspiration mode <unified|domains>`
+//! * `sense sched/inspiration`
+//! * `act sched/inspiration inspire <任务描述>`
+//! * `act sched/inspiration pick`
+//! * `act sched/inspiration reflect`
+//! * `act sched/inspiration mode <unified|domains>`
 
 use std::sync::{Mutex, OnceLock};
 
@@ -186,7 +186,7 @@ pub fn core() -> &'static Mutex<Inspiration> {
     CORE.get_or_init(|| Mutex::new(Inspiration::new()))
 }
 
-/// 通道 `sched://inspiration` 的行动实现。
+/// 通道 `sched/inspiration` 的行动实现。
 pub fn act(payload: &str) -> Result<String, String> {
     let text = payload.trim();
     let (sub, rest) = match text.split_once(' ') {
@@ -215,7 +215,7 @@ mod tests {
 
     #[test]
     fn phase_inference() {
-        assert_eq!(infer_phase("sense gpu://vram"), SchedDomain::Perception);
+        assert_eq!(infer_phase("sense gpu/vram"), SchedDomain::Perception);
         assert_eq!(infer_phase("irq timer"), SchedDomain::Reflex);
         assert_eq!(infer_phase("memory snapshot"), SchedDomain::Memory);
         assert_eq!(infer_phase("power policy"), SchedDomain::Governance);
@@ -225,7 +225,7 @@ mod tests {
     #[test]
     fn inspire_then_pick_is_one_decision() {
         let mut c = Inspiration::new();
-        let r = c.inspire("sense gpu://vram").unwrap();
+        let r = c.inspire("sense gpu/vram").unwrap();
         assert!(r.contains("perception"), "{}", r);
         assert_eq!(c.cycles, 1);
         let p = c.pick();

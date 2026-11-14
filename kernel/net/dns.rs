@@ -1,4 +1,4 @@
-﻿//! DNS 解析器（kernel/net/dns.rs）。
+//! DNS 解析器（kernel/net/dns.rs）。
 //!
 //! 本模块实现一个简化的 DNS 解析器：构造与解析 DNS 报文（头部、问题区、回答区、
 //! 权威区、附加区）、递归查询、带 TTL 过期淘汰的缓存、hosts 文件支持。
@@ -9,7 +9,7 @@
 //! * DnsRecord：名称、类型（A/AAAA/CNAME/MX/TXT/NS）、值、TTL
 //! * DNS 报文构造与解析（5 个区段）
 //! * 递归查询（串联多台上游服务器）、缓存（TTL 过期淘汰）、hosts 文件支持
-//! * sense/act 通道：`net://dns`
+//! * sense/act 通道：`net/dns`
 
 use std::collections::BTreeMap;
 use crate::ksync::{SpinLock, OnceLock};
@@ -458,7 +458,7 @@ impl DnsResolver {
         Self { servers, cache: DnsCache::new(), hosts: Hosts::new(), next_id: 1 }
     }
 
-    /// 默认解析器（`net://dns` 通道后端）。
+    /// 默认解析器（`net/dns` 通道后端）。
     pub fn resolver() -> &'static SpinLock<DnsResolver> {
         static RESOLVER: OnceLock<SpinLock<DnsResolver>> = OnceLock::new();
         RESOLVER.get_or_init(|| SpinLock::new(Self::new(Vec::new())))
@@ -579,16 +579,16 @@ fn fmt_ip(ip: [u8; 4]) -> String {
 }
 
 // =======================================================================
-// sense/act 接口（net://dns）
+// sense/act 接口（net/dns）
 // ======================================================================
 
-/// 查询 DNS 状态快照（供 `sense net://dns`）。
+/// 查询 DNS 状态快照（供 `sense net/dns`）。
 pub fn dns_sense_snapshot() -> String {
     let r = DnsResolver::resolver().lock();
     format!("dns servers={} cache={} hosts={}", r.servers.len(), r.cache_len(), 0)
 }
 
-/// 对 DNS 通道执行行动（供 `act net://dns`）。负载：`resolve <name> [A|AAAA|CNAME|MX|TXT|NS]` / `resolve_ipv4 <name>` / `reverse <ip>`。
+/// 对 DNS 通道执行行动（供 `act net/dns`）。负载：`resolve <name> [A|AAAA|CNAME|MX|TXT|NS]` / `resolve_ipv4 <name>` / `reverse <ip>`。
 pub fn dns_act_raw(payload: &str) -> Result<String, String> {
     let mut it = payload.split_whitespace();
     match it.next() {
@@ -622,7 +622,7 @@ pub fn dns_act_raw(payload: &str) -> Result<String, String> {
             let names = r.reverse_lookup(ip);
             Ok(format!("reverse {} -> {}", fmt_ip(ip), names.join(",")))
         }
-        _ => Err("用法: act net://dns resolve <name> [类型] | resolve_ipv4 <name> | reverse <ip>".to_string()),
+        _ => Err("用法: act net/dns resolve <name> [类型] | resolve_ipv4 <name> | reverse <ip>".to_string()),
     }
 }
 

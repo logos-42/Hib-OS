@@ -544,9 +544,9 @@ mod tests {
         let path = tmp_log_path("query");
         let _ = fs::remove_file(&path);
         let mut logger = AuditLogger::new(&path);
-        logger.log(EventType::Syscall, 1, 0, "sys://x", "read", true, "ok");
+        logger.log(EventType::Syscall, 1, 0, "sys/x", "read", true, "ok");
         logger.log(EventType::FileAccess, 2, 0, "/tmp/f", "open", false, "denied");
-        logger.log(EventType::Syscall, 1, 0, "sys://y", "write", true, "ok");
+        logger.log(EventType::Syscall, 1, 0, "sys/y", "write", true, "ok");
 
         let filter = AuditFilter {
             event_type: Some(EventType::Syscall),

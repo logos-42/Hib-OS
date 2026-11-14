@@ -1,4 +1,4 @@
-﻿//! 文件管理器应用 —— 浏览、复制、粘贴、删除、重命名、新建目录、搜索、拖拽。
+//! 文件管理器应用 —— 浏览、复制、粘贴、删除、重命名、新建目录、搜索、拖拽。
 //!
 //! `FileManager` 提供类资源管理器的功能：
 //! * `browse(path)` 列出目录下的 `FileEntry`
@@ -683,7 +683,7 @@ pub fn file_manager() -> &'static Mutex<FileManager> {
     FILE_MANAGER.get_or_init(|| Mutex::new(FileManager::new(std::env::temp_dir())))
 }
 
-/// `sense gui://file_manager`：返回文件管理器状态摘要。
+/// `sense gui/file_manager`：返回文件管理器状态摘要。
 pub fn file_manager_sense() -> String {
     let fm = file_manager().lock().unwrap();
     format!(
@@ -698,7 +698,7 @@ pub fn file_manager_sense() -> String {
     )
 }
 
-/// `act gui://file_manager <op> ...`：对文件管理器执行行动。
+/// `act gui/file_manager <op> ...`：对文件管理器执行行动。
 pub fn file_manager_act(payload: &str) -> Result<String, String> {
     let mut it = payload.split_whitespace();
     let fm = file_manager();

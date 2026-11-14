@@ -1,4 +1,4 @@
-﻿//! 元认知 —— 自我监控、自我评估、自我修正与元学习。
+//! 元认知 —— 自我监控、自我评估、自我修正与元学习。
 //!
 //! `Metacognition` 提供 `monitor`（思考/行动置信度） / `evaluate`（结果评估） /
 //! `self_correct`（自我修正） / `learn_from_experience`（从经验学习）。
@@ -300,7 +300,7 @@ pub fn metacognition() -> &'static Mutex<Metacognition> {
     METACOGNITION.get_or_init(|| Mutex::new(Metacognition::new()))
 }
 
-/// `sense ai://metacognition`：返回元认知状态摘要。
+/// `sense ai/metacognition`：返回元认知状态摘要。
 pub fn metacognition_sense() -> String {
     let m = metacognition().lock().unwrap();
     format!(
@@ -313,7 +313,7 @@ pub fn metacognition_sense() -> String {
     )
 }
 
-/// `act ai://metacognition <op> ...`：对元认知执行行动。
+/// `act ai/metacognition <op> ...`：对元认知执行行动。
 pub fn metacognition_act(payload: &str) -> Result<String, String> {
     let mut it = payload.split_whitespace();
     let m = metacognition();

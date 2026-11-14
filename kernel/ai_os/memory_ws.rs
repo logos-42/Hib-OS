@@ -1,4 +1,4 @@
-﻿//! 工作记忆层 —— AI 原生 OS 的「记忆系统」 (Memory Working Space)
+//! 工作记忆层 —— AI 原生 OS 的「记忆系统」 (Memory Working Space)
 //!
 //! 本模块实现 AI 原生 OS 的多层记忆架构，对应传统 OS 中的「缓存 / 主存 /
 //! 交换分区 / 文件系统」概念，但重新映射到记忆域：
@@ -16,7 +16,7 @@
 //! * MemoryAssociation (记忆联想) —— 语义关联检索，等价于索引 / 搜索。
 //!
 //! 所有结构均为纯 Rust 原型，供内核统一核算与调度，
-//! 并通过 `memory://*` 通道接入 `sense`/`act` 感知层。
+//! 并通过 `memory/*` 通道接入 `sense`/`act` 感知层。
 
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::{Mutex, OnceLock};
@@ -976,13 +976,13 @@ pub fn memory_act(payload: &str) -> Result<String, String> {
             Ok(format!("感觉缓冲已衰减 now={}", now))
         }
         Some("wm-store") => {
-            let content = it.next().ok_or("用法: memory:// wm-store <内容>")?;
+            let content = it.next().ok_or("用法: memory/ wm-store <内容>")?;
             let mut eng = memory_engine().lock().unwrap();
             let id = eng.wm_store(content.to_string());
             Ok(format!("工作记忆存储 id={}", id))
         }
         Some("wm-retrieve") => {
-            let id = it.next().and_then(|s| s.parse::<u64>().ok()).ok_or("用法: memory:// wm-retrieve <id>")?;
+            let id = it.next().and_then(|s| s.parse::<u64>().ok()).ok_or("用法: memory/ wm-retrieve <id>")?;
             let mut eng = memory_engine().lock().unwrap();
             match eng.wm_retrieve(id) {
                 Some(c) => Ok(format!("工作记忆[id={}]: {}", id, c)),
@@ -996,14 +996,14 @@ pub fn memory_act(payload: &str) -> Result<String, String> {
             Ok(format!("工作记忆已衰减 now={}", now))
         }
         Some("stm-encode") => {
-            let content = it.next().ok_or("用法: memory:// stm-encode <内容> <重要性>")?;
+            let content = it.next().ok_or("用法: memory/ stm-encode <内容> <重要性>")?;
             let importance = it.next().and_then(|s| s.parse::<f32>().ok()).unwrap_or(0.5);
             let mut eng = memory_engine().lock().unwrap();
             let id = eng.stm_encode(content.to_string(), importance);
             Ok(format!("短时记忆编码 id={}", id))
         }
         Some("stm-access") => {
-            let id = it.next().and_then(|s| s.parse::<u64>().ok()).ok_or("用法: memory:// stm-access <id>")?;
+            let id = it.next().and_then(|s| s.parse::<u64>().ok()).ok_or("用法: memory/ stm-access <id>")?;
             let mut eng = memory_engine().lock().unwrap();
             match eng.stm_access(id) {
                 Some(c) => Ok(format!("短时记忆[id={}]: {}", id, c)),
@@ -1025,7 +1025,7 @@ pub fn memory_act(payload: &str) -> Result<String, String> {
             Ok(format!("长时记忆存储 id={} 类型={:?}", id, r#type))
         }
         Some("ltm-retrieve") => {
-            let key = it.next().ok_or("用法: memory:// ltm-retrieve <键>")?;
+            let key = it.next().ok_or("用法: memory/ ltm-retrieve <键>")?;
             let mut eng = memory_engine().lock().unwrap();
             match eng.ltm_retrieve(key) {
                 Some(v) => Ok(format!("长时记忆[{}] = {}", key, v)),
@@ -1033,7 +1033,7 @@ pub fn memory_act(payload: &str) -> Result<String, String> {
             }
         }
         Some("episode-record") => {
-            let title = it.next().ok_or("用法: memory:// episode-record <标题> <描述> <情绪> <显著性>")?;
+            let title = it.next().ok_or("用法: memory/ episode-record <标题> <描述> <情绪> <显著性>")?;
             let desc = it.next().ok_or("缺少描述")?;
             let emotion = it.next().and_then(|s| s.parse::<f32>().ok()).unwrap_or(0.0);
             let salience = it.next().and_then(|s| s.parse::<f32>().ok()).unwrap_or(0.5);
@@ -1042,7 +1042,7 @@ pub fn memory_act(payload: &str) -> Result<String, String> {
             Ok(format!("情景记忆记录 id={}", id))
         }
         Some("semantic-add") => {
-            let subject = it.next().ok_or("用法: memory:// semantic-add <主语> <谓语> <宾语> <置信度>")?;
+            let subject = it.next().ok_or("用法: memory/ semantic-add <主语> <谓语> <宾语> <置信度>")?;
             let predicate = it.next().ok_or("缺少谓语")?;
             let object = it.next().ok_or("缺少宾语")?;
             let confidence = it.next().and_then(|s| s.parse::<f32>().ok()).unwrap_or(0.8);
@@ -1051,7 +1051,7 @@ pub fn memory_act(payload: &str) -> Result<String, String> {
             Ok(format!("语义记忆事实 id={}", id))
         }
         Some("semantic-query") => {
-            let subject = it.next().ok_or("用法: memory:// semantic-query <主语> <谓语>")?;
+            let subject = it.next().ok_or("用法: memory/ semantic-query <主语> <谓语>")?;
             let predicate = it.next().ok_or("缺少谓语")?;
             let eng = memory_engine().lock().unwrap();
             match eng.semantic_query(subject, predicate) {
@@ -1060,14 +1060,14 @@ pub fn memory_act(payload: &str) -> Result<String, String> {
             }
         }
         Some("skill-learn") => {
-            let name = it.next().ok_or("用法: memory:// skill-learn <名称> <步骤...>")?;
+            let name = it.next().ok_or("用法: memory/ skill-learn <名称> <步骤...>")?;
             let steps: Vec<SkillStep> = it.map(|s| SkillStep { id: 0, action: s.to_string(), precondition: String::new(), effect: String::new() }).collect();
             let mut eng = memory_engine().lock().unwrap();
             let id = eng.skill_learn(name, steps);
             Ok(format!("程序记忆技能 id={} 名称={}", id, name))
         }
         Some("skill-execute") => {
-            let name = it.next().ok_or("用法: memory:// skill-execute <名称>")?;
+            let name = it.next().ok_or("用法: memory/ skill-execute <名称>")?;
             let mut eng = memory_engine().lock().unwrap();
             match eng.skill_execute(name) {
                 Some(result) => Ok(result),

@@ -1,4 +1,4 @@
-﻿//! 磁盘镜像文件（块设备后端）。
+//! 磁盘镜像文件（块设备后端）。
 //!
 //! `DiskImage` 把宿主机上的一个普通文件当作磁盘镜像（块设备）来使用：
 //! 按固定扇区大小（默认 512 字节）读写，支持稀疏写（写超出当前容量时
@@ -13,10 +13,10 @@
 //! - **能力位权限**：通过 `caps::CAP_SYS_RAWIO` / `caps::CAP_SYS_ADMIN` 校验读写权限，
 //!   而非传统 uid 检查。
 //! - **通道接口**：提供 `probe_disk_img` / `act_disk_img`，供 `sense`/`act` 框架以
-//!   `diskimg://<路径>` 通道形式操作镜像。
+//!   `diskimg/<路径>` 通道形式操作镜像。
 //!
 //! 这是 `kernel/fs/diskimg.rs` 的扩展版，面向分区表、缓冲区缓存与文件系统
-//! 提供更底层的扇区级读写接口。与旧模块并存，不影响既有 `block://` 通道。
+//! 提供更底层的扇区级读写接口。与旧模块并存，不影响既有 `block/` 通道。
 
 use std::collections::HashSet;
 use std::fs::{File, OpenOptions};
@@ -342,7 +342,7 @@ impl std::fmt::Debug for DiskImage {
 
 /// 磁盘镜像并发控制键：以镜像路径作为通道名，供 lease 系统使用。
 fn diskimg_lease_channel(path: &Path) -> String {
-    format!("diskimg://{}", path.display())
+    format!("diskimg/{}", path.display())
 }
 
 /// 单写者租约包装器：对 `DiskImage` 的写入加 lease 保护。
@@ -538,14 +538,14 @@ impl DiskImageCaps {
 }
 
 // ============================================================================
-// sense/act 通道接口：diskimg://<路径>
+// sense/act 通道接口：diskimg/<路径>
 // ============================================================================
 
 /// 感知磁盘镜像通道：返回镜像实时快照（扇区数、脏块数、epoch）。
 ///
-/// 通道名形式：`diskimg://<绝对路径>`
+/// 通道名形式：`diskimg/<绝对路径>`
 pub fn probe_disk_img(name: &str) -> Option<String> {
-    let path = name.strip_prefix("diskimg://")?;
+    let path = name.strip_prefix("diskimg/")?;
     let path = Path::new(path);
     let img = match DiskImage::open(path, true) {
         Ok(i) => i,
@@ -572,7 +572,7 @@ pub fn probe_disk_img(name: &str) -> Option<String> {
 /// - `flush` —— 刷新脏块
 /// - `epoch` —— 返回当前 epoch
 pub fn act_disk_img(name: &str, payload: &str) -> Option<Result<String, String>> {
-    let path = name.strip_prefix("diskimg://")?;
+    let path = name.strip_prefix("diskimg/")?;
     let path = Path::new(path);
     let mut tokens = payload.split_whitespace();
     let sub = tokens.next().unwrap_or("");
@@ -921,7 +921,7 @@ mod tests {
         let mut img = DiskImage::create(&path, 16 * DEFAULT_SECTOR_SIZE).unwrap();
         img.write_block(0, &[0x01u8; DEFAULT_SECTOR_SIZE as usize]).unwrap();
         img.flush().unwrap();
-        let name = format!("diskimg://{}", path.display());
+        let name = format!("diskimg/{}", path.display());
         let snap = probe_disk_img(&name).unwrap();
         assert!(snap.contains("sector_count=16"));
         assert!(snap.contains("epoch="));
@@ -932,7 +932,7 @@ mod tests {
     fn disk_img_act_channel_create_flush() {
         let path = temp_path("act");
         let _ = std::fs::remove_file(&path);
-        let name = format!("diskimg://{}", path.display());
+        let name = format!("diskimg/{}", path.display());
         // 创建。
         let r = act_disk_img(&name, "create 4096").unwrap().unwrap();
         assert!(r.contains("已创建镜像"));

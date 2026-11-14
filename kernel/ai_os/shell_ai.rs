@@ -11,7 +11,7 @@
 //! * AliasManager (别名管理器) —— 命令别名映射，等价于 shell 别名；
 //! * Environment (环境变量) —— 环境变量管理，等价于 environ；
 //! * Pipeline (管道) —— 命令管道，等价于 Unix 管道；
-//! * ShellAI (AI 原生 Shell 引擎) —— 统一入口，通过 shell_ai://* 通道暴露。
+//! * ShellAI (AI 原生 Shell 引擎) —— 统一入口，通过 shell_ai/* 通道暴露。
 //!
 //! 所有结构均为纯 Rust 原型，无终端依赖，供内核统一核算与调度。
 
@@ -632,7 +632,7 @@ pub fn shell_ai_act(payload: &str) -> Result<String, String> {
             let dir = it.next().unwrap_or("/");
             let mut eng = shell_ai().lock().unwrap();
             eng.set_dir(dir);
-            // 注入：同步到 L1 VFS，使 `sense fs://vfs` 可见。
+            // 注入：同步到 L1 VFS，使 `sense fs/vfs` 可见。
             let _ = make_dir("/shell_ai/cwd");
             let _ = write_file(0, "/shell_ai/cwd/last", dir.as_bytes());
             Ok(format!("已切换目录: {}", dir))

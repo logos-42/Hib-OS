@@ -11,7 +11,7 @@
 //! 并发：全局 `MulticoreScheduler` 单例由 `OnceLock<SpinLock<...>>` 守护；上层可
 //! 沿用 `kernel/lease.rs` 的单写者租约对特定核心的就绪队列做独占写。
 //! 能力：任务入队/调度受 `kernel/caps.rs` 的 `CAP_SYS_ADMIN` 门禁。
-//! 通道：`sched://<域>` 映射到 `sense.rs` / `act_sched`。
+//! 通道：`sched/<域>` 映射到 `sense.rs` / `act_sched`。
 //!
 //! 接口规范：
 //! * `pick_next(core_id)` —— 选出指定核心的下一个运行任务；

@@ -12,7 +12,7 @@
 //! * TemporalMemory (时间记忆) —— 对过去时间的编码，等价于时间戳日志；
 //! * TemporalPrediction (时间预测) —— 对未来时间的预测，等价于预读；
 //! * TemporalBinding (时间绑定) —— 将事件绑定到特定时间点，等价于定时触发；
-//! * TemporalEngine (时间引擎) —— 统一入口，通过 temporal://* 通道暴露。
+//! * TemporalEngine (时间引擎) —— 统一入口，通过 temporal/* 通道暴露。
 //!
 //! 所有结构均为纯 Rust 原型，无硬件依赖，供内核统一核算与调度。
 
@@ -761,7 +761,7 @@ pub fn temporal_act(payload: &str) -> Result<String, String> {
             Ok(format!("超日夜律: {:?} 专注力={:.2}", eng.ultradian_phase(), eng.ultradian.focus_capacity()))
         }
         Some("append-event") => {
-            let event_type = it.next().ok_or("用法: temporal:// append-event <类型> <数据>")?;
+            let event_type = it.next().ok_or("用法: temporal/ append-event <类型> <数据>")?;
             let data = it.next().unwrap_or("");
             let mut eng = temporal_engine().lock().unwrap();
             let id = eng.append_event(event_type, data);
@@ -779,7 +779,7 @@ pub fn temporal_act(payload: &str) -> Result<String, String> {
             Ok(out)
         }
         Some("encode-memory") => {
-            let summary = it.next().ok_or("用法: temporal:// encode-memory <摘要> <显著性> <标签...>")?;
+            let summary = it.next().ok_or("用法: temporal/ encode-memory <摘要> <显著性> <标签...>")?;
             let salience = it.next().and_then(|s| s.parse::<f32>().ok()).unwrap_or(0.5);
             let tags: Vec<&str> = it.collect();
             let mut eng = temporal_engine().lock().unwrap();
@@ -787,7 +787,7 @@ pub fn temporal_act(payload: &str) -> Result<String, String> {
             Ok(format!("已编码时间记忆 id={} 摘要={}", id, summary))
         }
         Some("schedule-once") => {
-            let name = it.next().ok_or("用法: temporal:// schedule-once <名称> <延迟ns> <动作>")?;
+            let name = it.next().ok_or("用法: temporal/ schedule-once <名称> <延迟ns> <动作>")?;
             let delay = it.next().and_then(|s| s.parse::<u128>().ok()).unwrap_or(1_000_000_000);
             let action = it.next().unwrap_or("default");
             let mut eng = temporal_engine().lock().unwrap();
@@ -795,7 +795,7 @@ pub fn temporal_act(payload: &str) -> Result<String, String> {
             Ok(format!("已调度一次性任务 id={} 名称={}", id, name))
         }
         Some("schedule-periodic") => {
-            let name = it.next().ok_or("用法: temporal:// schedule-periodic <名称> <延迟ns> <间隔ns> <动作>")?;
+            let name = it.next().ok_or("用法: temporal/ schedule-periodic <名称> <延迟ns> <间隔ns> <动作>")?;
             let delay = it.next().and_then(|s| s.parse::<u128>().ok()).unwrap_or(1_000_000_000);
             let interval = it.next().and_then(|s| s.parse::<u128>().ok()).unwrap_or(5_000_000_000);
             let action = it.next().unwrap_or("default");
@@ -821,7 +821,7 @@ pub fn temporal_act(payload: &str) -> Result<String, String> {
             Ok(format!("已绑定事件 id={} 绑定id={}", event_id, id))
         }
         Some("predict-event") => {
-            let event_type = it.next().ok_or("用法: temporal:// predict-event <类型> <延迟ns> <置信度>")?;
+            let event_type = it.next().ok_or("用法: temporal/ predict-event <类型> <延迟ns> <置信度>")?;
             let delay = it.next().and_then(|s| s.parse::<u128>().ok()).unwrap_or(1_000_000_000);
             let confidence = it.next().and_then(|s| s.parse::<f32>().ok()).unwrap_or(0.8);
             let mut eng = temporal_engine().lock().unwrap();

@@ -12,7 +12,7 @@
 //! * AILayout (AI 布局) —— 基于意图的自动布局，等价于布局管理器；
 //! * AIMultiInput (多模态输入) —— 触摸/笔/语音/视线统一输入，等价于输入子系统；
 //! * AIWindowManager (AI 窗口管理器) —— 智能窗口管理，等价于 WM；
-//! * GUAI (AI 原生 GUI 引擎) —— 统一入口，通过 gui_ai://* 通道暴露。
+//! * GUAI (AI 原生 GUI 引擎) —— 统一入口，通过 gui_ai/* 通道暴露。
 //!
 //! 所有结构均为纯 Rust 原型，无显示硬件依赖，供内核统一核算与调度。
 
@@ -725,14 +725,14 @@ pub fn gui_ai_act(payload: &str) -> Result<String, String> {
     let mut it = payload.split_whitespace();
     match it.next() {
         Some("create-window") => {
-            let title = it.next().ok_or("用法: gui_ai:// create-window <标题> <x> <y> <w> <h>")?;
+            let title = it.next().ok_or("用法: gui_ai/ create-window <标题> <x> <y> <w> <h>")?;
             let x = it.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(100);
             let y = it.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(100);
             let w = it.next().and_then(|s| s.parse::<u32>().ok()).unwrap_or(800);
             let h = it.next().and_then(|s| s.parse::<u32>().ok()).unwrap_or(600);
             let mut eng = gui_ai().lock().unwrap();
             let id = eng.create_window(title, x, y, w, h);
-            // 注入：激活 L1 GUI 桌面，使 `sense gui://desktop` 可见。
+            // 注入：激活 L1 GUI 桌面，使 `sense gui/desktop` 可见。
             let _l1_id = open_window(title, w, h);
             Ok(format!("已创建窗口 id={} 标题={}", id, title))
         }

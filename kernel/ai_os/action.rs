@@ -12,7 +12,7 @@
 //! * ActionFeedback (动作反馈) —— 动作执行后的状态反馈，等价于中断返回值；
 //! * ActionError (动作错误) —— 动作执行失败的错误码，等价于 errno；
 //! * ActionConstraint (动作约束) —— 动作的前置条件与后置条件，等价于文件锁；
-//! * ActionEngine (动作引擎) —— 统一入口，通过 action://* 通道暴露。
+//! * ActionEngine (动作引擎) —— 统一入口，通过 action/* 通道暴露。
 //!
 //! 所有结构均为纯 Rust 原型，无硬件依赖，供内核统一核算与调度。
 

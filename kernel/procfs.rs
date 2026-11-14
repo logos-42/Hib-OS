@@ -2,10 +2,10 @@
 //!
 //! 类比 Linux 的 `/proc/stat`、`/proc/meminfo`、`/proc/uptime`，
 //! 但这里不生成真实目录项，而是把全部关键指标聚合成一条只读通道
-//! `proc://sysinfo`，让 AI 用一次 `sense` 就拿到整机体检结果。
+//! `proc/sysinfo`，让 AI 用一次 `sense` 就拿到整机体检结果。
 //!
-//! * `sense proc://sysinfo`        —— 读取快照（不递增采样计数）
-//! * `act proc://sysinfo refresh`  —— 递增采样计数后返回快照
+//! * `sense proc/sysinfo`        —— 读取快照（不递增采样计数）
+//! * `act proc/sysinfo refresh`  —— 递增采样计数后返回快照
 
 use std::sync::{Mutex, OnceLock};
 
@@ -91,7 +91,7 @@ fn fmt_tenths(v: u64) -> String {
 
 static PROCFS: OnceLock<Mutex<ProcFs>> = OnceLock::new();
 
-/// 全局 procfs 采样器（`proc://sysinfo` 的实体）。
+/// 全局 procfs 采样器（`proc/sysinfo` 的实体）。
 pub fn procfs() -> &'static Mutex<ProcFs> {
     PROCFS.get_or_init(|| Mutex::new(ProcFs::new()))
 }

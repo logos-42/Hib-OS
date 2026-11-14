@@ -2,7 +2,7 @@
 //!
 //! 每个 worktree 是一条独立的命名空间根：AI 意识实例 / 闭环循环可以在自己的
 //! worktree 内创建文件、目录，彼此互不污染。所有操作通过统一通道
-//! `worktree://trees` 暴露，AI 可直接 `sense` / `act`。
+//! `worktree/trees` 暴露，AI 可直接 `sense` / `act`。
 
 use std::collections::BTreeMap;
 use std::sync::{Mutex, OnceLock};
@@ -191,7 +191,7 @@ pub fn resolve_path(path: &str) -> String {
     )
 }
 
-/// 解析 `fs://vfs` 动作负载中的路径参数（write/read/ls/mkdir/rm/stat）。
+/// 解析 `fs/vfs` 动作负载中的路径参数（write/read/ls/mkdir/rm/stat）。
 pub fn resolve_fs_payload(payload: &str) -> String {
     let payload = payload.trim();
     let (cmd, rest) = match payload.split_once(char::is_whitespace) {
@@ -216,12 +216,12 @@ pub fn resolve_fs_payload(payload: &str) -> String {
     }
 }
 
-/// `sense worktree://trees`：返回 worktree 快照。
+/// `sense worktree/trees`：返回 worktree 快照。
 pub fn worktree_sense() -> String {
     worktrees().lock().unwrap().list()
 }
 
-/// `act worktree://trees <payload>`：
+/// `act worktree/trees <payload>`：
 /// `create <名称> [归属]` | `remove <名称>` | `switch <名称>` | `list` | `current`
 pub fn worktree_act(payload: &str) -> Result<String, String> {
     let mut w = worktrees().lock().unwrap();
@@ -252,7 +252,7 @@ pub fn worktree_act(payload: &str) -> Result<String, String> {
             w.active.as_deref().unwrap_or("none"),
             w.current_root()
         )),
-        _ => Err("用法: act worktree://trees create <名称> [归属] | remove <名称> | switch <名称> | list | current".to_string()),
+        _ => Err("用法: act worktree/trees create <名称> [归属] | remove <名称> | switch <名称> | list | current".to_string()),
     }
 }
 

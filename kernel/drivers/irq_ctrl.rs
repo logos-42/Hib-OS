@@ -1,4 +1,4 @@
-﻿//! 中断控制器（kernel/drivers/irq_ctrl.rs）。
+//! 中断控制器（kernel/drivers/irq_ctrl.rs）。
 //!
 //! 实现中断描述符表（IDT）、中断门描述符、中断处理器注册与分发。
 //! 与现有 `kernel/irq.rs`（轻量 signal 投递）并存，面向更完整的中断控制器模型：
@@ -10,7 +10,7 @@
 //! * 每个中断线可注册多个处理器，按注册顺序分发，任一返回 true 即视为已处理并停止后续处理器。
 //! * 并发：处理器表写入由 `lease.rs` 单写者租约 + epoch CAS 保护；读取使用快照。
 //! * 安全：注册中断处理器需 `caps.rs` 的 `CAP_SYS_RAWIO` / `CAP_NET_ADMIN` 等能力（由调用方策略决定，此处仅预留检查入口）。
-//! * 感知通道：`drv://irq_ctrl`（供 `sense`/`act` 查询 IDT 状态、处理器注册表、中断统计）。
+//! * 感知通道：`drv/irq_ctrl`（供 `sense`/`act` 查询 IDT 状态、处理器注册表、中断统计）。
 //!
 //! 接口：`irq_handler_register(irq, handler)` / `irq_dispatch(irq)` / `idt_set_gate(...)` / `idt_load()`。
 
@@ -251,7 +251,7 @@ impl IrqController {
         }
     }
 
-    /// 全局中断控制器单例（`drv://irq_ctrl` 通道后端）。
+    /// 全局中断控制器单例（`drv/irq_ctrl` 通道后端）。
     pub fn instance() -> &'static SpinLock<IrqController> {
         static INST: OnceLock<SpinLock<IrqController>> = OnceLock::new();
         INST.get_or_init(|| SpinLock::new(Self::new()))
@@ -420,7 +420,7 @@ impl IrqController {
         self.handlers.get(&irq).map(|l| l.len()).unwrap_or(0)
     }
 
-    /// 状态快照（供 `sense drv://irq_ctrl`）。
+    /// 状态快照（供 `sense drv/irq_ctrl`）。
     pub fn status(&self) -> String {
         let mut lines: Vec<String> = self.handlers.iter().map(|(irq, list)| {
             let invocations: u64 = list.iter().map(|e| e.invocations).sum();
@@ -441,16 +441,16 @@ impl Default for IrqController {
 }
 
 // =======================================================================
-// sense/act 接口（drv://irq_ctrl）
+// sense/act 接口（drv/irq_ctrl）
 // =======================================================================
 
-/// 查询中断控制器状态快照（供 `sense drv://irq_ctrl`）。
+/// 查询中断控制器状态快照（供 `sense drv/irq_ctrl`）。
 pub fn irq_ctrl_sense_snapshot() -> String {
     let c = IrqController::instance().lock();
     c.status()
 }
 
-/// 对中断控制器通道执行行动（供 `act drv://irq_ctrl`）。
+/// 对中断控制器通道执行行动（供 `act drv/irq_ctrl`）。
 /// 负载：`stats` / `list` / `mask <irq>` / `unmask <irq>` / `cli` / `sti` / `raise <irq>`。
 pub fn irq_ctrl_act_raw(payload: &str) -> Result<String, String> {
     let mut it = payload.split_whitespace();
@@ -488,7 +488,7 @@ pub fn irq_ctrl_act_raw(payload: &str) -> Result<String, String> {
             let n = c.irq_dispatch(IrqLine(irq));
             Ok(format!("已触发中断 {}，调用处理器 {} 次", irq, n))
         }
-        _ => Err("用法: act drv://irq_ctrl stats | list | mask <irq> | unmask <irq> | cli | sti | raise <irq>".to_string()),
+        _ => Err("用法: act drv/irq_ctrl stats | list | mask <irq> | unmask <irq> | cli | sti | raise <irq>".to_string()),
     }
 }
 

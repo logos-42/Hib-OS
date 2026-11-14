@@ -1,8 +1,8 @@
-//! 命名互斥锁 —— `sync://mutex/<名>` 的后端。
+//! 命名互斥锁 —— `sync/mutex/<名>` 的后端。
 //!
 //! 与 `sync.rs` 的 `PriorityMutex`（线程本地、`ThreadId` owner）不同：
 //! * 本模块的锁对象是**通道级**的，跨执行体、跨进程、跨调度域都可见；
-//! * 加锁 = `act sync://mutex/<名> lock`，解锁 = `act sync://mutex/<名> unlock`；
+//! * 加锁 = `act sync/mutex/<名> lock`，解锁 = `act sync/mutex/<名> unlock`；
 //! * 没拿到锁的请求进入 FIFO 等待队列，锁释放时 `signal` 唤醒下一个等待者；
 //! * 持有者可通过 `owner` 字段知道是谁占着，做优先级继承的依据。
 //!
@@ -67,7 +67,7 @@ impl NamedMutex {
             return true;
         }
 
-        let key = format!("sync://mutex/{}", self.name);
+        let key = format!("sync/mutex/{}", self.name);
         exec::note_blocked(&key);
 
         let deadline = timeout.map(|d| Instant::now() + d);
@@ -117,7 +117,7 @@ impl NamedMutex {
             g.lock_count += 1;
             drop(g);
             // 边沿触发唤醒：下一个持有者可能正在 block_on。
-            exec::signal(&format!("sync://mutex/{}", self.name));
+            exec::signal(&format!("sync/mutex/{}", self.name));
             return true;
         }
         drop(g);

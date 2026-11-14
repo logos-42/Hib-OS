@@ -1,7 +1,7 @@
 //! 真实网络 I/O —— AI 原生「与外部世界对话」。
 //!
 //! DNS 解析与 TCP 连接直接落到**主机真实网络栈**（`std::net`）。
-//! 感知通道：`socket://tcp`（连接/读写）、`net://dns`（域名解析）。
+//! 感知通道：`socket/tcp`（连接/读写）、`net/dns`（域名解析）。
 
 use std::net::{TcpStream, ToSocketAddrs};
 use std::sync::{Mutex, OnceLock};

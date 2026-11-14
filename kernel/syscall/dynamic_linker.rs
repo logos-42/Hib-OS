@@ -1,4 +1,4 @@
-﻿//! 动态链接器 —— 为 Hib OS 用户态宏内核提供共享库加载与符号绑定。
+//! 动态链接器 —— 为 Hib OS 用户态宏内核提供共享库加载与符号绑定。
 //!
 //! 与 `kernel/syscall` 的 `AiSystemCall` 和 `PosixSyscall` 并行存在，不替换。
 //! 配合 `kernel/syscall/elf_loader.rs` 的 ELF 加载器，实现 `.so` 风格共享库的

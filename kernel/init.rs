@@ -1,6 +1,6 @@
 //! 服务 / init 管理 —— AI 原生的「自启动意图」。
 //!
-//! 把系统服务建模为可启停 / 启用的 `init://services` 通道。
+//! 把系统服务建模为可启停 / 启用的 `init/services` 通道。
 
 use std::sync::{Mutex, OnceLock};
 

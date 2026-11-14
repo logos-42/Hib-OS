@@ -1,14 +1,14 @@
-//! 多调度域 —— `domain://table`。
+//! 多调度域 —— `domain/table`。
 //!
 //! Linux 按 CPU 核切 runqueue；Hib 按**通道族**切认知域：
 //! cpu / gpu / net / io / ui 各自一套配额与亲和性，一个域拥塞不拖垮另一个。
 //! 这里把此前"定义了却零使用"的 `CpuAffinity` 真正落地：
 //! 每个域绑定一个核，创建域时自动分配下一个核。
 //!
-//! * `sense domain://table`
-//! * `act domain://table create <name>`
-//! * `act domain://table assign|move <cell> <domain>`
-//! * `act domain://table tick <domain>` / `balance` / `quota <domain> <n>`
+//! * `sense domain/table`
+//! * `act domain/table create <name>`
+//! * `act domain/table assign|move <cell> <domain>`
+//! * `act domain/table tick <domain>` / `balance` / `quota <domain> <n>`
 
 use std::collections::BTreeMap;
 use std::sync::{Mutex, OnceLock};

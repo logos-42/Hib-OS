@@ -648,12 +648,12 @@ mod tests {
 
     #[test]
     fn extract_actions_parses() {
-        let reply = "你好！我已经处理了请求。\nACTION: gpu://vram alloc 64\nACTION: net://eth0 ping 10.0.0.1";
+        let reply = "你好！我已经处理了请求。\nACTION: gpu/vram alloc 64\nACTION: net/eth0 ping 10.0.0.1";
         let mut consciousness = AIConsciousness::new();
         let loop_ = ThoughtLoop::new("test");
         loop_.extract_actions(reply, &mut consciousness);
-        assert!(consciousness.exists(ConceptId::from_name("gpu://vram")));
-        assert!(consciousness.exists(ConceptId::from_name("net://eth0")));
+        assert!(consciousness.exists(ConceptId::from_name("gpu/vram")));
+        assert!(consciousness.exists(ConceptId::from_name("net/eth0")));
     }
 
     #[test]
@@ -674,9 +674,9 @@ mod tests {
     #[test]
     fn extract_content_restores_newline() {
         // 关键：\n 必须变成真正的换行，否则 ACTION: 指令无法被按行识别
-        let json = r#"{"choices":[{"message":{"content":"好的\n\nACTION: sense net://eth0"}}]}"#;
+        let json = r#"{"choices":[{"message":{"content":"好的\n\nACTION: sense net/eth0"}}]}"#;
         let content = extract_content(json).unwrap();
-        assert_eq!(content, "好的\n\nACTION: sense net://eth0");
+        assert_eq!(content, "好的\n\nACTION: sense net/eth0");
     }
 
     #[test]

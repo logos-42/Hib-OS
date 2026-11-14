@@ -1,4 +1,4 @@
-﻿//! AI Action Token / Action Process / AI Consciousness 本体。
+//! AI Action Token / Action Process / AI Consciousness 本体。
 //!
 //! - `AiActionToken`: 每个 AI 模型的能力凭证
 //! - `AIConsciousness`: 概念图，驱动语义调度

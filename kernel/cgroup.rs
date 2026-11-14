@@ -1,6 +1,6 @@
 //! 控制组 (cgroups) —— AI 原生的「资源分组」。
 //!
-//! 把进程按组约束 CPU / 内存配额，统一为 `cgroup://groups` 通道。
+//! 把进程按组约束 CPU / 内存配额，统一为 `cgroup/groups` 通道。
 
 use std::collections::BTreeMap;
 use std::sync::{Mutex, OnceLock};

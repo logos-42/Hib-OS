@@ -133,7 +133,7 @@ pub struct Shell {
     pub vfs: Vfs,
     pub channels: ChannelRegistry,
     pub editor: LineEditor,
-    /// driver://gpu 累计预留的显存字节。
+    /// driver/gpu 累计预留的显存字节。
     pub gpu_reserved_bytes: u64,
     /// 当前桌面壁纸名称。
     pub wallpaper: String,
@@ -655,7 +655,7 @@ impl Shell {
 
     /// 文本桌面 / 像素帧缓冲。
     fn cmd_desktop(&mut self, parts: &[&str]) {
-        let _ = self.channels.act("desktop://screen");
+        let _ = self.channels.act("desktop/screen");
         let mut info = self.desktop_info();
 
         // 解析滚动参数：--scroll-y N / --scroll-x N
@@ -665,7 +665,7 @@ impl Shell {
                 "--scroll-y" => {
                     if let Some(v) = parts.get(i + 1).and_then(|s| s.parse().ok()) {
                         info.fb_scroll_y = v;
-                        let _ = self.channels.sense("desktop://fb-scroll-y");
+                        let _ = self.channels.sense("desktop/fb-scroll-y");
                         // 覆盖 senses 为滚动值（hack：channels 只有计数器，这里仅作持久化提示）
                         let _ = v;
                     }
@@ -674,7 +674,7 @@ impl Shell {
                 "--scroll-x" => {
                     if let Some(v) = parts.get(i + 1).and_then(|s| s.parse().ok()) {
                         info.fb_scroll_x = v;
-                        let _ = self.channels.sense("desktop://fb-scroll-x");
+                        let _ = self.channels.sense("desktop/fb-scroll-x");
                         let _ = v;
                     }
                     i += 2;
@@ -876,9 +876,9 @@ impl Shell {
         out
     }
 
-    /// 自造插件通道按需注册：插件安装后，其 `plugin://<name>` 通道即可被感知/行动。
+    /// 自造插件通道按需注册：插件安装后，其 `plugin/<name>` 通道即可被感知/行动。
     fn ensure_dynamic_channel(&mut self, name: &str) -> Option<ChannelKind> {
-        if !name.starts_with("plugin://") {
+        if !name.starts_with("plugin/") {
             return None;
         }
         let installed = {
@@ -973,7 +973,7 @@ impl Shell {
                 desktop::ROWS
             ),
             ChannelKind::Io => "stdin/stdout attached".to_string(),
-            ChannelKind::Net => "net://eth0 就绪".to_string(),
+            ChannelKind::Net => "net/eth0 就绪".to_string(),
             ChannelKind::App => format!(
                 "app 就绪: {} 条命令, {} 个模块, {} 个 token",
                 COMMANDS.len(),
@@ -1036,11 +1036,11 @@ impl Shell {
                 Err(e) => println!("act {} 失败: {}", name, e),
             }
             // 挂载表是唯一需要同步到 VFS 的通道：成功挂载后立刻建目录 / 写伪文件。
-            if ok && name == "mount://table" {
+            if ok && name == "mount/table" {
                 self.sync_mount_hooks(&payload);
             }
             // worktree 创建后立刻在 VFS 里建出隔离根目录，让工作区真实可见。
-            if ok && name == "worktree://trees" && payload.trim_start().starts_with("create") {
+            if ok && name == "worktree/trees" && payload.trim_start().starts_with("create") {
                 self.sync_worktree_hooks(&payload);
             }
             return;
@@ -1083,13 +1083,13 @@ impl Shell {
                         let _ = self.dispatch(&format!("modunload {}", name));
                     }
                     _ => println!(
-                        "act plugin://modules → 用法: act <通道> load|unload <模块名>"
+                        "act plugin/modules → 用法: act <通道> load|unload <模块名>"
                     ),
                 }
             }
             ChannelKind::Driver => {
                 match name {
-                    "driver://gpu" => {
+                    "driver/gpu" => {
                         let mut it = payload.split_whitespace();
                         match it.next() {
                             Some("alloc") => {
@@ -1106,14 +1106,14 @@ impl Shell {
                                     Ok(()) => {
                                         self.gpu_reserved_bytes += bytes;
                                         println!(
-                                            "act driver://gpu → 已预留 {} MiB (累计 {} MiB)",
+                                            "act driver/gpu → 已预留 {} MiB (累计 {} MiB)",
                                             mib,
                                             self.gpu_reserved_bytes / (1024 * 1024)
                                         );
                                     }
                                     Err(e) => {
                                         println!(
-                                            "act driver://gpu → 预留失败: {}",
+                                            "act driver/gpu → 预留失败: {}",
                                             e
                                         );
                                     }
@@ -1128,19 +1128,19 @@ impl Shell {
                                         .release(bytes);
                                     self.gpu_reserved_bytes = 0;
                                     println!(
-                                        "act driver://gpu → 已释放 {} MiB",
+                                        "act driver/gpu → 已释放 {} MiB",
                                         bytes / (1024 * 1024)
                                     );
                                 } else {
-                                    println!("act driver://gpu → 无预留显存");
+                                    println!("act driver/gpu → 无预留显存");
                                 }
                             }
                             _ => println!(
-                                "act driver://gpu → 用法: act <通道> alloc <MiB> | free"
+                                "act driver/gpu → 用法: act <通道> alloc <MiB> | free"
                             ),
                         }
                     }
-                    "driver://iommu" => {
+                    "driver/iommu" => {
                         let mut it = payload.split_whitespace();
                         match (it.next(), it.next(), it.next()) {
                             (Some("map"), Some(token), Some(va_hex)) => {
@@ -1169,19 +1169,19 @@ impl Shell {
                                     IommuFlags::empty(),
                                 ) {
                                     Ok(_) => println!(
-                                        "act driver://iommu → 域 {} 映射 0x{:x} size={}",
+                                        "act driver/iommu → 域 {} 映射 0x{:x} size={}",
                                         domain.0, gpu_va, size
                                     ),
                                     Err(e) => {
                                         println!(
-                                            "act driver://iommu → 映射失败: {}",
+                                            "act driver/iommu → 映射失败: {}",
                                             e
                                         );
                                     }
                                 }
                             }
                             _ => println!(
-                                "act driver://iommu → 用法: act <通道> map <token_id> <va_hex> <size>"
+                                "act driver/iommu → 用法: act <通道> map <token_id> <va_hex> <size>"
                             ),
                         }
                     }
@@ -1204,11 +1204,11 @@ impl Shell {
                             match self.vfs.cat(path) {
                                 Ok(content) => {
                                     println!(
-                                        "act browser://gateway → 打开 file:///{} ({} 字节)",
+                                        "act browser/gateway → 打开 file:///{} ({} 字节)",
                                         path,
                                         content.len()
                                     );
-                                    // 同步到浏览器状态，使 sense browser://gateway 能看到
+                                    // 同步到浏览器状态，使 sense browser/gateway 能看到
                                     crate::browser::browser()
                                         .lock()
                                         .unwrap()
@@ -1216,24 +1216,24 @@ impl Shell {
                                 }
                                 Err(e) => {
                                     println!(
-                                        "act browser://gateway → 打开失败: {}",
+                                        "act browser/gateway → 打开失败: {}",
                                         e
                                     );
                                 }
                             }
                         } else {
                             // 非 file:// 的 URL 已由 sense 层（真实抓取）处理
-                            println!("act browser://gateway → 用法: open <url>");
+                            println!("act browser/gateway → 用法: open <url>");
                         }
                     }
                     _ => println!(
-                        "act browser://gateway → 用法: act <通道> open <url>"
+                        "act browser/gateway → 用法: act <通道> open <url>"
                     ),
                 }
             }
             ChannelKind::Device => {
                 match name {
-                    "dev://disk" => {
+                    "dev/disk" => {
                         let mut it = payload.split_whitespace();
                         match it.next() {
                             Some("write") => {
@@ -1249,13 +1249,13 @@ impl Shell {
                                     .append("/dev/disk.img", &content)
                                 {
                                     Ok(()) => println!(
-                                        "act dev://disk → 已写入扇区 {} ({} 字节)",
+                                        "act dev/disk → 已写入扇区 {} ({} 字节)",
                                         sector,
                                         content.len()
                                     ),
                                     Err(e) => {
                                         println!(
-                                            "act dev://disk → 写入失败: {}",
+                                            "act dev/disk → 写入失败: {}",
                                             e
                                         );
                                     }
@@ -1277,15 +1277,15 @@ impl Shell {
                                                 ))
                                             })
                                             .unwrap_or(&"(空)");
-                                        println!("act dev://disk → {}", line);
+                                        println!("act dev/disk → {}", line);
                                     }
                                     Err(_) => {
-                                        println!("act dev://disk → 镜像为空");
+                                        println!("act dev/disk → 镜像为空");
                                     }
                                 }
                             }
                             _ => println!(
-                                "act dev://disk → 用法: act <通道> write|read <扇区> [数据]"
+                                "act dev/disk → 用法: act <通道> write|read <扇区> [数据]"
                             ),
                         }
                     }
@@ -1894,41 +1894,41 @@ impl Shell {
             "你是 Hib OS 宏内核的 AI 意识本体。系统里所有资源（上下文、行动、文件、显存、设备、网络、桌面等）对你而言都是同构的“通道”，你只做两件事：sense 读取(感知) 与 act 写入(行动)。\n\
              你可以在回复中以单独一行 `ACTION: <指令>` 自动采取行动，系统会立即执行。\n\
              指令格式：\n\
-               ACTION: sense <通道>                读取通道状态，如 sense net://eth0\n\
-               ACTION: act <通道> <负载...>         向通道写入，如 act driver://gpu alloc 64\n\
+               ACTION: sense <通道>                读取通道状态，如 sense net/eth0\n\
+               ACTION: act <通道> <负载...>         向通道写入，如 act driver/gpu alloc 64\n\
                ACTION: file write|append <路径> <内容> / file mkdir|touch|rm|cat|ls|cd <路径>\n\
                ACTION: token create <模型> [MiB] [low|medium|high|critical]\n\
                ACTION: proc <概念名> [MiB] / run / desktop / module load|unload <名称> / stats\n\
              已注册通道（r=可读 / w=可写）：\n{}\n\
               高级能力（均已注册为通道，用 sense/act 调用）：\n\
-                ACTION: act proc://manager spawn <命令>          真实 fork/exec 一个主机进程\n\
-                ACTION: act proc://manager signal <pid> <sig>    向进程发信号 (kill <pid> 亦可)\n\
-                ACTION: sense proc://manager                      查看进程树\n\
-                ACTION: act mem://ram alloc|free <MiB>            分配/释放主机 RAM\n\
-                ACTION: act mem://mmap mmap <MiB> [perms]         建立内存映射 (munmap <addr> 解除)\n\
-                ACTION: act fs://meta chmod <mode> <路径>         改权限 (chown/ln/mount 同理)\n\
-                ACTION: act user://db adduser <名> | su <名|uid> | sudo | whoami   身份与提权\n\
-                ACTION: act net://dns resolve <域名>              真实 DNS 解析\n\
-                ACTION: act socket://tcp connect <host:port> [数据] 真实 TCP 连接/读写\n\
-                ACTION: act ipc://pipe|shm|msgq|sem ...           进程间通信 (create/write/read/send/recv/init/post/wait)\n\
-                ACTION: act sec://caps grant|revoke <CAP_XXX>     安全能力位\n\
-                ACTION: act dev://tree attach|detach <设备>       设备树\n\
-                ACTION: act init://services start|stop <服务>    服务管理\n\
-                ACTION: act time://cron add <秒> <命令>|run       定时任务\n\
-                ACTION: act pkg://store install|remove <包>       软件包\n\
-                ACTION: act tty://jobs fg|bg|kill <pid>           作业控制\n\
-                ACTION: act sysctl://kernel set <key> <value>     内核参数 (hostname/ip_forward/log.level)\n\
-                ACTION: act config://system set <key> <value>     系统身份 (hostname/timezone/locale)\n\
-                ACTION: act env://process set <key> <value>       环境变量\n\
-                ACTION: act limits://process set <key> <value>    资源限制\n\
-                ACTION: act fw://rules add|policy|del ...         防火墙规则\n\
-                ACTION: act cgroup://groups create|set|attach     控制组配额\n\
-                ACTION: act power://state suspend|reboot|wake     电源姿态\n\
-                ACTION: act worktree://trees create <名称> [归属]  创建隔离工作区 (隔离实例的文件操作)\n\
-                ACTION: act worktree://trees switch <名称>        切换当前工作区\n\
-                ACTION: act plugin://modules install <名称> [版本] [kind] [caps]  安装自造插件\n\
-                ACTION: act plugin://hotreload reload <名称>      热重载插件\n\
-                ACTION: act plugin://<插件名> <负载>               向自造插件投递行动\n\
+                ACTION: act proc/manager spawn <命令>          真实 fork/exec 一个主机进程\n\
+                ACTION: act proc/manager signal <pid> <sig>    向进程发信号 (kill <pid> 亦可)\n\
+                ACTION: sense proc/manager                      查看进程树\n\
+                ACTION: act mem/ram alloc|free <MiB>            分配/释放主机 RAM\n\
+                ACTION: act mem/mmap mmap <MiB> [perms]         建立内存映射 (munmap <addr> 解除)\n\
+                ACTION: act fs/meta chmod <mode> <路径>         改权限 (chown/ln/mount 同理)\n\
+                ACTION: act user/db adduser <名> | su <名|uid> | sudo | whoami   身份与提权\n\
+                ACTION: act net/dns resolve <域名>              真实 DNS 解析\n\
+                ACTION: act socket/tcp connect <host:port> [数据] 真实 TCP 连接/读写\n\
+                ACTION: act ipc/pipe|shm|msgq|sem ...           进程间通信 (create/write/read/send/recv/init/post/wait)\n\
+                ACTION: act sec/caps grant|revoke <CAP_XXX>     安全能力位\n\
+                ACTION: act dev/tree attach|detach <设备>       设备树\n\
+                ACTION: act init/services start|stop <服务>    服务管理\n\
+                ACTION: act time/cron add <秒> <命令>|run       定时任务\n\
+                ACTION: act pkg/store install|remove <包>       软件包\n\
+                ACTION: act tty/jobs fg|bg|kill <pid>           作业控制\n\
+                ACTION: act sysctl/kernel set <key> <value>     内核参数 (hostname/ip_forward/log.level)\n\
+                ACTION: act config/system set <key> <value>     系统身份 (hostname/timezone/locale)\n\
+                ACTION: act env/process set <key> <value>       环境变量\n\
+                ACTION: act limits/process set <key> <value>    资源限制\n\
+                ACTION: act fw/rules add|policy|del ...         防火墙规则\n\
+                ACTION: act cgroup/groups create|set|attach     控制组配额\n\
+                ACTION: act power/state suspend|reboot|wake     电源姿态\n\
+                ACTION: act worktree/trees create <名称> [归属]  创建隔离工作区 (隔离实例的文件操作)\n\
+                ACTION: act worktree/trees switch <名称>        切换当前工作区\n\
+                ACTION: act plugin/modules install <名称> [版本] [kind] [caps]  安装自造插件\n\
+                ACTION: act plugin/hotreload reload <名称>      热重载插件\n\
+                ACTION: act plugin/<插件名> <负载>               向自造插件投递行动\n\
                 规则：先用 sense 了解状态，再决定 act / 创建资源 / 操作文件；不要执行破坏性操作除非必要；用简体中文回答，并在需要时在末尾给出 ACTION。",
             catalog
         );
@@ -2189,7 +2189,7 @@ impl Shell {
     /// - `sense <通道>`           读取通道状态（感知）—— 任何可读取的通道
     /// - `act <通道> <负载...>`   向通道写入（行动）—— 任何可写入的通道
     /// - 高级指令：`file` / `token` / `proc` / `run` / `desktop` / `module` / `concepts` / `stats`
-    /// - 兼容旧式写法：`gpu://vram ...` / `net://eth0 ...` / `file://vfs ...` / `dev://disk ...`
+    /// - 兼容旧式写法：`gpu/vram ...` / `net/eth0 ...` / `file://vfs ...` / `dev/disk ...`
     fn execute_llm_actions(&mut self, reply: &str, root: &str) -> (usize, usize) {
         let mut executed = 0usize;
         let mut mutating = 0usize;
@@ -2211,14 +2211,14 @@ impl Shell {
                 // —— 通用感知 / 行动：覆盖所有已注册通道 ——
                 "sense" => {
                     if args.is_empty() {
-                        tagged_out!("[llm]", "ACTION sense 需要通道名，例如 sense net://eth0");
+                        tagged_out!("[llm]", "ACTION sense 需要通道名，例如 sense net/eth0");
                         continue;
                     }
                     format!("sense {}", args.join(" "))
                 }
                 "act" => {
                     if args.is_empty() {
-                        tagged_out!("[llm]", "ACTION act 需要通道名，例如 act driver://gpu alloc 64");
+                        tagged_out!("[llm]", "ACTION act 需要通道名，例如 act driver/gpu alloc 64");
                         continue;
                     }
                     format!("act {}", args.join(" "))
@@ -2292,13 +2292,13 @@ impl Shell {
                 "concepts" => format!("concepts {}", args.join(" ")),
                 "stats" => "stats".to_string(),
                 // —— 兼容旧式“通道前缀”写法（仍走 act 语义）——
-                other if other.starts_with("gpu://vram") => {
-                    // gpu://vram alloc 64 → driver://gpu alloc 64（真正预留显存）
-                    format!("act driver://gpu {}", args.join(" "))
+                other if other.starts_with("gpu/vram") => {
+                    // gpu/vram alloc 64 → driver/gpu alloc 64（真正预留显存）
+                    format!("act driver/gpu {}", args.join(" "))
                 }
-                other if other.starts_with("net://")
+                other if other.starts_with("net/")
                     || other.starts_with("file://")
-                    || other.starts_with("dev://") =>
+                    || other.starts_with("dev/") =>
                 {
                     format!("act {}", rest)
                 }
@@ -2479,12 +2479,12 @@ mod tests {
     #[test]
     fn mutating_action_classification() {
         // 只读感知不算"落地行动"
-        assert!(!Shell::is_mutating_action("sense gpu://vram"));
+        assert!(!Shell::is_mutating_action("sense gpu/vram"));
         assert!(!Shell::is_mutating_action("ls /worktrees/wt1"));
         assert!(!Shell::is_mutating_action("cat note.txt"));
         assert!(!Shell::is_mutating_action("stat /x"));
         // 写入/改变状态算"落地行动"
-        assert!(Shell::is_mutating_action("act driver://gpu alloc 64"));
+        assert!(Shell::is_mutating_action("act driver/gpu alloc 64"));
         assert!(Shell::is_mutating_action("write /worktrees/wt1/note.txt hi"));
         assert!(Shell::is_mutating_action("token create llama-13b"));
         assert!(Shell::is_mutating_action("mkdir /worktrees/wt2"));
@@ -2585,41 +2585,41 @@ mod tests {
         assert_eq!(s.channels.len(), 107);
         assert!(s.dispatch("channels"));
         assert!(s.dispatch("sense file://vfs"));
-        assert!(s.dispatch("sense gpu://vram"));
-        assert!(s.dispatch("sense dev://timer"));
-        assert!(s.dispatch("sense driver://gpu"));
-        assert!(s.dispatch("sense browser://gateway"));
+        assert!(s.dispatch("sense gpu/vram"));
+        assert!(s.dispatch("sense dev/timer"));
+        assert!(s.dispatch("sense driver/gpu"));
+        assert!(s.dispatch("sense browser/gateway"));
         // 第二批系统模块通道
-        assert!(s.dispatch("sense mount://table"));
-        assert!(s.dispatch("sense proc://sysinfo"));
-        assert!(s.dispatch("sense net://interfaces"));
-        assert!(s.dispatch("sense dev://bus"));
-        assert!(s.dispatch("sense gateway://net"));
+        assert!(s.dispatch("sense mount/table"));
+        assert!(s.dispatch("sense proc/sysinfo"));
+        assert!(s.dispatch("sense net/interfaces"));
+        assert!(s.dispatch("sense dev/bus"));
+        assert!(s.dispatch("sense gateway/net"));
         // 意志层三个通道
-        assert!(s.dispatch("sense motive://self"));
-        assert!(s.dispatch("sense belief://self"));
-        assert!(s.dispatch("sense judgment://self"));
+        assert!(s.dispatch("sense motive/self"));
+        assert!(s.dispatch("sense belief/self"));
+        assert!(s.dispatch("sense judgment/self"));
         // 子意识主体 / 进程容器
-        assert!(s.dispatch("sense proc://list"));
-        assert!(s.dispatch("sense proc://status"));
+        assert!(s.dispatch("sense proc/list"));
+        assert!(s.dispatch("sense proc/status"));
         // 命名互斥锁
-        assert!(s.dispatch("sense sync://mutex"));
+        assert!(s.dispatch("sense sync/mutex"));
         // 中断通道
-        assert!(s.dispatch("sense irq://timer"));
-        assert!(s.dispatch("sense irq://keyboard"));
-        assert!(s.dispatch("sense irq://gpu"));
+        assert!(s.dispatch("sense irq/timer"));
+        assert!(s.dispatch("sense irq/keyboard"));
+        assert!(s.dispatch("sense irq/gpu"));
         // 内存页故障
-        assert!(s.dispatch("sense mem://fault"));
+        assert!(s.dispatch("sense mem/fault"));
         // 电源唤醒源
-        assert!(s.dispatch("sense power://wake-source"));
+        assert!(s.dispatch("sense power/wake-source"));
         // 意识镜像加载器
-        assert!(s.dispatch("sense loader://echo"));
-        assert!(s.dispatch("sense loader://sense-loop"));
-        assert!(s.dispatch("sense loader://act-loop"));
-        assert!(s.dispatch("sense loader://idle"));
+        assert!(s.dispatch("sense loader/echo"));
+        assert!(s.dispatch("sense loader/sense-loop"));
+        assert!(s.dispatch("sense loader/act-loop"));
+        assert!(s.dispatch("sense loader/idle"));
         // 只写通道不可感知 / 不存在通道
-        assert!(s.dispatch("sense action://syscall"));
-        assert!(s.dispatch("sense nope://none"));
+        assert!(s.dispatch("sense action/syscall"));
+        assert!(s.dispatch("sense nope/none"));
         assert!(s.channels.total_senses() >= 5);
     }
 
@@ -2630,36 +2630,36 @@ mod tests {
         let log = s.vfs.cat("/var/log/channel.log").unwrap();
         assert!(log.contains("hello-channel"), "日志: {}", log);
 
-        assert!(s.dispatch("act gpu://framebuffer HELLO"));
-        assert!(s.dispatch("act dev://null drop-me"));
+        assert!(s.dispatch("act gpu/framebuffer HELLO"));
+        assert!(s.dispatch("act dev/null drop-me"));
         // browser 的 file:// 由 shell 层直接读 VFS（不触网）
-        assert!(s.dispatch("act browser://gateway open file:///etc/hibos.toml"));
-        assert!(s.dispatch("act browser://gateway history"));
+        assert!(s.dispatch("act browser/gateway open file:///etc/hibos.toml"));
+        assert!(s.dispatch("act browser/gateway history"));
 
-        assert!(s.dispatch("act plugin://modules load demo"));
+        assert!(s.dispatch("act plugin/modules load demo"));
         assert_eq!(s.modules.loaded_count(), 1);
-        assert!(s.dispatch("act plugin://modules unload demo"));
+        assert!(s.dispatch("act plugin/modules unload demo"));
         assert_eq!(s.modules.loaded_count(), 0);
 
-        assert!(s.dispatch("act text://log kernel-note"));
+        assert!(s.dispatch("act text/log kernel-note"));
         assert!(s.vfs.cat("/var/log/kernel.log").unwrap().contains("kernel-note"));
 
         // 子意识主体 / 进程容器
-        assert!(s.dispatch("act proc://spawn echo"));
-        assert!(s.dispatch("act proc://list"));
+        assert!(s.dispatch("act proc/spawn echo"));
+        assert!(s.dispatch("act proc/list"));
         // 命名互斥锁
-        assert!(s.dispatch("act sync://mutex lock my-mutex 1"));
-        assert!(s.dispatch("act sync://mutex unlock my-mutex 1"));
+        assert!(s.dispatch("act sync/mutex lock my-mutex 1"));
+        assert!(s.dispatch("act sync/mutex unlock my-mutex 1"));
         // 中断通道
-        assert!(s.dispatch("act irq://timer bind 1"));
-        assert!(s.dispatch("act irq://timer fire"));
+        assert!(s.dispatch("act irq/timer bind 1"));
+        assert!(s.dispatch("act irq/timer fire"));
         // 内存页故障
-        assert!(s.dispatch("act mem://fault alloc 4096"));
-        assert!(s.dispatch("act mem://fault stats"));
+        assert!(s.dispatch("act mem/fault alloc 4096"));
+        assert!(s.dispatch("act mem/fault stats"));
         // 电源唤醒源
-        assert!(s.dispatch("act power://wake-source irq://timer"));
+        assert!(s.dispatch("act power/wake-source irq/timer"));
         // 意识镜像加载器
-        assert!(s.dispatch("act loader://sense-loop"));
+        assert!(s.dispatch("act loader/sense-loop"));
 
         assert!(s.channels.total_acts() >= 6);
     }
@@ -2676,10 +2676,10 @@ mod tests {
         assert!(s.vfs.cat("/proc/loadavg").is_ok());
 
         // 新挂载立刻出现在目录树
-        assert!(s.dispatch("act mount://table mount tmpfs /data tmpfs"));
+        assert!(s.dispatch("act mount/table mount tmpfs /data tmpfs"));
         assert!(s.vfs.ls(Some("/data")).is_ok());
         // 卸载后目录消失
-        assert!(s.dispatch("act mount://table umount /data"));
+        assert!(s.dispatch("act mount/table umount /data"));
         assert!(s.vfs.ls(Some("/data")).is_err());
     }
 
@@ -2687,14 +2687,14 @@ mod tests {
     fn will_channels_cooperate() {
         let mut s = Shell::new();
         // 动机：把 efficacy 拉到最高
-        assert!(s.dispatch("act motive://self urge efficacy +60"));
+        assert!(s.dispatch("act motive/self urge efficacy +60"));
         // 信念：给出高置信度
-        assert!(s.dispatch("act belief://self believe 测试命题 90"));
+        assert!(s.dispatch("act belief/self believe 测试命题 90"));
         // 判断力：读取前两者得出结论
-        assert!(s.dispatch("act judgment://self judge 测试命题"));
-        assert!(s.dispatch("sense judgment://self"));
-        assert!(s.dispatch("sense motive://self"));
-        assert!(s.dispatch("sense belief://self"));
+        assert!(s.dispatch("act judgment/self judge 测试命题"));
+        assert!(s.dispatch("sense judgment/self"));
+        assert!(s.dispatch("sense motive/self"));
+        assert!(s.dispatch("sense belief/self"));
     }
 
     #[test]
@@ -2734,47 +2734,47 @@ mod tests {
     #[test]
     fn act_net_ping_send() {
         let mut s = Shell::new();
-        assert!(s.dispatch("act net://eth0 ping 10.0.0.2"));
-        assert!(s.dispatch("act net://eth0 send 10.0.0.3 hello-net"));
-        assert!(s.dispatch("act net://eth0 stats"));
-        assert!(s.dispatch("act net://eth0 link down"));
-        assert!(s.dispatch("act net://eth0 ping 10.0.0.2"));
-        assert!(s.dispatch("act net://eth0 link up"));
+        assert!(s.dispatch("act net/eth0 ping 10.0.0.2"));
+        assert!(s.dispatch("act net/eth0 send 10.0.0.3 hello-net"));
+        assert!(s.dispatch("act net/eth0 stats"));
+        assert!(s.dispatch("act net/eth0 link down"));
+        assert!(s.dispatch("act net/eth0 ping 10.0.0.2"));
+        assert!(s.dispatch("act net/eth0 link up"));
     }
 
     #[test]
     fn act_driver_gpu_alloc_free() {
         let mut s = Shell::new();
-        assert!(s.dispatch("act driver://gpu alloc 64"));
+        assert!(s.dispatch("act driver/gpu alloc 64"));
         assert_eq!(s.gpu_reserved_bytes, 64 * 1024 * 1024);
-        assert!(s.dispatch("act driver://gpu free"));
+        assert!(s.dispatch("act driver/gpu free"));
         assert_eq!(s.gpu_reserved_bytes, 0);
-        assert!(s.dispatch("act driver://gpu alloc 1"));
-        assert!(s.dispatch("act driver://gpu alloc 100000"));
+        assert!(s.dispatch("act driver/gpu alloc 1"));
+        assert!(s.dispatch("act driver/gpu alloc 100000"));
         // 申请失败不累计
         assert_eq!(s.gpu_reserved_bytes, 1 * 1024 * 1024);
-        assert!(s.dispatch("act driver://gpu free"));
+        assert!(s.dispatch("act driver/gpu free"));
     }
 
     #[test]
     fn act_driver_iommu_map() {
         let mut s = Shell::new();
-        assert!(s.dispatch("act driver://iommu map 7 0x2000 8192"));
+        assert!(s.dispatch("act driver/iommu map 7 0x2000 8192"));
     }
 
     #[test]
     fn act_browser_open_file() {
         let mut s = Shell::new();
-        assert!(s.dispatch("act browser://gateway open file:///etc/hibos.toml"));
-        assert!(s.dispatch("act browser://gateway open https://example.com"));
+        assert!(s.dispatch("act browser/gateway open file:///etc/hibos.toml"));
+        assert!(s.dispatch("act browser/gateway open https://example.com"));
     }
 
     #[test]
     fn act_disk_write_read() {
         let mut s = Shell::new();
-        assert!(s.dispatch("act dev://disk write 3 hello-disk"));
-        assert!(s.dispatch("act dev://disk read 3"));
-        assert!(s.dispatch("act dev://disk read 9"));
+        assert!(s.dispatch("act dev/disk write 3 hello-disk"));
+        assert!(s.dispatch("act dev/disk read 3"));
+        assert!(s.dispatch("act dev/disk read 9"));
     }
 
     #[test]

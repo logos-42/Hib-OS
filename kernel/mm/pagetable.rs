@@ -4,7 +4,7 @@
 //! 页表项语义按 Intel SDM：P / R/W / U/S / A / D / NX，外加软件位 COW。
 //! 
 //! AI 原生映射：页表 = 语义映射树（token → 上下文页/KV 缓存）；
-//! 缺页 = 通道事件（`mem://fault`）。
+//! 缺页 = 通道事件（`mem/fault`）。
 
 use std::collections::BTreeMap;
 use std::sync::{Mutex, OnceLock};

@@ -1,4 +1,4 @@
-//! 像素壁纸系统 —— `gui://wallpaper`。
+//! 像素壁纸系统 —— `gui/wallpaper`。
 //!
 //! 之前的问题：合成器只有一套极暗的深空背景，看不出"有壁纸"；
 //! `wallpaper` 命令只改字符桌面的名字，像素桌面完全不响应；
@@ -8,15 +8,15 @@
 //! 1. **多套明显可见的程序化像素壁纸**（日落 / 极光 / 电路 / 星云 / 网格 / 纯色）；
 //! 2. **BMP 解码**：把任意 24/32bpp 图片加载为壁纸；
 //! 3. **摆放方式**：stretch（拉伸）/ tile（平铺）/ center（居中）；
-//! 4. **全局壁纸库**：`wallpaper` 命令、像素合成器、`gui://wallpaper`
+//! 4. **全局壁纸库**：`wallpaper` 命令、像素合成器、`gui/wallpaper`
 //!    三者操作同一份状态，改一处全系统同步。
 //!
-//! * `sense gui://wallpaper`
-//! * `act gui://wallpaper list`
-//! * `act gui://wallpaper set <风格>`
-//! * `act gui://wallpaper load <BMP路径>`
-//! * `act gui://wallpaper fit <stretch|tile|center>`
-//! * `act gui://wallpaper save <BMP路径>` / `preview`
+//! * `sense gui/wallpaper`
+//! * `act gui/wallpaper list`
+//! * `act gui/wallpaper set <风格>`
+//! * `act gui/wallpaper load <BMP路径>`
+//! * `act gui/wallpaper fit <stretch|tile|center>`
+//! * `act gui/wallpaper save <BMP路径>` / `preview`
 
 use std::sync::{Mutex, OnceLock};
 
@@ -132,7 +132,7 @@ impl WallpaperBank {
             "png" => png::load(path)?,
             "bmp" => bmp::load(path)?,
             "jpg" | "jpeg" => {
-                return Err("JPEG 暂不直接解码，请先用 `act gui://wallpaper wiki` 使用已转换的 PNG 版本".to_string())
+                return Err("JPEG 暂不直接解码，请先用 `act gui/wallpaper wiki` 使用已转换的 PNG 版本".to_string())
             }
             _ => return Err(format!("不支持的图片格式 .{} (支持 png/bmp)", ext)),
         };
@@ -234,7 +234,7 @@ pub fn set_named(name: &str) -> Result<String, String> {
     bank().lock().unwrap().set_style(mapped)
 }
 
-/// 通道 `gui://wallpaper` 的行动实现。
+/// 通道 `gui/wallpaper` 的行动实现。
 pub fn act(payload: &str) -> Result<String, String> {
     let text = payload.trim();
     let (sub, rest) = match text.split_once(' ') {

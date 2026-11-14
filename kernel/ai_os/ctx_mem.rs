@@ -226,7 +226,7 @@ pub fn status() -> String {
     format!("windows={} used_tokens={}", m.count(), m.total_used())
 }
 
-/// `act ctx://*` 的后端动作：
+/// `act ctx/*` 的后端动作：
 /// * `create <owner> <capacity>` 新建窗口
 /// * `alloc <window> <tokens> <text...>` 分配语义页
 /// * `access <window> <page>` 访问页
@@ -248,7 +248,7 @@ pub fn ctx_act(payload: &str) -> Result<String, String> {
             let wid = it
                 .next()
                 .and_then(|s| s.parse::<u64>().ok())
-                .ok_or("用法: ctx://kv alloc <window> <tokens> <text>")?;
+                .ok_or("用法: ctx/kv alloc <window> <tokens> <text>")?;
             let mut rest = it.next().unwrap_or("").splitn(2, ' ');
             let tokens = rest.next().and_then(|s| s.parse().ok()).unwrap_or(0);
             let text = rest.next().unwrap_or("");
@@ -262,12 +262,12 @@ pub fn ctx_act(payload: &str) -> Result<String, String> {
             let wid = it
                 .next()
                 .and_then(|s| s.parse::<u64>().ok())
-                .ok_or("用法: ctx://kv access <window> <page>")?;
+                .ok_or("用法: ctx/kv access <window> <page>")?;
             let pid = it
                 .next()
                 .and_then(|s| s.parse::<u64>().ok())
                 .map(PageId)
-                .ok_or("用法: ctx://kv access <window> <page>")?;
+                .ok_or("用法: ctx/kv access <window> <page>")?;
             let w = m.window_mut(wid).ok_or("窗口不存在")?;
             let page = w.access(pid).map_err(|e| format!("访问失败: {:?}", e))?;
             Ok(format!("page={} tokens={} dirty={}", page.id.0, page.tokens, page.dirty))
@@ -276,7 +276,7 @@ pub fn ctx_act(payload: &str) -> Result<String, String> {
             let wid = it
                 .next()
                 .and_then(|s| s.parse::<u64>().ok())
-                .ok_or("用法: ctx://kv evict <window> <tokens>")?;
+                .ok_or("用法: ctx/kv evict <window> <tokens>")?;
             let tokens = it.next().and_then(|s| s.parse().ok()).unwrap_or(0);
             let w = m.window_mut(wid).ok_or("窗口不存在")?;
             let ev = w
@@ -288,7 +288,7 @@ pub fn ctx_act(payload: &str) -> Result<String, String> {
             let wid = it
                 .next()
                 .and_then(|s| s.parse::<u64>().ok())
-                .ok_or("用法: ctx://kv fault <window> <tokens> <text>")?;
+                .ok_or("用法: ctx/kv fault <window> <tokens> <text>")?;
             let mut rest = it.next().unwrap_or("").splitn(2, ' ');
             let tokens = rest.next().and_then(|s| s.parse().ok()).unwrap_or(0);
             let text = rest.next().unwrap_or("");
@@ -302,7 +302,7 @@ pub fn ctx_act(payload: &str) -> Result<String, String> {
             let wid = it
                 .next()
                 .and_then(|s| s.parse::<u64>().ok())
-                .ok_or("用法: ctx://kv destroy <window>")?;
+                .ok_or("用法: ctx/kv destroy <window>")?;
             m.destroy(wid).map_err(|e| format!("销毁失败: {:?}", e))?;
             Ok(format!("已销毁上下文窗口 ctx={}", wid))
         }

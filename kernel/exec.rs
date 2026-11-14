@@ -112,7 +112,7 @@ pub struct Body {
     pub inherited: bool,
 }
 
-/// 执行体快照（供 `sense exec://threads`）。
+/// 执行体快照（供 `sense exec/threads`）。
 #[derive(Clone, Debug, Default)]
 pub struct ExecSnapshot {
     pub total: usize,
@@ -178,8 +178,8 @@ pub fn current_name() -> Option<String> {
 
 /// 派生一个真执行体（真 OS 线程）。
 ///
-/// 返回的 id 立刻可被 `sense exec://threads` 看到；`f` 结束时状态转 `Exited`，
-/// 并唤醒所有等待 `exec://exit/<id>` 的父执行体。
+/// 返回的 id 立刻可被 `sense exec/threads` 看到；`f` 结束时状态转 `Exited`，
+/// 并唤醒所有等待 `exec/exit/<id>` 的父执行体。
 pub fn spawn<F>(name: &str, priority: CpuPriority, f: F) -> ExecId
 where
     F: FnOnce() + Send + 'static,
@@ -327,14 +327,14 @@ fn finish(id: ExecId, elapsed: Duration, code: i32) {
         b.signaled = false;
     }
     drop(g);
-    // 唤醒所有 join 者（它们注册在 exec://exit/<id> 上）。
+    // 唤醒所有 join 者（它们注册在 exec/exit/<id> 上）。
     ex().cv.notify_all();
     wake(&exit_key(id));
 }
 
 /// `join` 使用的等待键。
 pub fn exit_key(id: ExecId) -> String {
-    format!("exec://exit/{}", id)
+    format!("exec/exit/{}", id)
 }
 
 /// 以通道事件为断言挂起当前执行体。
@@ -504,7 +504,7 @@ pub fn wake(key: &str) -> usize {
 /// 观察用：标记当前执行体阻塞在某个同步对象上。
 ///
 /// 同步原语（`sync.rs`）内部用 Condvar 完成真实等待，这里只负责让
-/// `sense exec://threads` 能看到「谁阻塞在哪」——可观测性与机制解耦。
+/// `sense exec/threads` 能看到「谁阻塞在哪」——可观测性与机制解耦。
 pub fn note_blocked(key: &str) {
     let Some(id) = current() else { return };
     let mut g = ex().inner.lock().unwrap();
@@ -830,7 +830,7 @@ mod tests {
 
     #[test]
     fn block_then_wake_roundtrip() {
-        let key = "unittest://exec/wake";
+        let key = "unittest/exec/wake";
         let hit = Arc::new(AtomicBool::new(false));
         let hit2 = hit.clone();
         let id = spawn("unit-block", CpuPriority::Medium, move || {
@@ -865,7 +865,7 @@ mod tests {
         let got = Arc::new(Mutex::new(None));
         let g2 = got.clone();
         let id = spawn("unit-timeout", CpuPriority::Low, move || {
-            let r = block_on("unittest://exec/never", Some(Duration::from_millis(20)));
+            let r = block_on("unittest/exec/never", Some(Duration::from_millis(20)));
             *g2.lock().unwrap() = Some(r);
         });
         assert_eq!(join(id, Some(Duration::from_secs(2))), Some(0));
@@ -874,7 +874,7 @@ mod tests {
 
     #[test]
     fn suspend_keeps_waiter_registered() {
-        let key = "unittest://exec/suspend";
+        let key = "unittest/exec/suspend";
         let id = spawn("unit-suspend", CpuPriority::Medium, move || {
             block_on(key, Some(Duration::from_secs(5)));
         });
@@ -904,7 +904,7 @@ mod tests {
     #[test]
     fn priority_inheritance_boosts_and_restores() {
         let id = spawn("unit-prio", CpuPriority::Low, || {
-            block_on("unittest://exec/prio", Some(Duration::from_millis(30)));
+            block_on("unittest/exec/prio", Some(Duration::from_millis(30)));
         });
         boost_priority(id, CpuPriority::Critical);
         {
@@ -933,7 +933,7 @@ mod tests {
 
     #[test]
     fn bare_thread_reports_not_current() {
-        let r = std::thread::spawn(|| block_on("unittest://exec/bare", Some(Duration::from_millis(5))))
+        let r = std::thread::spawn(|| block_on("unittest/exec/bare", Some(Duration::from_millis(5))))
             .join()
             .unwrap();
         assert_eq!(r, WakeReason::NotCurrent);

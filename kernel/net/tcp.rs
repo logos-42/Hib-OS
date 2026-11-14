@@ -1,4 +1,4 @@
-﻿//! 简化版 TCP：状态机（LISTEN/SYN-SENT/ESTABLISHED 等）、三次握手、
+//! 简化版 TCP：状态机（LISTEN/SYN-SENT/ESTABLISHED 等）、三次握手、
 //! 序列号/确认号、滑动窗口。
 //!
 //! 本层不依赖以太网：`TcpLayer` 只处理 TCP 段字节流，收发由上层（`NetStack`）经

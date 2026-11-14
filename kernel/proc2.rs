@@ -1,12 +1,12 @@
-//! 进程 / 子意识主体容器 —— `proc://spawn` / `proc://kill` 的后端。
+//! 进程 / 子意识主体容器 —— `proc/spawn` / `proc/kill` 的后端。
 //!
 //! Linux 把进程看成「地址空间 + 文件描述符表 + PID」的资源容器。
 //! Hib OS 把**进程 = 子意识主体**：
 //! * 每个进程拥有**独立的 `wait_table` 副本**（它关心的通道事件断言）；
 //! * 每个进程拥有**独立的租约集**（它当前持有哪些通道的写租约）；
 //! * 进程 ID（proc-id）不是 PID，是意识主体标识；
-//! * `proc://spawn <镜像>` 加载一段可调用 `sense`/`act` 的意识镜像；
-//! * `proc://kill <id>` 优雅弹出：释放该进程全部租约、推进相关通道 epoch、
+//! * `proc/spawn <镜像>` 加载一段可调用 `sense`/`act` 的意识镜像；
+//! * `proc/kill <id>` 优雅弹出：释放该进程全部租约、推进相关通道 epoch、
 //!   清空其 wait_table 条目、通知等待者。
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -83,7 +83,7 @@ fn table() -> &'static Mutex<ProcTable> {
 pub fn spawn(image: &str) -> Result<ProcId, String> {
     let image = image.trim();
     if image.is_empty() {
-        return Err("用法: proc://spawn <镜像名>".to_string());
+        return Err("用法: proc/spawn <镜像名>".to_string());
     }
 
     let id = {
@@ -298,15 +298,15 @@ fn run_proc_image(image: &str, proc_id: ProcId) {
             // 简单回声：不断 checkpoint，等待外部 act 唤醒。
             loop {
                 exec::checkpoint();
-                let key = format!("proc://echo/{}", proc_id);
+                let key = format!("proc/echo/{}", proc_id);
                 let _ = exec::block_on(&key, Some(Duration::from_millis(100)));
             }
         }
         "sense-loop" => {
             loop {
-                let _ = crate::sense::probe("gpu://vram");
+                let _ = crate::sense::probe("gpu/vram");
                 exec::checkpoint();
-                let key = format!("proc://sense/{}", proc_id);
+                let key = format!("proc/sense/{}", proc_id);
                 let _ = exec::block_on(&key, Some(Duration::from_millis(200)));
             }
         }
@@ -314,12 +314,12 @@ fn run_proc_image(image: &str, proc_id: ProcId) {
             let mut i = 0u64;
             loop {
                 let _ = crate::sense::act(
-                    "lease://channels",
-                    &format!("commit proc://act/{} {} hello-from-proc", proc_id, i),
+                    "lease/channels",
+                    &format!("commit proc/act/{} {} hello-from-proc", proc_id, i),
                 );
                 i += 1;
                 exec::checkpoint();
-                let key = format!("proc://act/{}", proc_id);
+                let key = format!("proc/act/{}", proc_id);
                 let _ = exec::block_on(&key, Some(Duration::from_millis(500)));
             }
         }
@@ -351,8 +351,8 @@ mod tests {
     #[test]
     fn kill_releases_leases() {
         let id = spawn("echo").unwrap();
-        grant_lease(id, "ctx://test");
-        grant_lease(id, "mem://test");
+        grant_lease(id, "ctx/test");
+        grant_lease(id, "mem/test");
         {
             let t = table().lock().unwrap();
             assert_eq!(t.procs[&id].leases.len(), 2);
@@ -368,12 +368,12 @@ mod tests {
     #[test]
     fn wait_table_note() {
         let id = spawn("echo").unwrap();
-        note_wait(id, "proc://test/key", 42);
+        note_wait(id, "proc/test/key", 42);
         let wt = wait_table(id).unwrap();
-        assert!(wt.contains("proc://test/key"));
-        note_unwait(id, "proc://test/key", 42);
+        assert!(wt.contains("proc/test/key"));
+        note_unwait(id, "proc/test/key", 42);
         let wt = wait_table(id).unwrap();
-        assert!(!wt.contains("proc://test/key"));
+        assert!(!wt.contains("proc/test/key"));
     }
 
     #[test]

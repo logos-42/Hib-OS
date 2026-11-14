@@ -1,4 +1,4 @@
-﻿//! 多子意识编排 —— `agent://orchestrator` 的真实后端。
+//! 多子意识编排 —— `agent/orchestrator` 的真实后端。
 //!
 //! 之前这两个通道只是注册了名字，`sense`/`act` 里没有任何实现。
 //! 现在每个子智能体是一个**真执行体**（`exec::spawn` 的真 OS 线程），
@@ -9,7 +9,7 @@
 //! * 子体的任务只能通过**通道**（sense/act）作用于世界，不允许直接改内核状态 ——
 //!   也就是说「能力边界 = 通道边界」。
 //! * `barrier` 用来做**认知对齐**：多个子体在动手前对齐到同一个世界版本(epoch)。
-//! * 子体禁止再操作 `agent://` 自身，避免递归编排导致的死锁。
+//! * 子体禁止再操作 `agent/` 自身，避免递归编排导致的死锁。
 
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -125,18 +125,18 @@ fn orch() -> &'static Mutex<Orchestrator> {
 }
 
 fn mailbox_key(id: AgentId) -> String {
-    format!("agent://mailbox/{}", id)
+    format!("agent/mailbox/{}", id)
 }
 
 fn done_key(id: AgentId) -> String {
-    format!("agent://done/{}", id)
+    format!("agent/done/{}", id)
 }
 
 /// 派生一个子智能体（真线程 + 真邮箱）。
 pub fn spawn(name: &str, role: &str, priority: CpuPriority) -> Result<AgentId, String> {
     let name = name.trim();
     if name.is_empty() {
-        return Err("用法: act agent://orchestrator spawn <名称> [角色]".to_string());
+        return Err("用法: act agent/orchestrator spawn <名称> [角色]".to_string());
     }
     let parent_agent = {
         // 若当前执行体本身是一个子智能体，则记录编排血缘。
@@ -204,7 +204,7 @@ pub fn spawn_in_domain(
 ) -> Result<AgentId, String> {
     let name = name.trim();
     if name.is_empty() {
-        return Err("用法: act agent://orchestrator spawn <名称> [角色]".to_string());
+        return Err("用法: act agent/orchestrator spawn <名称> [角色]".to_string());
     }
     let parent_agent = {
         let me = exec::current();
@@ -354,8 +354,8 @@ fn run_task(payload: &str) -> (bool, String, u64) {
             if rest.is_empty() {
                 return (false, "用法: sense <通道>".to_string(), 0);
             }
-            if rest.starts_with("agent://") {
-                return (false, "子体不允许递归操作 agent://".to_string(), 0);
+            if rest.starts_with("agent/") {
+                return (false, "子体不允许递归操作 agent/".to_string(), 0);
             }
             let ep = crate::lease::epoch(rest);
             match sense::probe(rest) {
@@ -367,8 +367,8 @@ fn run_task(payload: &str) -> (bool, String, u64) {
             if rest.is_empty() {
                 return (false, "用法: act <通道> <负载>".to_string(), 0);
             }
-            if rest.starts_with("agent://") {
-                return (false, "子体不允许递归操作 agent://".to_string(), 0);
+            if rest.starts_with("agent/") {
+                return (false, "子体不允许递归操作 agent/".to_string(), 0);
             }
             let (ch, body) = match rest.split_once(' ') {
                 Some((c, b)) => (c, b),
@@ -413,7 +413,7 @@ fn run_task(payload: &str) -> (bool, String, u64) {
         "sleep" => {
             let ms = rest.parse::<u64>().unwrap_or(10).min(60_000);
             let began = get_time_ns();
-            exec::block_on("agent://sleep", Some(Duration::from_millis(ms)));
+            exec::block_on("agent/sleep", Some(Duration::from_millis(ms)));
             (
                 true,
                 format!("slept {}ms", (get_time_ns() - began) / 1_000_000),
@@ -537,7 +537,7 @@ fn resolve(name_or_id: &str) -> Result<AgentId, String> {
         .ok_or_else(|| format!("子智能体 {} 不存在", name_or_id))
 }
 
-/// `act agent://orchestrator <...>` 的入口。
+/// `act agent/orchestrator <...>` 的入口。
 pub fn dispatch(payload: &str) -> Result<String, String> {
     let mut it = payload.splitn(2, ' ');
     let verb = it.next().unwrap_or("list");
@@ -687,7 +687,7 @@ mod tests {
     fn spawn_and_run_a_sense_task() {
         let _serial = test_guard();
         let id = spawn("ut-sense", "worker", CpuPriority::Medium).unwrap();
-        submit("ut-sense", "sense gpu://vram").unwrap();
+        submit("ut-sense", "sense gpu/vram").unwrap();
         let r = wait_idle("ut-sense", Some(Duration::from_secs(3))).unwrap();
         assert!(r.contains("idle"));
         let o = orch().lock().unwrap();
@@ -702,7 +702,7 @@ mod tests {
     fn agent_cannot_recurse_into_agent_channels() {
         let _serial = test_guard();
         spawn("ut-recursion", "worker", CpuPriority::Low).unwrap();
-        submit("ut-recursion", "act agent://orchestrator list").unwrap();
+        submit("ut-recursion", "act agent/orchestrator list").unwrap();
         wait_idle("ut-recursion", Some(Duration::from_secs(3))).unwrap();
         let o = orch().lock().unwrap();
         let rec = o.results.iter().rev().find(|r| r.agent == "ut-recursion").unwrap();

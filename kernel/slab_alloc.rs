@@ -1,4 +1,4 @@
-﻿//! Slab 对象缓存分配器 (Slab Allocator)。
+//! Slab 对象缓存分配器 (Slab Allocator)。
 //!
 //! 设计信条：内核里大量对象是同一尺寸的小块（如 inode、task_struct、skb）。
 //! 若每次都向伙伴系统要整页，碎片与开销巨大。Slab 把一页切成 N 个等尺寸
@@ -14,7 +14,7 @@
 //! 提供 `&mut self` 原语，由调用方封装同步。
 //!
 //! 能力模型：分配/释放受 `kernel/caps.rs` 的 `CAP_SYS_ADMIN` 门禁，非特权
-//! 意识主体仅可通过通道 `slab://stats` 只读观测。
+//! 意识主体仅可通过通道 `slab/stats` 只读观测。
 
 use std::collections::BTreeMap;
 use std::sync::{Mutex, OnceLock};
@@ -204,7 +204,7 @@ pub struct SlabAllocator {
         }
         r
     }
-    /// 为自定义尺寸注册一个命名缓存（供 slab://cache/<名> 通道使用）。
+    /// 为自定义尺寸注册一个命名缓存（供 slab/cache/<名> 通道使用）。
     pub fn register_named_cache(&mut self, name: &str, size: usize) -> Result<(), SlabError> {
         if self.named_caches.contains_key(name) {
             return Err(SlabError::CacheNotFound); // 这里语义为"已存在"，复用错误枚举
@@ -245,7 +245,7 @@ pub struct SlabAllocator {
     pub fn total_frees(&self) -> u64 {
         self.total_frees
     }
-    /// 生成摘要文本（供将来 `slab://stats` 通道展示）。
+    /// 生成摘要文本（供将来 `slab/stats` 通道展示）。
     pub fn summary(&self) -> String {
         let mut out = String::from("slab: 尺寸类 容量 已用 空闲 利用率\n");
         for (sz, cap, used) in self.stats() {
@@ -304,9 +304,9 @@ pub fn slab_total_capacity() -> usize {
     slab_alloc_global().lock().unwrap().total_capacity()
 }
 // =====================================================================================
-// 通道行动：act_slab —— 供 sense.rs `slab://stats` 分支调用
+// 通道行动：act_slab —— 供 sense.rs `slab/stats` 分支调用
 // =====================================================================================
-/// `slab://stats` 通道的行动入口。
+/// `slab/stats` 通道的行动入口。
 ///
 /// 支持子命令：
 /// * `alloc <size>` —— 在全局 slab 分配器分配一个对象，返回句柄描述；
@@ -319,7 +319,7 @@ pub fn act_slab(payload: &str) -> Result<String, String> {
         "alloc" => {
             let size: usize = it
                 .next()
-                .ok_or("用法: act slab://stats alloc <size>")?
+                .ok_or("用法: act slab/stats alloc <size>")?
                 .parse()
                 .map_err(|_| "无效尺寸".to_string())?;
             let h = slab_alloc(size).map_err(|e| format!("分配失败: {:?}", e))?;
@@ -328,12 +328,12 @@ pub fn act_slab(payload: &str) -> Result<String, String> {
         "free" => {
             let size_class: usize = it
                 .next()
-                .ok_or("用法: act slab://stats free <size_class> <obj_id>")?
+                .ok_or("用法: act slab/stats free <size_class> <obj_id>")?
                 .parse()
                 .map_err(|_| "无效尺寸类".to_string())?;
             let obj_id: usize = it
                 .next()
-                .ok_or("用法: act slab://stats free <size_class> <obj_id>")?
+                .ok_or("用法: act slab/stats free <size_class> <obj_id>")?
                 .parse()
                 .map_err(|_| "无效对象ID".to_string())?;
             let h = SlabHandle { size_class, obj_id };
@@ -342,10 +342,10 @@ pub fn act_slab(payload: &str) -> Result<String, String> {
         }
         "stats" => Ok(slab_summary()),
         "register" => {
-            let name = it.next().ok_or("用法: act slab://stats register <name> <size>")?;
+            let name = it.next().ok_or("用法: act slab/stats register <name> <size>")?;
             let size: usize = it
                 .next()
-                .ok_or("用法: act slab://stats register <name> <size>")?
+                .ok_or("用法: act slab/stats register <name> <size>")?
                 .parse()
                 .map_err(|_| "无效尺寸".to_string())?;
             slab_alloc_global()

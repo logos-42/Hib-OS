@@ -1,6 +1,6 @@
-//! 子 AI 意识主体 (Cell) —— `cell://self`。
+//! 子 AI 意识主体 (Cell) —— `cell/self`。
 //!
-//! 之前意志三通道（`motive://self` / `belief://self` / `judgment://self`）是
+//! 之前意志三通道（`motive/self` / `belief/self` / `judgment/self`）是
 //! **全局单例**，所有智能体共享一套动机与信念 —— 这等于"所有子意识共用一个脑子"。
 //! 本模块把它们变成 **per-Cell 的私有视图**：
 //!
@@ -11,12 +11,12 @@
 //! * `freeze` / `thaw` 是 L2 睡眠：冻结期间拒绝写入，唤醒时报告
 //!   "离开期间世界变了几个 epoch"，让醒来的意识决定要不要重新感知。
 //!
-//! * `sense cell://self`
-//! * `act cell://self create <id> [parent]`
-//! * `act cell://self urge|believe|observe <id> ...`
-//! * `act cell://self judge <id> [命题]`
-//! * `act cell://self merge <child> [parent]`
-//! * `act cell://self freeze|thaw <id>` / `show <id>` / `remove <id>`
+//! * `sense cell/self`
+//! * `act cell/self create <id> [parent]`
+//! * `act cell/self urge|believe|observe <id> ...`
+//! * `act cell/self judge <id> [命题]`
+//! * `act cell/self merge <child> [parent]`
+//! * `act cell/self freeze|thaw <id>` / `show <id>` / `remove <id>`
 
 use std::collections::BTreeMap;
 use std::sync::{Mutex, OnceLock};
@@ -82,7 +82,7 @@ pub fn subs() -> &'static Mutex<BTreeMap<String, SubConscious>> {
 pub fn status() -> String {
     let m = subs().lock().unwrap();
     let mut out = format!(
-        "root: 全局意志三通道 (motive://self / belief://self / judgment://self)\ncells: {} 个",
+        "root: 全局意志三通道 (motive/self / belief/self / judgment/self)\ncells: {} 个",
         m.len()
     );
     for c in m.values() {
@@ -253,12 +253,12 @@ pub fn merge(child_id: &str, parent: Option<&str>) -> Result<String, String> {
 /// L2 睡眠：冻结子意识，记录当时的世界版本。
 pub fn freeze(id: &str) -> Result<String, String> {
     if id == ROOT {
-        return Err("root 不能冻结（请用 power://state）".to_string());
+        return Err("root 不能冻结（请用 power/state）".to_string());
     }
     let mut m = subs().lock().unwrap();
     let c = m.get_mut(id).ok_or_else(|| format!("子意识 {} 不存在", id))?;
     c.frozen = true;
-    c.frozen_epoch = lease::epoch("cell://self");
+    c.frozen_epoch = lease::epoch("cell/self");
     Ok(format!(
         "子意识 {} 已冻结 (world epoch={})",
         id, c.frozen_epoch
@@ -276,7 +276,7 @@ pub fn thaw(id: &str) -> Result<String, String> {
         return Err(format!("子意识 {} 未冻结", id));
     }
     c.frozen = false;
-    let now = lease::epoch("cell://self");
+    let now = lease::epoch("cell/self");
     let delta = now.saturating_sub(c.frozen_epoch);
     let hint = if delta == 0 {
         "世界未变，可沿用冻结前的感知".to_string()
@@ -363,7 +363,7 @@ mod tests {
         assert!(believe("sleeper", "新命题", 50).is_err());
         assert!(judge("sleeper", None).is_err());
         // 世界推进一版
-        lease::force("cell://self", "外部改动");
+        lease::force("cell/self", "外部改动");
         let r = thaw("sleeper").unwrap();
         assert!(r.contains("世界已变化 1 版"), "{}", r);
         assert!(believe("sleeper", "新命题", 50).is_ok());

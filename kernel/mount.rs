@@ -2,12 +2,12 @@
 //!
 //! 类比 Linux 的 `/proc/mounts`：每一行描述「哪个源被挂到哪个目标、什么类型、
 //! 只读还是可写」。这里不实现真实块设备，只把挂载关系建模成可感知 / 可设置的
-//! 通道 `mount://table`。
+//! 通道 `mount/table`。
 //!
-//! * `sense mount://table`            —— 列出全部挂载点
-//! * `act mount://table mount <源> <目标> [类型] [ro|rw]`
-//! * `act mount://table umount <目标>`
-//! * `act mount://table remount <目标> <ro|rw>`
+//! * `sense mount/table`            —— 列出全部挂载点
+//! * `act mount/table mount <源> <目标> [类型] [ro|rw]`
+//! * `act mount/table umount <目标>`
+//! * `act mount/table remount <目标> <ro|rw>`
 
 use std::sync::{Mutex, OnceLock};
 
@@ -157,7 +157,7 @@ impl MountTable {
 
 static MOUNTS: OnceLock<Mutex<MountTable>> = OnceLock::new();
 
-/// 全局挂载表（`mount://table` 的实体）。
+/// 全局挂载表（`mount/table` 的实体）。
 pub fn mounts() -> &'static Mutex<MountTable> {
     MOUNTS.get_or_init(|| Mutex::new(MountTable::new()))
 }

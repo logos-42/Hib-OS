@@ -4,7 +4,7 @@
 //!   设备驱动(device) → 以太网/ARP(ethernet) → IPv4(ipv4: 路由/分片/重组/ICMP) →
 //!   TCP(tcp) / UDP(udp) → Socket API(socket)
 //!
-//! 上层通过 `net://eth0`（链路/ARP/路由/统计）和 `socket://tcp`（BSD socket）
+//! 上层通过 `net/eth0`（链路/ARP/路由/统计）和 `socket/tcp`（BSD socket）
 //! 感知通道供 `sense`/`act` 使用（见 kernel/sense.rs、kernel/channels.rs）。
 //!
 //! 兼容：`NetStack`、`Interface`、`RouteEntry`、`Packet`、`NetStats`、`net()`、
@@ -100,7 +100,7 @@ pub struct RouteEntry {
     pub iface: String,
 }
 
-/// 一个网络包（旧版裸 IP 包视图，供 net://eth0 send/recv 兼容使用）。
+/// 一个网络包（旧版裸 IP 包视图，供 net/eth0 send/recv 兼容使用）。
 #[derive(Clone, Debug)]
 pub struct Packet {
     pub src: [u8; 4],
@@ -125,9 +125,9 @@ pub struct NetStack {
     pub arp: BTreeMap<[u8; 4], [u8; 6]>,
     /// 路由表。
     pub routes: Vec<RouteEntry>,
-    /// 旧版发送队列（裸 IP 包，供 net://eth0 send 兼容）。
+    /// 旧版发送队列（裸 IP 包，供 net/eth0 send 兼容）。
     pub tx: VecDeque<Packet>,
-    /// 旧版接收队列（裸 IP 包，供 net://eth0 recv 兼容）。
+    /// 旧版接收队列（裸 IP 包，供 net/eth0 recv 兼容）。
     pub rx: VecDeque<Packet>,
     pub stats: NetStats,
 
@@ -320,7 +320,7 @@ impl Default for NetStack {
     fn default() -> Self { Self::new() }
 }
 
-/// 全局协议栈（感知通道 `net://eth0` 的实体）。
+/// 全局协议栈（感知通道 `net/eth0` 的实体）。
 pub fn net() -> &'static SpinLock<NetStack> {
     static NET: OnceLock<SpinLock<NetStack>> = OnceLock::new();
     NET.get_or_init(|| SpinLock::new(NetStack::new()))

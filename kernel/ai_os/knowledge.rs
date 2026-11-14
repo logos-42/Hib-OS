@@ -176,9 +176,9 @@ pub fn init() {
     if !kb.is_empty() {
         return;
     }
-    kb.write("mem://system/boot", "Hib OS 启动：AI 原生内核已就绪", &["system".to_string()]);
-    kb.write("mem://system/policy", "默认策略：最小权限、显式授权、全程审计", &["system".to_string(), "security".to_string()]);
-    kb.write("mem://agent/init", "init 智能体负责派生与回收其他智能体", &["agent".to_string()]);
+    kb.write("mem/system/boot", "Hib OS 启动：AI 原生内核已就绪", &["system".to_string()]);
+    kb.write("mem/system/policy", "默认策略：最小权限、显式授权、全程审计", &["system".to_string(), "security".to_string()]);
+    kb.write("mem/agent/init", "init 智能体负责派生与回收其他智能体", &["agent".to_string()]);
 }
 
 pub fn status() -> String {
@@ -186,7 +186,7 @@ pub fn status() -> String {
     format!("nodes={} hits={} misses={}", kb.len(), kb.hits, kb.misses)
 }
 
-/// `act knowledge://*` 的后端动作：
+/// `act knowledge/*` 的后端动作：
 /// * `write <path> <text...> [tag...]` 写入
 /// * `append <path> <text...>` 追加
 /// * `read <path>` 读取
@@ -199,20 +199,20 @@ pub fn knowledge_act(payload: &str) -> Result<String, String> {
     let mut kb = knowledge().lock().unwrap();
     match it.next() {
         Some("write") => {
-            let path = it.next().ok_or("用法: knowledge://store write <path> <text>")?;
+            let path = it.next().ok_or("用法: knowledge/store write <path> <text>")?;
             let text = it.next().unwrap_or("");
             kb.write(path, text, &[]);
             Ok(format!("已写入 {}（{} 字符）", path, text.chars().count()))
         }
         Some("append") => {
-            let path = it.next().ok_or("用法: knowledge://store append <path> <text>")?;
+            let path = it.next().ok_or("用法: knowledge/store append <path> <text>")?;
             let text = it.next().unwrap_or("");
             kb.append(path, text)
                 .ok_or_else(|| format!("节点不存在: {}", path))?;
             Ok(format!("已追加 {} 字符到 {}", text.chars().count(), path))
         }
         Some("read") => {
-            let path = it.next().ok_or("用法: knowledge://store read <path>")?;
+            let path = it.next().ok_or("用法: knowledge/store read <path>")?;
             let node = kb.read(path).ok_or_else(|| format!("节点不存在: {}", path))?;
             Ok(format!(
                 "path={} tokens={} tags={:?}\n{}",
@@ -223,7 +223,7 @@ pub fn knowledge_act(payload: &str) -> Result<String, String> {
             ))
         }
         Some("remove") => {
-            let path = it.next().ok_or("用法: knowledge://store remove <path>")?;
+            let path = it.next().ok_or("用法: knowledge/store remove <path>")?;
             if kb.remove(path) {
                 Ok(format!("已删除 {}", path))
             } else {
@@ -240,7 +240,7 @@ pub fn knowledge_act(payload: &str) -> Result<String, String> {
             Ok(out)
         }
         Some("tag") => {
-            let tag = it.next().ok_or("用法: knowledge://store tag <tag>")?;
+            let tag = it.next().ok_or("用法: knowledge/store tag <tag>")?;
             let mut out = String::from("标签结果:\n");
             for n in kb.by_tag(tag) {
                 out.push_str(&format!("  {}\n", n.path));
@@ -266,36 +266,36 @@ mod tests {
     #[test]
     fn write_read_remove() {
         let mut kb = KnowledgeBase::new();
-        kb.write("mem://a", "hello world", &["t".to_string()]);
-        assert_eq!(kb.read("mem://a").unwrap().content, "hello world");
-        assert!(kb.remove("mem://a"));
-        assert!(!kb.remove("mem://a"));
+        kb.write("mem/a", "hello world", &["t".to_string()]);
+        assert_eq!(kb.read("mem/a").unwrap().content, "hello world");
+        assert!(kb.remove("mem/a"));
+        assert!(!kb.remove("mem/a"));
         assert_eq!(kb.len(), 0);
     }
 
     #[test]
     fn append_updates_vector() {
         let mut kb = KnowledgeBase::new();
-        kb.write("mem://a", "hello", &[]);
-        kb.append("mem://a", " world").unwrap();
-        assert_eq!(kb.read("mem://a").unwrap().content, "hello world");
+        kb.write("mem/a", "hello", &[]);
+        kb.append("mem/a", " world").unwrap();
+        assert_eq!(kb.read("mem/a").unwrap().content, "hello world");
     }
 
     #[test]
     fn semantic_search_ranks() {
         let mut kb = KnowledgeBase::new();
-        kb.write("mem://os", "kernel scheduler memory page", &[]);
-        kb.write("mem://poem", "roses are red violets blue", &[]);
+        kb.write("mem/os", "kernel scheduler memory page", &[]);
+        kb.write("mem/poem", "roses are red violets blue", &[]);
         let res = kb.search("kernel memory", 2);
-        assert_eq!(res[0].0, "mem://os");
+        assert_eq!(res[0].0, "mem/os");
         assert!(res[0].1 > res[1].1);
     }
 
     #[test]
     fn tag_index() {
         let mut kb = KnowledgeBase::new();
-        kb.write("mem://x", "x", &["sec".to_string()]);
-        kb.write("mem://y", "y", &["misc".to_string()]);
+        kb.write("mem/x", "x", &["sec".to_string()]);
+        kb.write("mem/y", "y", &["misc".to_string()]);
         assert_eq!(kb.by_tag("sec").len(), 1);
     }
 

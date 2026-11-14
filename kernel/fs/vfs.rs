@@ -1,7 +1,7 @@
 //! 文件描述符表与系统调用层（open/read/write/close/llseek）。
 //!
 //! 每进程独立 fd 表；open/read/write/close/llseek 与简单文件系统
-//! 配合，为 `fs://` 通道提供 POSIX 风格的文件访问（no_std 内核版本）。
+//! 配合，为 `fs/` 通道提供 POSIX 风格的文件访问（no_std 内核版本）。
 
 use alloc::string::String;
 use alloc::string::ToString;
@@ -213,7 +213,7 @@ pub fn vfs_stats() -> String {
 }
 
 // =====================================================================
-// 高层文件操作 —— `fs://vfs` 通道的落地实现
+// 高层文件操作 —— `fs/vfs` 通道的落地实现
 //
 // 低层 open/read/write/close 要求调用方自己持有 fd 与偏移；通道层
 // （`sense` / `act`）只关心"路径 → 内容"。以下函数全部复用上面的
@@ -358,7 +358,7 @@ pub fn stat_path(path: &str) -> Result<String, String> {
     ))
 }
 
-/// `fs://vfs` 的感知快照：inode 总数、根目录条目数、fd 表规模。
+/// `fs/vfs` 的感知快照：inode 总数、根目录条目数、fd 表规模。
 pub fn fs_sense_snapshot() -> String {
     let inodes = super::inode::inode_count();
     let root_entries = dentry_list(ROOT_INO).len();
@@ -378,7 +378,7 @@ pub fn fs_sense_snapshot() -> String {
     out
 }
 
-/// `fs://vfs` 的行动分发。
+/// `fs/vfs` 的行动分发。
 ///
 /// 用法：
 /// * `write <路径> <内容>` —— 覆盖写入文本

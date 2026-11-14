@@ -1,4 +1,4 @@
-﻿//! 文本模式桌面 —— 80×25 单元格「假显存」+ 窗口合成。
+//! 文本模式桌面 —— 80×25 单元格「假显存」+ 窗口合成。
 //!
 //! 参考 Linux 桌面环境（GNOME / KDE / Xfce）的布局：
 //! * 顶部面板：应用菜单 + 系统状态（时钟、网络、电源）
@@ -818,7 +818,7 @@ fn draw_monitor(
         s.write(
             x + 2,
             y + 3,
-            "(空帧 — 先用 fbpreview / act driver://framebuffer 填充)",
+            "(空帧 — 先用 fbpreview / act driver/framebuffer 填充)",
             color::OVERLAY0,
             color::BASE,
         );
@@ -831,7 +831,7 @@ pub fn render(info: &DesktopInfo) -> String {
     format!("\x1b[2J\x1b[?25l{}{}", screen.render(), "\x1b[?25h")
 }
 
-/// 全局帧缓冲 (感知通道 `gpu://framebuffer` 的实体)。
+/// 全局帧缓冲 (感知通道 `gpu/framebuffer` 的实体)。
 pub fn framebuffer() -> &'static Mutex<Framebuffer> {
     static FB: OnceLock<Mutex<Framebuffer>> = OnceLock::new();
     FB.get_or_init(|| Mutex::new(Framebuffer::new(COLS * ADVANCE, ROWS * LINE_HEIGHT)))
@@ -909,8 +909,8 @@ mod tests {
     fn compose_fills_screen() {
         let info = DesktopInfo {
             channels: vec![
-                ("context://ontology".into(), "context".into(), 3),
-                ("gpu://vram".into(), "gpu".into(), 1),
+                ("context/ontology".into(), "context".into(), 3),
+                ("gpu/vram".into(), "gpu".into(), 1),
             ],
             tokens: 3,
             panel_time: "15:30".into(),

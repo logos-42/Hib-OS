@@ -650,7 +650,7 @@ pub fn theme_manager() -> &'static Mutex<ThemeManager> {
     THEME_MANAGER.get_or_init(|| Mutex::new(ThemeManager::new()))
 }
 
-/// `sense gui://theme`：返回主题管理器状态摘要。
+/// `sense gui/theme`：返回主题管理器状态摘要。
 pub fn theme_sense() -> String {
     let tm = theme_manager().lock().unwrap();
     let t = tm.current_theme();
@@ -665,7 +665,7 @@ pub fn theme_sense() -> String {
     )
 }
 
-/// `act gui://theme <op> ...`：对主题管理器执行行动。
+/// `act gui/theme <op> ...`：对主题管理器执行行动。
 pub fn theme_act(payload: &str) -> Result<String, String> {
     let mut it = payload.split_whitespace();
     let tm = theme_manager();

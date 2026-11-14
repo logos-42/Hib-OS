@@ -32,9 +32,9 @@ fn syscall_lock() -> &'static SpinLock<()> {
 pub fn sys_sense(name: &str) -> Option<String> {
     let _guard = syscall_lock().lock();
     match name {
-        "fs://vfs" => Some(fs_sense_snapshot()),
-        "dev://timer" => Some(format!("now={}ns", get_time_ns())),
-        "dev://null" => Some("null device".to_string()),
+        "fs/vfs" => Some(fs_sense_snapshot()),
+        "dev/timer" => Some(format!("now={}ns", get_time_ns())),
+        "dev/null" => Some("null device".to_string()),
         _ => None,
     }
 }
@@ -47,9 +47,9 @@ pub fn sys_sense(name: &str) -> Option<String> {
 pub fn sys_act(name: &str, payload: &str) -> Option<SysCallResult> {
     let _guard = syscall_lock().lock();
     match name {
-        "fs://vfs" => Some(fs_act_dispatch(payload)),
-        "dev://null" => Some(Ok(format!("已丢弃 {} 字节", payload.len()))),
-        "dev://timer" => Some(Ok(format!("now={}ns", get_time_ns()))),
+        "fs/vfs" => Some(fs_act_dispatch(payload)),
+        "dev/null" => Some(Ok(format!("已丢弃 {} 字节", payload.len()))),
+        "dev/timer" => Some(Ok(format!("now={}ns", get_time_ns()))),
         _ => None,
     }
 }

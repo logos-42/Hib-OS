@@ -1,4 +1,4 @@
-﻿//! swap 区模拟（内存文件作为后端）。
+//! swap 区模拟（内存文件作为后端）。
 //!
 //! 以宿主文件系统文件作为 swap 后端，模拟页交换进出：
 //!
@@ -16,7 +16,7 @@
 //! 并发：全局 `SwapArea` 单例由 `OnceLock<Mutex<...>>` 守护；上层可沿用
 //! `kernel/lease.rs` 的单写者租约对 swap 区做独占写。
 //! 能力：swap 读写受 `kernel/caps.rs` 的 `CAP_SYS_ADMIN` 门禁。
-//! 通道：`swap://area` 映射到 `sense.rs` / `act_swap`。
+//! 通道：`swap/area` 映射到 `sense.rs` / `act_swap`。
 
 use std::collections::BTreeMap;
 use std::fs::{self, OpenOptions};
@@ -389,9 +389,9 @@ pub fn swap_is_initialized() -> bool {
     swap_area().lock().unwrap().is_some()
 }
 // =====================================================================================
-// 通道行动：act_swap —— 供 sense.rs `swap://area` 分支调用
+// 通道行动：act_swap —— 供 sense.rs `swap/area` 分支调用
 // =====================================================================================
-/// `swap://area` 通道的行动入口。
+/// `swap/area` 通道的行动入口。
 ///
 /// 支持子命令：
 /// * `init <path> <max_pages>` —— 初始化全局 swap 区；
@@ -404,10 +404,10 @@ pub fn act_swap(payload: &str) -> Result<String, String> {
     let mut it = payload.split_whitespace();
     match it.next().unwrap_or("") {
         "init" => {
-            let path = it.next().ok_or("用法: act swap://area init <path> <max_pages>")?;
+            let path = it.next().ok_or("用法: act swap/area init <path> <max_pages>")?;
             let max_pages: usize = it
                 .next()
-                .ok_or("用法: act swap://area init <path> <max_pages>")?
+                .ok_or("用法: act swap/area init <path> <max_pages>")?
                 .parse()
                 .map_err(|_| "无效 max_pages".to_string())?;
             init_swap(Path::new(path), max_pages)
@@ -417,7 +417,7 @@ pub fn act_swap(payload: &str) -> Result<String, String> {
         "out" => {
             let page_addr: usize = it
                 .next()
-                .ok_or("用法: act swap://area out <page_addr> <data>")?
+                .ok_or("用法: act swap/area out <page_addr> <data>")?
                 .parse()
                 .map_err(|_| "无效页地址".to_string())?;
             let data = it.next().ok_or("缺少数据")?.as_bytes().to_vec();
@@ -432,7 +432,7 @@ pub fn act_swap(payload: &str) -> Result<String, String> {
         "in" => {
             let slot_idx: usize = it
                 .next()
-                .ok_or("用法: act swap://area in <slot>")?
+                .ok_or("用法: act swap/area in <slot>")?
                 .parse()
                 .map_err(|_| "无效插槽".to_string())?;
             let data = swap_in(SwapSlot(slot_idx)).map_err(|e| format!("换入失败: {:?}", e))?;
@@ -457,7 +457,7 @@ pub fn act_swap(payload: &str) -> Result<String, String> {
         "free" => {
             let slot_idx: usize = it
                 .next()
-                .ok_or("用法: act swap://area free <slot>")?
+                .ok_or("用法: act swap/area free <slot>")?
                 .parse()
                 .map_err(|_| "无效插槽".to_string())?;
             free_swap_slot(SwapSlot(slot_idx)).map_err(|e| format!("释放失败: {:?}", e))?;
@@ -466,7 +466,7 @@ pub fn act_swap(payload: &str) -> Result<String, String> {
         "fault" => {
             let addr: usize = it
                 .next()
-                .ok_or("用法: act swap://area fault <addr>")?
+                .ok_or("用法: act swap/area fault <addr>")?
                 .parse()
                 .map_err(|_| "无效地址".to_string())?;
             match handle_page_fault(addr) {

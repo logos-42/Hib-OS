@@ -12,7 +12,7 @@
 //! * Negotiation (协商) —— 智能体间资源与目标协商，等价于死锁避免 / 资源谈判；
 //! * ConflictResolution (冲突解决) —— 智能体冲突的调解机制，等价于调度冲突解决；
 //! * Reputation (信誉) —— 智能体的信任度评分，等价于进程优先级 / 信用评分；
-//! * SocietyEngine (社会引擎) —— 统一入口，通过 society://* 通道暴露。
+//! * SocietyEngine (社会引擎) —— 统一入口，通过 society/* 通道暴露。
 //!
 //! 所有结构均为纯 Rust 原型，供内核统一核算与调度。
 
@@ -780,7 +780,7 @@ pub fn society_act(payload: &str) -> Result<String, String> {
     let mut it = payload.split_whitespace();
     match it.next() {
         Some("register-agent") => {
-            let name = it.next().ok_or("用法: society:// register-agent <名称> <类型>")?;
+            let name = it.next().ok_or("用法: society/ register-agent <名称> <类型>")?;
             let agent_type = it.next().unwrap_or("generic");
             let mut eng = society_engine().lock().unwrap();
             let id = eng.register_agent(name, agent_type);

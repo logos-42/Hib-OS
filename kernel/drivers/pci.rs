@@ -1,6 +1,6 @@
 //! PCI 枚举与配置空间。
 //!
-//! 建模为 `dev://pci/<bus>:<device>.<function>` 通道，
+//! 建模为 `dev/pci/<bus>:<device>.<function>` 通道，
 //! 每个 PCI 设备一个通道，`sense` 可读取其配置空间快照。
 
 use alloc::collections::BTreeMap; use alloc::string::String; use alloc::vec::Vec;
@@ -27,9 +27,9 @@ pub struct PciDevice {
 }
 
 impl PciDevice {
-    /// 通道名：`dev://pci/<bus>:<device>.<function>`
+    /// 通道名：`dev/pci/<bus>:<device>.<function>`
     pub fn channel(&self) -> String {
-        format!("dev://pci/{}:{}.{}", self.bus, self.device, self.function)
+        format!("dev/pci/{}:{}.{}", self.bus, self.device, self.function)
     }
 
     pub fn id(&self) -> String {
@@ -89,7 +89,7 @@ pub fn enumerate_pci() -> Vec<PciDevice> {
     bus.devices()
 }
 
-/// 返回指定通道的 PCI 设备快照字符串（供 `sense dev://pci/...` 使用）。
+/// 返回指定通道的 PCI 设备快照字符串（供 `sense dev/pci/...` 使用）。
 pub fn pci_channel(channel: &str) -> Option<String> {
     let bus = pci_bus().lock();
     bus.find(channel).map(|d| {
@@ -116,20 +116,20 @@ mod tests {
     #[test]
     fn pci_channel_format_and_id() {
         let dev = PciDevice { bus: 0, device: 2, function: 0, vendor_id: 0x8086, device_id: 0x5916, class_code: CLASS_DISPLAY, subclass: 0x00, irq_line: 16, bar0: 0 };
-        assert_eq!(dev.channel(), "dev://pci/0:2.0");
+        assert_eq!(dev.channel(), "dev/pci/0:2.0");
         assert_eq!(dev.id(), "8086:5916");
 
         let dev1 = PciDevice { bus: 1, device: 7, function: 3, vendor_id: 0x10de, device_id: 0x1f08, class_code: CLASS_DISPLAY, subclass: 0x00, irq_line: 19, bar0: 0 };
-        assert_eq!(dev1.channel(), "dev://pci/1:7.3");
+        assert_eq!(dev1.channel(), "dev/pci/1:7.3");
     }
 
     #[test]
     fn pci_channel_snapshot() {
         enumerate_pci();
-        let snap = pci_channel("dev://pci/0:2.0").expect("应能找到设备");
+        let snap = pci_channel("dev/pci/0:2.0").expect("应能找到设备");
         assert!(snap.contains("8086"));
         assert!(snap.contains("5916"));
         assert!(snap.contains("irq=16"));
-        assert!(pci_channel("dev://pci/99:99.9").is_none());
+        assert!(pci_channel("dev/pci/99:99.9").is_none());
     }
 }

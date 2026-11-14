@@ -1,4 +1,4 @@
-﻿//! 完整 TCP 协议栈（kernel/net/tcp_stack.rs）。
+//! 完整 TCP 协议栈（kernel/net/tcp_stack.rs）。
 //!
 //! 建立于 `kernel/net/tcp.rs` 的 `TcpLayer`/`TcpSegment`/`TcpState` 之上，
 //! 填充更完整的 TCP 状态机（LISTEN/SYN_SENT/SYN_RECEIVED/ESTABLISHED/
@@ -10,7 +10,7 @@
 //!   `tcp::TcpSegment`，不复用 `TcpLayer` 的内部状态，避免借用冲突。
 //! * 并发：连接表写入由 `lease.rs` 的单写者租约 + epoch CAS 保护，优先于悲观锁。
 //! * 安全：绑定/连接等操作校验 `caps.rs` 的能力位（`CAP_NET_BIND`、`CAP_NET_RAW`）。
-//! * 感知通道：`net://tcp_stack`（供 `sense`/`act` 查询连接表、拥塞状态、重传统计）。
+//! * 感知通道：`net/tcp_stack`（供 `sense`/`act` 查询连接表、拥塞状态、重传统计）。
 //!
 //! 接口：`tcp_connect(local_port, remote_ip, remote_port)` / `tcp_send(key, data)` /
 //! `tcp_recv(key, len)` / `tcp_accept(listener_port)` / `tcp_close(key)` /
@@ -379,7 +379,7 @@ impl TcpStack {
         }
     }
 
-    /// 全局 TCP 协议栈单例（`net://tcp_stack` 通道后端）。
+    /// 全局 TCP 协议栈单例（`net/tcp_stack` 通道后端）。
     pub fn stack() -> &'static SpinLock<TcpStack> {
         static STACK: OnceLock<SpinLock<TcpStack>> = OnceLock::new();
         STACK.get_or_init(|| SpinLock::new(Self::new([10, 0, 0, 2])))
@@ -837,7 +837,7 @@ impl TcpStack {
     pub fn active_count(&self) -> u64 {
         self.conns.values().filter(|c| c.state != TcpState::Closed && c.state != TcpState::Listen).count() as u64
     }
-    /// 状态快照（供 `sense net://tcp_stack`）。
+    /// 状态快照（供 `sense net/tcp_stack`）。
     pub fn status(&self) -> String {
         let mut lines: Vec<String> = self.conns.values().map(|c| {
             format!("  {} state={} cwnd={} ssthresh={} snd_una={} snd_nxt={} rcv_nxt={} rto={}ms retrans={}",
@@ -857,16 +857,16 @@ impl TcpStack {
 }
 
 // =======================================================================
-// sense/act 接口（net://tcp_stack）
+// sense/act 接口（net/tcp_stack）
 // =======================================================================
 
-/// 查询 TCP 协议栈状态快照（供 `sense net://tcp_stack`）。
+/// 查询 TCP 协议栈状态快照（供 `sense net/tcp_stack`）。
 pub fn tcp_stack_sense_snapshot() -> String {
     let st = TcpStack::stack().lock();
     st.status()
 }
 
-/// 对 TCP 协议栈通道执行行动（供 `act net://tcp_stack`）。
+/// 对 TCP 协议栈通道执行行动（供 `act net/tcp_stack`）。
 /// 负载：`stats` / `conns` / `connect <port> <ip> <rport>` / `send <port> <hexdata>` / `close <port>`。
 pub fn tcp_stack_act_raw(payload: &str) -> Result<String, String> {
     let mut it = payload.split_whitespace();
@@ -938,7 +938,7 @@ pub fn tcp_stack_act_raw(payload: &str) -> Result<String, String> {
             let segs = st.close(&key)?;
             Ok(format!("tcp_close port={} segs={}", port, segs.len()))
         }
-        _ => Err("用法: act net://tcp_stack stats | conns | connect <port> <ip> <rport> | send <port> <hex> | close <port>".to_string()),
+        _ => Err("用法: act net/tcp_stack stats | conns | connect <port> <ip> <rport> | send <port> <hex> | close <port>".to_string()),
     }
 }
 

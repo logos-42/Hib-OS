@@ -10,10 +10,10 @@
 //! 正确版本，对外暴露 `&mut self` 接口，方便上层封装同步原语。
 //!
 //! 能力模型：物理页框分配受 `kernel/caps.rs` 的 `CAP_SYS_ADMIN` 门禁；
-//! 普通意识主体仅可通过 `buddy://stats` 通道观测空闲/已用统计。
+//! 普通意识主体仅可通过 `buddy/stats` 通道观测空闲/已用统计。
 //!
 //! 通道集成：`buddy_alloc` / `buddy_free` / `buddy_summary` 全局函数供
-//! `sense.rs` `buddy://stats` 分支与 `act_buddy` 行动入口调用。
+//! `sense.rs` `buddy/stats` 分支与 `act_buddy` 行动入口调用。
 
 use std::collections::HashSet;
 use std::sync::{Mutex, OnceLock};
@@ -254,7 +254,7 @@ static BUDDY: OnceLock<Mutex<BuddyAllocator>> = OnceLock::new();
 fn buddy_global() -> &'static Mutex<BuddyAllocator> {
     BUDDY.get_or_init(|| Mutex::new(BuddyAllocator::new(1 << 20, 0)))
 }
-/// 分配 2^order 页大小的块，返回首帧地址（供 `buddy://stats alloc <order>`）。
+/// 分配 2^order 页大小的块，返回首帧地址（供 `buddy/stats alloc <order>`）。
 pub fn buddy_alloc(order: usize) -> Result<PageAddr, AllocError> {
     let mut b = buddy_global().lock().unwrap();
     b.alloc_order(order).map(PageAddr)
@@ -264,11 +264,11 @@ pub fn buddy_alloc_bytes(size: usize) -> Result<PageAddr, AllocError> {
     let mut b = buddy_global().lock().unwrap();
     b.alloc(size).map(PageAddr)
 }
-/// 释放由 `buddy_alloc` 得到的块（供 `buddy://stats free <page> <order>`）。
+/// 释放由 `buddy_alloc` 得到的块（供 `buddy/stats free <page> <order>`）。
 pub fn buddy_free(addr: PageAddr, order: usize) -> Result<(), AllocError> {
     buddy_global().lock().unwrap().free(addr.0, order)
 }
-/// 生成分配器统计摘要（供 `buddy://stats` 通道展示）。
+/// 生成分配器统计摘要（供 `buddy/stats` 通道展示）。
 pub fn buddy_summary() -> String {
     let b = buddy_global().lock().unwrap();
     let s = b.stats();
@@ -298,9 +298,9 @@ pub fn buddy_free_frames() -> usize {
     b.total_frames - b.allocated_frames
 }
 // =====================================================================================
-// 通道行动：act_buddy —— 供 sense.rs `buddy://stats` 分支调用
+// 通道行动：act_buddy —— 供 sense.rs `buddy/stats` 分支调用
 // =====================================================================================
-/// `buddy://stats` 通道的行动入口。
+/// `buddy/stats` 通道的行动入口。
 ///
 /// 支持子命令：
 /// * `alloc <order>` —— 分配 2^order 页大小的块，返回首帧地址；
@@ -313,7 +313,7 @@ pub fn act_buddy(payload: &str) -> Result<String, String> {
         "alloc" => {
             let order: usize = it
                 .next()
-                .ok_or("用法: act buddy://stats alloc <order>")?
+                .ok_or("用法: act buddy/stats alloc <order>")?
                 .parse()
                 .map_err(|_| "无效阶数".to_string())?;
             let addr = buddy_alloc(order).map_err(|e| format!("分配失败: {:?}", e))?;
@@ -327,12 +327,12 @@ pub fn act_buddy(payload: &str) -> Result<String, String> {
         "free" => {
             let page: usize = it
                 .next()
-                .ok_or("用法: act buddy://stats free <page> <order>")?
+                .ok_or("用法: act buddy/stats free <page> <order>")?
                 .parse()
                 .map_err(|_| "无效帧号".to_string())?;
             let order: usize = it
                 .next()
-                .ok_or("用法: act buddy://stats free <page> <order>")?
+                .ok_or("用法: act buddy/stats free <page> <order>")?
                 .parse()
                 .map_err(|_| "无效阶数".to_string())?;
             buddy_free(PageAddr(page), order).map_err(|e| format!("释放失败: {:?}", e))?;
@@ -341,7 +341,7 @@ pub fn act_buddy(payload: &str) -> Result<String, String> {
         "bytes" => {
             let size: usize = it
                 .next()
-                .ok_or("用法: act buddy://stats bytes <size>")?
+                .ok_or("用法: act buddy/stats bytes <size>")?
                 .parse()
                 .map_err(|_| "无效大小".to_string())?;
             let addr = buddy_alloc_bytes(size).map_err(|e| format!("分配失败: {:?}", e))?;

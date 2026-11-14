@@ -89,7 +89,7 @@ impl Semaphore {
         if self.try_acquire() {
             return true;
         }
-        let key = format!("sem://{}", self.id);
+        let key = format!("sem/{}", self.id);
         note_block(&key);
         let deadline = timeout.map(|d| Instant::now() + d);
         let mut g = self.state.lock().unwrap();
@@ -135,7 +135,7 @@ impl Semaphore {
 
     /// 归还一个配额，并向等待该信号量的调度域令牌发 wake_key。
     pub fn release(&self) {
-        let key = format!("sem://{}", self.id);
+        let key = format!("sem/{}", self.id);
         let mut g = self.state.lock().unwrap();
         g.count += 1;
         g.releases += 1;
@@ -211,7 +211,7 @@ impl Barrier {
     ///
     /// `timeout` 到期仍不对齐时返回 `None`（调用方应视为"世界观不一致"）。
     pub fn arrive_and_wait(&self, timeout: Option<Duration>) -> Option<u64> {
-        let key = format!("barrier://{}", self.id);
+        let key = format!("barrier/{}", self.id);
         note_block(&key);
         let deadline = timeout.map(|d| Instant::now() + d);
         let mut g = self.state.lock().unwrap();
@@ -225,7 +225,7 @@ impl Barrier {
             g.epoch += 1;
             g.trips += 1;
             let ep = g.epoch;
-            let key = format!("barrier://{}", self.id);
+            let key = format!("barrier/{}", self.id);
             drop(g);
             self.cv.notify_all();
             // 屏障到达即通道事件：唤醒等待该屏障的调度域令牌。
@@ -420,7 +420,7 @@ impl<T> Drop for PmGuard<'_, T> {
                 }
             }
             // 互斥锁释放即通道事件：唤醒等待该锁的调度域令牌。
-            let key = format!("pmutex://{:p}", self.mutex);
+            let key = format!("pmutex/{:p}", self.mutex);
             exec::signal(&key);
             self.mutex.cv.notify_one();
         }
@@ -483,7 +483,7 @@ pub fn named_barrier(name: &str, n: usize) -> Arc<Barrier> {
         .clone()
 }
 
-/// 同步原语总览（供 `sense sync://primitives`）。
+/// 同步原语总览（供 `sense sync/primitives`）。
 pub fn status() -> String {
     let sems = {
         let map = NAMED_SEMS.get_or_init(|| Mutex::new(BTreeMap::new()));

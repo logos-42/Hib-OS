@@ -1,13 +1,13 @@
-//! 信念通道 —— AI 原生的「我认为世界如何」`belief://self`。
+//! 信念通道 —— AI 原生的「我认为世界如何」`belief/self`。
 //!
 //! 一条信念 = **一个可证伪的命题** + **置信度 0-100** + **证据计数**。
 //! 信念不产生行动，只描述世界；判断力通道会读取它来做裁决。
 //!
-//! * `sense belief://self`
-//! * `act belief://self believe <命题> <置信度 0-100>`
-//! * `act belief://self observe <命题> <±增量>`（新增一条支持/反驳证据）
-//! * `act belief://self retract <命题>`
-//! * `act belief://self weak [阈值]`
+//! * `sense belief/self`
+//! * `act belief/self believe <命题> <置信度 0-100>`
+//! * `act belief/self observe <命题> <±增量>`（新增一条支持/反驳证据）
+//! * `act belief/self retract <命题>`
+//! * `act belief/self weak [阈值]`
 
 use std::sync::{Mutex, OnceLock};
 
@@ -175,7 +175,7 @@ impl Beliefs {
 
 static BELIEFS: OnceLock<Mutex<Beliefs>> = OnceLock::new();
 
-/// 全局信念集合（`belief://self` 的实体）。
+/// 全局信念集合（`belief/self` 的实体）。
 pub fn beliefs() -> &'static Mutex<Beliefs> {
     BELIEFS.get_or_init(|| Mutex::new(Beliefs::new()))
 }

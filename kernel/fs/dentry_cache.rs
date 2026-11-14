@@ -1,4 +1,4 @@
-﻿//! 目录项缓存（dcache）与 inode 缓存。
+//! 目录项缓存（dcache）与 inode 缓存。
 //!
 //! 提供名称查找（dentry lookup）、dentry/inode 缓存、LRU 淘汰、inode 引用计数。
 //! 哈希键为 (父 inode 号，名称)，支持 `lookup` / `insert` / `invalidate` / `prune`。
@@ -435,14 +435,14 @@ impl DentryCacheCaps {
 }
 
 // ============================================================================
-// sense/act 通道接口：dcache://<设备名>
+// sense/act 通道接口：dcache/<设备名>
 // ============================================================================
 
 /// 感知目录项缓存通道：返回 dcache 状态摘要。
 ///
-/// 通道名形式：`dcache://<设备名>`
+/// 通道名形式：`dcache/<设备名>`
 pub fn probe_dentry(name: &str) -> Option<String> {
-    let channel = format!("dcache://{}", name);
+    let channel = format!("dcache/{}", name);
     let epoch = lease::epoch(&channel);
     Some(format!(
         "channel={} type=dcache epoch={} ops=lookup|insert|invalidate|prune|stats",
@@ -458,10 +458,10 @@ pub fn probe_dentry(name: &str) -> Option<String> {
 pub fn act_dentry(name: &str, payload: &str) -> Option<Result<String, String>> {
     let mut tokens = payload.split_whitespace();
     let sub = tokens.next().unwrap_or("");
-    let channel = format!("dcache://{}", name);
+    let channel = format!("dcache/{}", name);
     match sub {
         "stats" => Some(Ok(format!(
-            "dcache://{} stats=placeholder epoch={}",
+            "dcache/{} stats=placeholder epoch={}",
             name,
             lease::epoch(&channel)
         ))),
@@ -789,7 +789,7 @@ mod tests {
 
     #[test]
     fn dentry_leased_single_writer() {
-        let cache = DentryCacheLeased::new(16, "dcache://test-lease");
+        let cache = DentryCacheLeased::new(16, "dcache/test-lease");
         assert!(cache.acquire_dcache_lease(101).is_ok());
         let err = cache.acquire_dcache_lease(102).unwrap_err();
         assert_eq!(err.holder, crate::exec::101);
@@ -800,7 +800,7 @@ mod tests {
 
     #[test]
     fn dentry_leased_insert_invalidate_commit_epoch() {
-        let cache = DentryCacheLeased::new(16, "dcache://test-lease2");
+        let cache = DentryCacheLeased::new(16, "dcache/test-lease2");
         let ep0 = cache.epoch();
         let ep1 = cache.acquire_dcache_lease(201).unwrap();
         assert_eq!(ep1, ep0);
@@ -820,7 +820,7 @@ mod tests {
 
     #[test]
     fn dentry_leased_stale_epoch_rejected() {
-        let cache = DentryCacheLeased::new(16, "dcache://test-lease3");
+        let cache = DentryCacheLeased::new(16, "dcache/test-lease3");
         let ep = cache.acquire_dcache_lease(301).unwrap();
         let _ = cache.insert_under_lease(
             301, ep, Dentry::new("bar", 1, 11),
@@ -836,7 +836,7 @@ mod tests {
 
     #[test]
     fn dentry_leased_force_clear() {
-        let cache = DentryCacheLeased::new(16, "dcache://test-lease4");
+        let cache = DentryCacheLeased::new(16, "dcache/test-lease4");
         let ep0 = cache.epoch();
         let ep1 = cache.force_clear(401);
         assert!(ep1 > ep0);
@@ -873,17 +873,17 @@ mod tests {
 
     #[test]
     fn dentry_probe_channel() {
-        let snap = probe_dentry("dcache://ram0").unwrap();
-        assert!(snap.contains("dcache://ram0"));
+        let snap = probe_dentry("dcache/ram0").unwrap();
+        assert!(snap.contains("dcache/ram0"));
         assert!(snap.contains("epoch="));
         assert!(snap.contains("ops="));
     }
 
     #[test]
     fn dentry_act_channel_stats_epoch() {
-        let r = act_dentry("dcache://ram0", "stats").unwrap().unwrap();
+        let r = act_dentry("dcache/ram0", "stats").unwrap().unwrap();
         assert!(r.contains("stats=placeholder"));
-        let r = act_dentry("dcache://ram0", "epoch").unwrap().unwrap();
+        let r = act_dentry("dcache/ram0", "epoch").unwrap().unwrap();
         assert!(r.contains("epoch="));
     }
 }

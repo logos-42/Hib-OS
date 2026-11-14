@@ -9,7 +9,7 @@
 //! * PciDevice：厂商 ID、设备 ID、类代码、子类、编程接口、BAR 空间、中断行、命令/状态寄存器
 //! * PCI 配置空间读写（256 字节标准头 + 扩展能力）
 //! * 设备枚举（总线/设备/功能）、BAR 大小探测
-//! * sense/act 通道：`drv://pci`
+//! * sense/act 通道：`drv/pci`
 
 use alloc::collections::BTreeMap; use alloc::vec::Vec; use alloc::boxed::Box; use alloc::string::String; use alloc::string::ToString;
 use crate::ksync::{SpinLock, OnceLock};
@@ -121,9 +121,9 @@ impl PciDevice {
         format!("{:02x}:{:02x}.{}", self.bus, self.device, self.function)
     }
 
-    /// 通道名：`drv://pci/<bus>:<device>.<function>`。
+    /// 通道名：`drv/pci/<bus>:<device>.<function>`。
     pub fn channel(&self) -> String {
-        format!("drv://pci/{}", self.bdf())
+        format!("drv/pci/{}", self.bdf())
     }
 
     /// 设备 ID 字符串：<vendor>:<device>。
@@ -208,7 +208,7 @@ impl PciBus {
         Self { config, devices: BTreeMap::new() }
     }
 
-    /// 全局 PCI 总线实例（`drv://pci` 通道后端）。
+    /// 全局 PCI 总线实例（`drv/pci` 通道后端）。
     pub fn bus() -> &'static SpinLock<PciBus> {
         static BUS: OnceLock<SpinLock<PciBus>> = OnceLock::new();
         BUS.get_or_init(|| SpinLock::new(Self::new()))
@@ -405,16 +405,16 @@ impl PciBus {
 }
 
 // =======================================================================
-// sense/act 接口（drv://pci）
+// sense/act 接口（drv/pci）
 // ======================================================================
 
-/// 查询 PCI 总线状态快照（供 `sense drv://pci`）。
+/// 查询 PCI 总线状态快照（供 `sense drv/pci`）。
 pub fn pci_sense_snapshot() -> String {
     let bus = PciBus::bus().lock();
     bus.status()
 }
 
-/// 对 PCI 通道执行行动（供 `act drv://pci`）。负载：`scan` / `list` / `class <代码>` / `bdf <bdf>`。
+/// 对 PCI 通道执行行动（供 `act drv/pci`）。负载：`scan` / `list` / `class <代码>` / `bdf <bdf>`。
 pub fn pci_act_raw(payload: &str) -> Result<String, String> {
     let mut it = payload.split_whitespace();
     match it.next() {
@@ -442,7 +442,7 @@ pub fn pci_act_raw(payload: &str) -> Result<String, String> {
                 None => Err(format!("未找到设备 {}", bdf)),
             }
         }
-        _ => Err("用法: act drv://pci scan | list | class <代码> | bdf <bdf>".to_string()),
+        _ => Err("用法: act drv/pci scan | list | class <代码> | bdf <bdf>".to_string()),
     }
 }
 
@@ -577,7 +577,7 @@ mod tests {
         ];
         let dev = PciDevice { bus: 0, device: 5, function: 1, vendor_id: 0x8086, device_id: 0x15F2, class_code: 0x03, subclass: 0x00, prog_if: 0x00, revision_id: 0x00, irq_line: 16, command: 0, status: 0, bars, cap_ptr: 0, multi_function: true };
         assert_eq!(dev.bdf(), "00:05.1");
-        assert_eq!(dev.channel(), "drv://pci/00:05.1");
+        assert_eq!(dev.channel(), "drv/pci/00:05.1");
         assert_eq!(dev.id_str(), "8086:15f2");
         assert!(dev.is_valid());
         let inv = PciDevice { vendor_id: PCI_VENDOR_ID_NONE, ..dev };

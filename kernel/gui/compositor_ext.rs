@@ -1,4 +1,4 @@
-﻿//! 合成器扩展 —— 混合模式、透明度、圆角、阴影、动画、双缓冲与防撕裂。
+//! 合成器扩展 —— 混合模式、透明度、圆角、阴影、动画、双缓冲与防撕裂。
 //!
 //! `CompositorExt` 在 `kernel/gui/compositor.rs` 的 `Compositor` 基础上提供：
 //! * `blend(src, dst, mode)` —— 五种混合模式（正常/乘法/滤色/叠加/差值）
@@ -655,7 +655,7 @@ pub fn compositor_ext() -> &'static Mutex<CompositorExt> {
     COMPOSITOR_EXT.get_or_init(|| Mutex::new(CompositorExt::new(960, 600)))
 }
 
-/// `sense gui://compositor_ext`：返回合成器扩展状态摘要。
+/// `sense gui/compositor_ext`：返回合成器扩展状态摘要。
 pub fn compositor_ext_sense() -> String {
     let c = compositor_ext().lock().unwrap();
     format!(
@@ -671,7 +671,7 @@ pub fn compositor_ext_sense() -> String {
     )
 }
 
-/// `act gui://compositor_ext <op> ...`：对合成器扩展执行行动。
+/// `act gui/compositor_ext <op> ...`：对合成器扩展执行行动。
 pub fn compositor_ext_act(payload: &str) -> Result<String, String> {
     let mut it = payload.split_whitespace();
     let c = compositor_ext();

@@ -12,7 +12,7 @@
 //! * MemoryMount (记忆挂载点) —— 语义文件系统的挂载点，等价于挂载点；
 //! * SemanticFS (语义文件系统) —— 整个语义文件系统，等价于超级块；
 //! * AIFileWatcher (AI 文件监视器) —— 基于语义变化的文件监视，等价于 inotify；
-//! * VfsAi (AI 原生 VFS 引擎) —— 统一入口，通过 vfs_ai://* 通道暴露。
+//! * VfsAi (AI 原生 VFS 引擎) —— 统一入口，通过 vfs_ai/* 通道暴露。
 //!
 //! 所有结构均为纯 Rust 原型，无磁盘依赖，供内核统一核算与调度。
 
@@ -655,14 +655,14 @@ pub fn vfs_ai_act(payload: &str) -> Result<String, String> {
     let mut it = payload.split_whitespace();
     match it.next() {
         Some("mkdir") => {
-            let name = it.next().ok_or("用法: vfs_ai:// mkdir <名称> [父inode]")?;
+            let name = it.next().ok_or("用法: vfs_ai/ mkdir <名称> [父inode]")?;
             let parent = it.next().and_then(|s| s.parse::<u64>().ok()).unwrap_or(1);
             let mut eng = vfs_ai().lock().unwrap();
             let ino = eng.create_inode(AINodeType::Directory, name, parent)?;
             Ok(format!("已创建目录 ino={} 名称={} 父={}", ino, name, parent))
         }
         Some("create") => {
-            let name = it.next().ok_or("用法: vfs_ai:// create <名称> [父inode]")?;
+            let name = it.next().ok_or("用法: vfs_ai/ create <名称> [父inode]")?;
             let parent = it.next().and_then(|s| s.parse::<u64>().ok()).unwrap_or(1);
             let mut eng = vfs_ai().lock().unwrap();
             let (ino, file_id) = eng.create_file(name, parent)?;
@@ -677,7 +677,7 @@ pub fn vfs_ai_act(payload: &str) -> Result<String, String> {
             }
             let mut eng = vfs_ai().lock().unwrap();
             let written = eng.write_file(file_id, offset, &data)?;
-            // 注入：同步写入 L1 POSIX VFS，使 `sense fs://vfs` 可见。
+            // 注入：同步写入 L1 POSIX VFS，使 `sense fs/vfs` 可见。
             let _ = make_dir("/ai_os/vfs_ai");
             let path = format!("/ai_os/vfs_ai/{}", file_id);
             let _ = write_file(0, &path, &data);
@@ -701,7 +701,7 @@ pub fn vfs_ai_act(payload: &str) -> Result<String, String> {
             Ok(format!("已删除文件 file_id={}", file_id))
         }
         Some("lookup") => {
-            let path = it.next().ok_or("用法: vfs_ai:// lookup <路径>")?;
+            let path = it.next().ok_or("用法: vfs_ai/ lookup <路径>")?;
             let eng = vfs_ai().lock().unwrap();
             match eng.lookup(path) {
                 Some(ino) => Ok(format!("路径 {} 解析到 ino={}", path, ino)),

@@ -1,4 +1,4 @@
-﻿//! 知识图谱 —— 三元组存储与图查询。
+//! 知识图谱 —— 三元组存储与图查询。
 //!
 //! `KnowledgeGraph` 提供 `add_triple` / `remove_triple` / `query` /
 //! `query_by_subject` / `query_by_object` / `traverse` / `shortest_path`。
@@ -458,7 +458,7 @@ pub fn knowledge_graph() -> &'static Mutex<KnowledgeGraph> {
     KNOWLEDGE_GRAPH.get_or_init(|| Mutex::new(KnowledgeGraph::new()))
 }
 
-/// `sense ai://kgraph`：返回知识图谱状态摘要。
+/// `sense ai/kgraph`：返回知识图谱状态摘要。
 pub fn kgraph_sense() -> String {
     let g = knowledge_graph().lock().unwrap();
     let comms = g.communities();
@@ -471,7 +471,7 @@ pub fn kgraph_sense() -> String {
     )
 }
 
-/// `act ai://kgraph <op> ...`：对知识图谱执行行动。
+/// `act ai/kgraph <op> ...`：对知识图谱执行行动。
 pub fn kgraph_act(payload: &str) -> Result<String, String> {
     let mut it = payload.split_whitespace();
     let g = knowledge_graph();

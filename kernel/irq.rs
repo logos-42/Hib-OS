@@ -1,11 +1,11 @@
-//! 中断通道 —— `irq://<设备>` 的后端。
+//! 中断通道 —— `irq/<设备>` 的后端。
 //!
 //! Linux 思维：IRQ 编号、中断描述符表、中断上下文、软中断/tasklet。
 //! AI 通道思维：中断 = 外部世界向某个通道投递的「感知事件」；
-//! `irq://<设备>` 是一个通道，设备事件通过 `act irq://<设备> fire` 投递，
+//! `irq/<设备>` 是一个通道，设备事件通过 `act irq/<设备> fire` 投递，
 //! 等待在该通道上的执行体被 `signal` 唤醒。
 //!
-//! 中断处理器 = 高优先级执行体，绑定到 `irq://<设备>` 通道。
+//! 中断处理器 = 高优先级执行体，绑定到 `irq/<设备>` 通道。
 
 use alloc::collections::BTreeMap;
 use alloc::string::{String, ToString};
@@ -96,7 +96,7 @@ mod tests {
     fn bind_and_fire() {
         bind("timer", 42);
         let n = fire("timer");
-        assert_eq!(n, 0); // 没有 exec 在等待 irq://timer，signal 返回 0
+        assert_eq!(n, 0); // 没有 exec 在等待 irq/timer，signal 返回 0
         let s = list();
         assert!(s.contains("timer"));
         assert!(s.contains("fires=1"));

@@ -1,12 +1,12 @@
-//! 意识镜像加载器 —— `loader://<镜像>` 的后端。
+//! 意识镜像加载器 —— `loader/<镜像>` 的后端。
 //!
 //! 加载 = 把一段可调用 `sense`/`act` 的意识镜像（DSL/WASM 字节码/脚本）
 //! 映射到一个新进程的通道集；返回 proc-id。
 //!
 //! 内置镜像：
 //! * echo       —— 回声镜像，等待外部 act 唤醒后回显
-//! * sense-loop —— 持续感知 gpu://vram，适合感知驱动调度演示
-//! * act-loop   —— 持续向 lease://channels 提交，适合租约竞争演示
+//! * sense-loop —— 持续感知 gpu/vram，适合感知驱动调度演示
+//! * act-loop   —— 持续向 lease/channels 提交，适合租约竞争演示
 //! * idle       —— 空闲，只 checkpoint，不占 CPU
 
 use std::collections::BTreeMap;
@@ -35,8 +35,8 @@ fn images() -> &'static Mutex<ImageRegistry> {
             "echo".to_string(),
             ImageMeta {
                 name: "echo".to_string(),
-                description: "回声镜像：等待 proc://echo/<id> 被 signal 后回显".into(),
-                channels: vec!["proc://echo/<id>".into()],
+                description: "回声镜像：等待 proc/echo/<id> 被 signal 后回显".into(),
+                channels: vec!["proc/echo/<id>".into()],
                 load_count: 0,
             },
         );
@@ -44,8 +44,8 @@ fn images() -> &'static Mutex<ImageRegistry> {
             "sense-loop".to_string(),
             ImageMeta {
                 name: "sense-loop".into(),
-                description: "持续感知 gpu://vram 的镜像".into(),
-                channels: vec!["gpu://vram".into(), "proc://sense/<id>".into()],
+                description: "持续感知 gpu/vram 的镜像".into(),
+                channels: vec!["gpu/vram".into(), "proc/sense/<id>".into()],
                 load_count: 0,
             },
         );
@@ -53,8 +53,8 @@ fn images() -> &'static Mutex<ImageRegistry> {
             "act-loop".into(),
             ImageMeta {
                 name: "act-loop".into(),
-                description: "持续向 lease://channels 提交的镜像".into(),
-                channels: vec!["lease://channels".into(), "proc://act/<id>".into()],
+                description: "持续向 lease/channels 提交的镜像".into(),
+                channels: vec!["lease/channels".into(), "proc/act/<id>".into()],
                 load_count: 0,
             },
         );

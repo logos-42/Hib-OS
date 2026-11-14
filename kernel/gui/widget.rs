@@ -1,4 +1,4 @@
-﻿//! GUI 控件库 —— 声明式控件 + 像素级渲染 + 焦点/事件分发。
+//! GUI 控件库 —— 声明式控件 + 像素级渲染 + 焦点/事件分发。
 //!
 //! 提供 Button / Label / TextEntry / Checkbox / RadioButton / ComboBox /
 //! Slider / ProgressBar / ScrollBar / Panel / Tab 十一种控件，以及
@@ -1121,7 +1121,7 @@ impl WidgetManager {
 // sense/act 通道接口（供 kernel/sense.rs 调用）
 // ============================================================================
 
-/// 全局 WidgetManager 单例（用于 `gui://widget` 通道）。
+/// 全局 WidgetManager 单例（用于 `gui/widget` 通道）。
 static WIDGET_MANAGER: OnceLock<Mutex<WidgetManager>> = OnceLock::new();
 
 /// 获取全局控件管理器。
@@ -1129,7 +1129,7 @@ pub fn widget_manager() -> &'static Mutex<WidgetManager> {
     WIDGET_MANAGER.get_or_init(|| Mutex::new(WidgetManager::new()))
 }
 
-/// `sense gui://widget`：返回控件管理器状态摘要。
+/// `sense gui/widget`：返回控件管理器状态摘要。
 pub fn widget_sense() -> String {
     let mgr = widget_manager().lock().unwrap();
     let mut lines = vec![format!("widgets={} focused={:?}", mgr.len(), mgr.focused)];
@@ -1148,7 +1148,7 @@ pub fn widget_sense() -> String {
     lines.join("\n")
 }
 
-/// `act gui://widget <op> ...`：对控件执行行动。
+/// `act gui/widget <op> ...`：对控件执行行动。
 pub fn widget_act(payload: &str) -> Result<String, String> {
     let mut it = payload.split_whitespace();
     let mgr = widget_manager();

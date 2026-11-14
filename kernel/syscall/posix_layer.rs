@@ -1,4 +1,4 @@
-﻿//! POSIX 兼容层 —— 在 Hib OS 用户态宏内核上提供类 POSIX 系统调用。
+//! POSIX 兼容层 —— 在 Hib OS 用户态宏内核上提供类 POSIX 系统调用。
 //!
 //! 本模块与 `kernel/syscall` 的 `AiSystemCall` **并行存在，不替换**现有系统调用。
 //! 所有操作都通过统一通道的 `sense`/`act` 抽象来暴露：打开文件、读写、进程
@@ -554,7 +554,7 @@ impl PosixLayer {
 
     /// 安装 POSIX 系统调用分派（与现有 AiSystemCall 并行，不替换）。
     ///
-    /// 在 Hib OS 中，POSIX 调用通过 `sys://posix` 通道的 `act` 入口进入，
+    /// 在 Hib OS 中，POSIX 调用通过 `sys/posix` 通道的 `act` 入口进入，
     /// 此处仅做标记与一次性初始化。
     pub fn install() {
         Self::init();
@@ -1145,10 +1145,10 @@ impl PosixLayer {
             s.next_fd += 1;
             let wr = s.next_fd;
             s.next_fd += 1;
-            let pipe_id = hash_path(Path::new("pipe://"));
+            let pipe_id = hash_path(Path::new("pipe/"));
             let rd_entry = FdEntry {
                 fd: rd,
-                path: PathBuf::from("pipe://rd"),
+                path: PathBuf::from("pipe/rd"),
                 flags: OpenFlags::RDONLY,
                 offset: 0,
                 readable: true,
@@ -1157,7 +1157,7 @@ impl PosixLayer {
             };
             let wr_entry = FdEntry {
                 fd: wr,
-                path: PathBuf::from("pipe://wr"),
+                path: PathBuf::from("pipe/wr"),
                 flags: OpenFlags::WRONLY,
                 offset: 0,
                 readable: false,
@@ -1165,7 +1165,7 @@ impl PosixLayer {
                 file_id: pipe_id,
             };
             let pipe_meta = FileMeta {
-                path: PathBuf::from("pipe://rd"),
+                path: PathBuf::from("pipe/rd"),
                 size: 0,
                 mode: 0o666,
                 uid: 0,
@@ -1175,9 +1175,9 @@ impl PosixLayer {
                 link_target: None,
                 nlink: 1,
             };
-            s.fs.insert(PathBuf::from("pipe://rd"), (pipe_meta.clone(), Vec::new()));
+            s.fs.insert(PathBuf::from("pipe/rd"), (pipe_meta.clone(), Vec::new()));
             let pipe_meta_wr = FileMeta {
-                path: PathBuf::from("pipe://wr"),
+                path: PathBuf::from("pipe/wr"),
                 size: 0,
                 mode: 0o666,
                 uid: 0,
@@ -1187,7 +1187,7 @@ impl PosixLayer {
                 link_target: None,
                 nlink: 1,
             };
-            s.fs.insert(PathBuf::from("pipe://wr"), (pipe_meta_wr, Vec::new()));
+            s.fs.insert(PathBuf::from("pipe/wr"), (pipe_meta_wr, Vec::new()));
             s.fds.insert(rd, rd_entry);
             s.fds.insert(wr, wr_entry);
             Ok(rd as usize)

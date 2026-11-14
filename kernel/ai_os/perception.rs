@@ -14,7 +14,7 @@
 //! * SensorRegistry (传感器注册表) —— 可用感知设备的注册与发现；
 //! * PerceptionThreshold (感知阈值) —— 各通道的激活阈值，等价于中断屏蔽；
 //! * PerceptionLatency (感知延迟) —— 各通道端到端延迟监控；
-//! * PerceptionEngine (感知引擎) —— 统一入口，通过 perception://* 通道暴露。
+//! * PerceptionEngine (感知引擎) —— 统一入口，通过 perception/* 通道暴露。
 //!
 //! 所有结构均为纯 Rust 原型，无硬件依赖，供内核统一核算与调度。
 
@@ -884,7 +884,7 @@ pub fn perception_act(payload: &str) -> Result<String, String> {
     let mut it = payload.split_whitespace();
     match it.next() {
         Some("add-channel") => {
-            let name = it.next().ok_or("用法: perception:// add-channel <名称> <模态> <来源>")?;
+            let name = it.next().ok_or("用法: perception/ add-channel <名称> <模态> <来源>")?;
             let modality_str = it.next().unwrap_or("visual");
             let modality = match modality_str {
                 "visual" => SensoryModality::Visual,

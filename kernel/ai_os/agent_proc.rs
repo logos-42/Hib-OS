@@ -4,7 +4,7 @@
 //! * `AgentPcb` 等价于 PCB：标识、状态、优先级、模型实例、上下文窗口、能力位；
 //! * 状态机：Created → Ready → Running → (Blocked) → Completed / Failed；
 //! * `AgentTable` 提供派生 (spawn)、终止 (kill)、退出 (exit)、状态迁移与追踪；
-//! * 通过 `agent://*` 通道暴露给 `sense`/`act`。
+//! * 通过 `agent/*` 通道暴露给 `sense`/`act`。
 
 use std::collections::BTreeMap;
 use std::sync::{Mutex, OnceLock};
@@ -232,13 +232,13 @@ fn parse_priority(s: &str) -> CpuPriority {
     }
 }
 
-/// `act agent://*` 的后端：spawn / kill / list / status / trace。
+/// `act agent/*` 的后端：spawn / kill / list / status / trace。
 pub fn agent_proc_act(payload: &str) -> Result<String, String> {
     let mut it = payload.split_whitespace();
     let mut table = agents().lock().unwrap();
     match it.next() {
         Some("spawn") => {
-            let name = it.next().ok_or("用法: act agent://spawn <名字> <角色> [优先级] [模型实例]")?;
+            let name = it.next().ok_or("用法: act agent/spawn <名字> <角色> [优先级] [模型实例]")?;
             let role = it.next().unwrap_or("general");
             let prio = parse_priority(it.next().unwrap_or("medium"));
             let model = it.next().and_then(|s| s.parse::<u64>().ok());
@@ -248,7 +248,7 @@ pub fn agent_proc_act(payload: &str) -> Result<String, String> {
             Ok(format!("已派生智能体 pid={} name={}", pid, name))
         }
         Some("kill") => {
-            let key = it.next().ok_or("用法: act agent://kill <pid|名字>")?;
+            let key = it.next().ok_or("用法: act agent/kill <pid|名字>")?;
             let pid = table.resolve(key).map_err(|e| format!("未知智能体: {:?}", e))?;
             table.kill(pid).map_err(|e| format!("终止失败: {:?}", e))?;
             Ok(format!("已终止 pid={}", pid))
@@ -264,7 +264,7 @@ pub fn agent_proc_act(payload: &str) -> Result<String, String> {
             Ok(out)
         }
         Some("trace") => {
-            let key = it.next().ok_or("用法: act agent://trace <pid|名字>")?;
+            let key = it.next().ok_or("用法: act agent/trace <pid|名字>")?;
             let pid = table.resolve(key).map_err(|e| format!("未知智能体: {:?}", e))?;
             let p = table.pcb(pid).ok_or("智能体不存在")?;
             Ok(format!(

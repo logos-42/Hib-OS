@@ -1,4 +1,4 @@
-﻿//! POSIX 兼容 Socket API（kernel/net/socket_api.rs）。
+//! POSIX 兼容 Socket API（kernel/net/socket_api.rs）。
 //!
 //! 本模块在 `kernel/net` 的 tcp/udp/ip 层之上提供 BSD 风格简化版 Socket API：
 //! socket/bind/listen/accept/connect/send/recv/sendto/recvfrom/close/setsockopt/getsockopt。
@@ -11,7 +11,7 @@
 //! * Socket：socket / bind / listen / accept / connect / send / recv / sendto / recvfrom / close / setsockopt / getsockopt
 //! * 文件描述符表（fd → socket 映射）
 //! * 阻塞/非阻模式简化版
-//! * sense/act 通道：`socket://tcp`（兼容现有）
+//! * sense/act 通道：`socket/tcp`（兼容现有）
 
 use std::collections::{BTreeMap, VecDeque};
 use crate::ksync::{SpinLock, OnceLock};
@@ -238,7 +238,7 @@ impl SocketTable {
 
     pub fn contains(&self, fd: SocketFd) -> bool { self.sockets.contains_key(&fd) }
 
-    /// 全局 socket 表实例（`socket://tcp` 通道后端）。
+    /// 全局 socket 表实例（`socket/tcp` 通道后端）。
     pub fn instance() -> &'static SpinLock<SocketTable> {
         static INST: OnceLock<SpinLock<SocketTable>> = OnceLock::new();
         INST.get_or_init(|| SpinLock::new(Self::new()))
@@ -415,16 +415,16 @@ pub fn fd_exists(fd: SocketFd) -> bool {
 }
 
 // =======================================================================
-// sense/act 接口（socket://tcp）
+// sense/act 接口（socket/tcp）
 // ======================================================================
 
-/// 查询 socket 状态快照（供 `sense socket://tcp`）。
+/// 查询 socket 状态快照（供 `sense socket/tcp`）。
 pub fn socket_api_sense_snapshot() -> String {
     let st = SocketTable::instance().lock();
     format!("socket fds={}", st.len())
 }
 
-/// 对 socket 通道执行行动（供 `act socket://tcp`）。负载：`stats` / `list`。
+/// 对 socket 通道执行行动（供 `act socket/tcp`）。负载：`stats` / `list`。
 pub fn socket_api_act_raw(payload: &str) -> Result<String, String> {
     let mut it = payload.split_whitespace();
     match it.next() {
@@ -437,7 +437,7 @@ pub fn socket_api_act_raw(payload: &str) -> Result<String, String> {
             }
             Ok(out)
         }
-        _ => Err("用法: act socket://tcp stats | list".to_string()),
+        _ => Err("用法: act socket/tcp stats | list".to_string()),
     }
 }
 

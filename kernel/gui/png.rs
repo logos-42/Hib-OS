@@ -1,4 +1,4 @@
-﻿//! PNG 解码 —— 零依赖，直接产出 32bpp `Surface`。
+//! PNG 解码 —— 零依赖，直接产出 32bpp `Surface`。
 //!
 //! 项目一直坚持「图形格式自己解析」（BMP 手写、JSON 手写），PNG 也不破例：
 //! 手写 zlib/DEFLATE 解压 + PNG 行滤波 + 颜色类型展开，不引入 image/flate2。

@@ -164,7 +164,7 @@ impl IommuManager {
     }
 }
 
-/// 全局 IOMMU 管理器 (感知通道 `dev://iommu0` 的实体)。
+/// 全局 IOMMU 管理器 (感知通道 `dev/iommu0` 的实体)。
 pub fn iommu() -> &'static Mutex<IommuManager> {
     static IOMMU: OnceLock<Mutex<IommuManager>> = OnceLock::new();
     IOMMU.get_or_init(|| Mutex::new(IommuManager::new()))

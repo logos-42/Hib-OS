@@ -1,4 +1,4 @@
-﻿//! 分区表解析（MBR / GPT 简化版）。
+//! 分区表解析（MBR / GPT 简化版）。
 //!
 //! 把磁盘镜像（`DiskImage` 或任意实现块读写的设备）上的主引导记录
 //! 与 GUID 分区表解析成 `Partition` 列表，供上层文件系统挂载使用。
@@ -9,7 +9,7 @@
 //!   做乐观并发控制，避免悲观锁。读取只做快照，不阻塞。
 //! - **能力位权限**：通过 `caps::CAP_SYS_ADMIN` 校验分区表写入权限，而非 uid。
 //! - **通道接口**：提供 `probe_partition` / `act_partition`，供 `sense`/`act` 框架以
-//!   `partition://<设备>` 通道形式查询与操作分区表。
+//!   `partition/<设备>` 通道形式查询与操作分区表。
 //!
 //! ## MBR 布局（512 字节）
 //! - [0, 446)   引导代码区（446 字节）
@@ -507,7 +507,7 @@ impl PartitionTableLeased {
     /// 从磁盘解析并包装为租约保护的分区表。
     pub fn parse_from(disk: &mut DiskImage) -> Result<Self, PartitionError> {
         let table = parse(disk)?;
-        let channel = format!("partition://{}", disk.path().display());
+        let channel = format!("partition/{}", disk.path().display());
         Ok(Self {
             inner: Mutex::new(table),
             channel,
@@ -621,14 +621,14 @@ impl PartitionCaps {
 }
 
 // ============================================================================
-// sense/act 通道接口：partition://<设备路径>
+// sense/act 通道接口：partition/<设备路径>
 // ============================================================================
 
 /// 感知分区表通道：返回磁盘的分区表摘要。
 ///
-/// 通道名形式：`partition://<设备路径>`
+/// 通道名形式：`partition/<设备路径>`
 pub fn probe_partition(name: &str) -> Option<String> {
-    let dev = name.strip_prefix("partition://")?;
+    let dev = name.strip_prefix("partition/")?;
     let path = Path::new(dev);
     let mut disk = match DiskImage::open(path, true) {
         Ok(d) => d,
@@ -646,7 +646,7 @@ pub fn probe_partition(name: &str) -> Option<String> {
 /// - `parse` —— 解析并返回分区表摘要
 /// - `epoch` —— 返回当前 epoch
 pub fn act_partition(name: &str, payload: &str) -> Option<Result<String, String>> {
-    let dev = name.strip_prefix("partition://")?;
+    let dev = name.strip_prefix("partition/")?;
     let path = Path::new(dev);
     let mut tokens = payload.split_whitespace();
     let sub = tokens.next().unwrap_or("");
@@ -662,7 +662,7 @@ pub fn act_partition(name: &str, payload: &str) -> Option<Result<String, String>
             }
         }
         "epoch" => {
-            let channel = format!("partition://{}", dev);
+            let channel = format!("partition/{}", dev);
             let ep = lease::epoch(&channel);
             Some(Ok(format!("epoch={}", ep)))
         }
@@ -990,7 +990,7 @@ mod tests {
         let _ = std::fs::remove_file(&path);
         let mut disk = DiskImage::create(&path, 1024 * 512).unwrap();
         let table = parse(&mut disk).unwrap();
-        let caps_part = PartitionCaps::new(table, "partition://test".to_string());
+        let caps_part = PartitionCaps::new(table, "partition/test".to_string());
         // 只读摘要无需能力。
         let _ = caps_part.summary();
         // 修改分区需 CAP_SYS_ADMIN。
@@ -1035,7 +1035,7 @@ mod tests {
         lba0[511] = 0xAA;
         disk.write_block(0, &lba0).unwrap();
         disk.flush().unwrap();
-        let name = format!("partition://{}", path.display());
+        let name = format!("partition/{}", path.display());
         let snap = probe_partition(&name).unwrap();
         assert!(snap.contains("Mbr"));
         assert!(snap.contains("2048"));
@@ -1061,7 +1061,7 @@ mod tests {
         lba0[511] = 0xAA;
         disk.write_block(0, &lba0).unwrap();
         disk.flush().unwrap();
-        let name = format!("partition://{}", path.display());
+        let name = format!("partition/{}", path.display());
         let r = act_partition(&name, "parse").unwrap().unwrap();
         assert!(r.contains("Mbr"));
         let r = act_partition(&name, "epoch").unwrap().unwrap();

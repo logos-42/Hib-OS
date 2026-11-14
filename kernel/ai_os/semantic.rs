@@ -15,7 +15,7 @@
 //! * SemanticNamespace (语义命名空间) —— 路径到向量的映射。
 //!
 //! 所有结构均为纯 Rust 原型，无外部嵌入模型依赖，供内核统一核算与调度，
-//! 并通过 `semantic://*` 通道接入 `sense`/`act` 感知层。
+//! 并通过 `semantic/*` 通道接入 `sense`/`act` 感知层。
 
 use std::collections::BTreeMap;
 use std::sync::{Mutex, OnceLock};
@@ -719,19 +719,19 @@ pub fn semantic_act(payload: &str) -> Result<String, String> {
     let mut it = payload.split_whitespace();
     match it.next() {
         Some("index") => {
-            let text = it.next().ok_or("用法: semantic:// index <文本>")?;
+            let text = it.next().ok_or("用法: semantic/ index <文本>")?;
             let mut eng = semantic_engine().lock().unwrap();
             let id = eng.index_text(text);
             Ok(format!("已索引文本 id={} 内容={}", id, text))
         }
         Some("concept") => {
-            let name = it.next().ok_or("用法: semantic:// concept <名称>")?;
+            let name = it.next().ok_or("用法: semantic/ concept <名称>")?;
             let mut eng = semantic_engine().lock().unwrap();
             let id = eng.add_concept(name);
             Ok(format!("已添加概念 id={} 名称={}", id, name))
         }
         Some("relate") => {
-            let from = it.next().ok_or("用法: semantic:// relate <源> <目标> <关系> <权重>")?;
+            let from = it.next().ok_or("用法: semantic/ relate <源> <目标> <关系> <权重>")?;
             let to = it.next().ok_or("缺少目标")?;
             let rel_str = it.next().unwrap_or("similar");
             let relation = match rel_str {
@@ -751,7 +751,7 @@ pub fn semantic_act(payload: &str) -> Result<String, String> {
             Ok(format!("已建立关系 {} --{:?}--> {} 权重={}", from, relation, to, weight))
         }
         Some("search") => {
-            let query = it.next().ok_or("用法: semantic:// search <查询> [top_k]")?;
+            let query = it.next().ok_or("用法: semantic/ search <查询> [top_k]")?;
             let top_k = it.next().and_then(|s| s.parse::<usize>().ok()).unwrap_or(5);
             let mut eng = semantic_engine().lock().unwrap();
             let results = eng.search(query, top_k);
@@ -772,14 +772,14 @@ pub fn semantic_act(payload: &str) -> Result<String, String> {
             Ok(out)
         }
         Some("bind") => {
-            let path = it.next().ok_or("用法: semantic:// bind <路径> <文本>")?;
+            let path = it.next().ok_or("用法: semantic/ bind <路径> <文本>")?;
             let text = it.next().ok_or("缺少文本")?;
             let mut eng = semantic_engine().lock().unwrap();
             let id = eng.bind_namespace(path, text);
             Ok(format!("已绑定 {} -> id={} 文本={}", path, id, text))
         }
         Some("resolve") => {
-            let path = it.next().ok_or("用法: semantic:// resolve <路径>")?;
+            let path = it.next().ok_or("用法: semantic/ resolve <路径>")?;
             let eng = semantic_engine().lock().unwrap();
             match eng.resolve_namespace(path) {
                 Some(norm) => Ok(format!("路径 {} 解析成功 向量范数={:.3}", path, norm)),
@@ -787,7 +787,7 @@ pub fn semantic_act(payload: &str) -> Result<String, String> {
             }
         }
         Some("analogy") => {
-            let a = it.next().ok_or("用法: semantic:// analogy <A> <B> <C>")?;
+            let a = it.next().ok_or("用法: semantic/ analogy <A> <B> <C>")?;
             let b = it.next().ok_or("缺少 B")?;
             let c = it.next().ok_or("缺少 C")?;
             let mut eng = semantic_engine().lock().unwrap();
@@ -797,7 +797,7 @@ pub fn semantic_act(payload: &str) -> Result<String, String> {
             }
         }
         Some("concept-similar") => {
-            let n1 = it.next().ok_or("用法: semantic:// concept-similar <名称1> <名称2>")?;
+            let n1 = it.next().ok_or("用法: semantic/ concept-similar <名称1> <名称2>")?;
             let n2 = it.next().ok_or("缺少名称2")?;
             let eng = semantic_engine().lock().unwrap();
             match (eng.graph.get_concept(n1), eng.graph.get_concept(n2)) {

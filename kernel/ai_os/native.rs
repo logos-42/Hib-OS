@@ -1,4 +1,4 @@
-﻿//! 意识原子层 —— AI 原生 OS 的「意识原语」 (Native Consciousness Primitives)
+//! 意识原子层 —— AI 原生 OS 的「意识原语」 (Native Consciousness Primitives)
 //!
 //! 本模块实现 AI 原生操作系统最底层的意识抽象，对应传统 OS 中的
 //! 「最小执行单元」与「中断向量」概念，但重新映射到 AI 意识域：
@@ -15,7 +15,7 @@
 //! * ReflexiveLoop (反射环) —— 意识对自身意识的递归指向，产生自我意识。
 //!
 //! 所有结构均为纯 Rust 原型，无外部依赖，供内核统一核算与调度，
-//! 并通过 `native://*` 通道接入 `sense`/`act` 感知层。
+//! 并通过 `native/*` 通道接入 `sense`/`act` 感知层。
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::{Mutex, OnceLock};
@@ -809,7 +809,7 @@ pub fn native_act(payload: &str) -> Result<String, String> {
             Ok(format!("已注入视觉质原 id={} (r={} g={} b={})", id, r, g, b))
         }
         Some("inject-semantic") => {
-            let concept = it.next().ok_or("用法: native:// inject-semantic <概念>")?;
+            let concept = it.next().ok_or("用法: native/ inject-semantic <概念>")?;
             let mut eng = consciousness_engine().lock().unwrap();
             let quale = eng.factory.create_semantic(concept);
             let id = quale.id;
@@ -826,7 +826,7 @@ pub fn native_act(payload: &str) -> Result<String, String> {
             Ok(format!("已注入情感质原 id={} valence={} arousal={}", id, valence, arousal))
         }
         Some("submit-workspace") => {
-            let content = it.next().ok_or("用法: native:// submit-workspace <内容> <模态> <来源> <激活> <紧急>")?;
+            let content = it.next().ok_or("用法: native/ submit-workspace <内容> <模态> <来源> <激活> <紧急>")?;
             let modality_str = it.next().unwrap_or("semantic");
             let modality = match modality_str {
                 "visual" => QualiaModality::Visual,

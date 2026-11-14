@@ -5,7 +5,7 @@
 //! - SMP vs Master-Slave → 五调度域独立调度
 //! - 亲和性 (Affinity) → 模型实例亲和，复用 KV 缓存
 //! 
-//! 通道：`smp://*`，可被 `sense`/`act` 操作。
+//! 通道：`smp/*`，可被 `sense`/`act` 操作。
 
 // 子模块（由子智能体并行填充）
 pub mod cpu_topology;

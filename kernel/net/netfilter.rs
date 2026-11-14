@@ -1,4 +1,4 @@
-﻿//! Netfilter 防火墙（kernel/net/netfilter.rs）。
+//! Netfilter 防火墙（kernel/net/netfilter.rs）。
 //!
 //! 本模块实现简化版 Netfilter：钩子点与规则链、报文过滤 verdict、
 //! 规则匹配（源/目的 IP、端口、协议、入/出接口）、动作（ACCEPT/DROP/REJECT/LOG/NAT 简化版）、
@@ -10,7 +10,7 @@
 //! * Rule：匹配条件（源/目的 IP、端口、协议、入站/出站接口）、动作（ACCEPT/DROP/REJECT/LOG/NAT 简化版）
 //! * 钩子点：PREROUTING / INPUT / FORWARD / OUTPUT / POSTROUTING、规则链、优先级排序
 //! * NAT 简化版：SNAT / DNAT、连接跟踪表（conntrack）简化版
-//! * sense/act 通道：`netfilter://rules`
+//! * sense/act 通道：`netfilter/rules`
 
 use std::collections::{BTreeMap, VecDeque};
 use crate::ksync::{SpinLock, OnceLock};
@@ -313,7 +313,7 @@ impl Netfilter {
         }
     }
 
-    /// 全局 Netfilter 实例（`netfilter://rules` 通道后端）。
+    /// 全局 Netfilter 实例（`netfilter/rules` 通道后端）。
     pub fn instance() -> &'static SpinLock<Netfilter> {
         static INST: OnceLock<SpinLock<Netfilter>> = OnceLock::new();
         INST.get_or_init(|| SpinLock::new(Self::new()))
@@ -463,10 +463,10 @@ impl Netfilter {
 }
 
 // =======================================================================
-// sense/act 接口（netfilter://rules）
+// sense/act 接口（netfilter/rules）
 // ======================================================================
 
-/// 查询 Netfilter 状态快照（供 `sense netfilter://rules`）。
+/// 查询 Netfilter 状态快照（供 `sense netfilter/rules`）。
 pub fn netfilter_sense_snapshot() -> String {
     let nf = Netfilter::instance().lock();
     let s = &nf.stats;
@@ -476,7 +476,7 @@ pub fn netfilter_sense_snapshot() -> String {
     )
 }
 
-/// 对 netfilter 通道执行行动（供 `act netfilter://rules`）。负载：`stats` / `list <hook>` / `log`。
+/// 对 netfilter 通道执行行动（供 `act netfilter/rules`）。负载：`stats` / `list <hook>` / `log`。
 pub fn netfilter_act_raw(payload: &str) -> Result<String, String> {
     let mut it = payload.split_whitespace();
     match it.next() {
@@ -497,7 +497,7 @@ pub fn netfilter_act_raw(payload: &str) -> Result<String, String> {
             let logs = nf.recent_log();
             if logs.is_empty() { Ok("日志为空".to_string()) } else { Ok(logs.join("\n")) }
         }
-        _ => Err("用法: act netfilter://rules stats | list <hook> | log".to_string()),
+        _ => Err("用法: act netfilter/rules stats | list <hook> | log".to_string()),
     }
 }
 

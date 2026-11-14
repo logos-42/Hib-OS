@@ -1,4 +1,4 @@
-﻿//! ICMP 协议处理（kernel/net/icmp.rs）。
+//! ICMP 协议处理（kernel/net/icmp.rs）。
 //!
 //! 在 `kernel/net/ipv4.rs` 的 `IcmpPacket`（Echo Request/Reply）之上，填充更完整的
 //! ICMP 功能：Echo Request/Reply（ping）、目的不可达（Destination Unreachable）、
@@ -10,7 +10,7 @@
 //!   ICMP 处理器（`IcmpStack`），维护 echo 标识符/序列号映射与未解决查询表。
 //! * 并发：`IcmpStack` 写入由 `lease.rs` 单写者租约 + epoch CAS 保护。
 //! * 安全：发送原始 ICMP 需校验 `caps.rs` 的 `CAP_NET_RAW` 能力。
-//! * 感知通道：`net://icmp`（供 `sense`/`act` 查询统计、发送 ping、查看未解决查询）。
+//! * 感知通道：`net/icmp`（供 `sense`/`act` 查询统计、发送 ping、查看未解决查询）。
 //!
 //! 接口：`icmp_echo_request(dst, id, seq, payload)` / `icmp_echo_reply(...)` /
 //! `icmp_destination_unreachable(...)` / `icmp_time_exceeded(...)` / `icmp_process(...)`。
@@ -283,7 +283,7 @@ pub struct IcmpStats {
             stats: IcmpStats::default(),
         }
     }
-    /// 全局 ICMP 协议栈单例（`net://icmp` 通道后端）。
+    /// 全局 ICMP 协议栈单例（`net/icmp` 通道后端）。
     pub fn stack() -> &'static SpinLock<IcmpStack> {
         static STACK: OnceLock<SpinLock<IcmpStack>> = OnceLock::new();
         STACK.get_or_init(|| SpinLock::new(Self::new()))
@@ -417,7 +417,7 @@ pub struct IcmpStats {
     }
     /// 未解决查询数量。
     pub fn pending_count(&self) -> usize { self.pending.len() }
-    /// 状态快照（供 `sense net://icmp`）。
+    /// 状态快照（供 `sense net/icmp`）。
     pub fn status(&self) -> String {
         format!(
             "icmp echo_req_sent={} echo_rep_sent={} echo_rep_recv={} unreach_sent={} unreach_recv={} time_exc_sent={} time_exc_recv={} dropped={} pending={}",
@@ -460,14 +460,14 @@ fn extract_orig_dst(payload: &[u8]) -> Option<[u8; 4]> {
     Some([payload[dst_offset], payload[dst_offset + 1], payload[dst_offset + 2], payload[dst_offset + 3]])
 }
 // =======================================================================
-// sense/act 接口（net://icmp）
+// sense/act 接口（net/icmp）
 // =======================================================================
-/// 查询 ICMP 状态快照（供 `sense net://icmp`）。
+/// 查询 ICMP 状态快照（供 `sense net/icmp`）。
 pub fn icmp_sense_snapshot() -> String {
     let st = IcmpStack::stack().lock();
     st.status()
 }
-/// 对 ICMP 通道执行行动（供 `act net://icmp`）。
+/// 对 ICMP 通道执行行动（供 `act net/icmp`）。
 /// 负载：`stats` / `pending` / `ping <ip> <id> <seq> <hexpayload>` / `unreach <ip> <code>` / `timeout <ip>`。
 pub fn icmp_act_raw(payload: &str) -> Result<String, String> {
     let mut it = payload.split_whitespace();
@@ -544,7 +544,7 @@ pub fn icmp_act_raw(payload: &str) -> Result<String, String> {
             let _ = net().lock().send_ip(dst, IP_PROTO_ICMP, &bytes);
             Ok(format!("icmp time_exceeded {} ttl code={} bytes={}", fmt_ip(dst), code.as_u8(), bytes.len()))
         }
-        _ => Err("用法: act net://icmp stats | pending | ping <ip> <id> <seq> <hex> | unreach <ip> <code> | timeout <ip>".to_string()),
+        _ => Err("用法: act net/icmp stats | pending | ping <ip> <id> <seq> <hex> | unreach <ip> <code> | timeout <ip>".to_string()),
     }
 }
 /// 十六进制字符串解码为字节。

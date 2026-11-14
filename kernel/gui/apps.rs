@@ -92,7 +92,7 @@ impl AppState {
         match kind {
             AppKind::Terminal => {
                 s.lines.push("输入命令后回车，内核执行并回显结果".into());
-                s.lines.push("试试: sense gpu://vram".into());
+                s.lines.push("试试: sense gpu/vram".into());
             }
             AppKind::Notes => s.lines.push("直接打字，回车换行".into()),
             AppKind::Wallpaper => s.lines.push("按 1-8 切换壁纸风格".into()),

@@ -1,13 +1,13 @@
-//! GPU 硬件保护域 —— `gpu://domains` / `gpu://faults`。
+//! GPU 硬件保护域 —— `gpu/domains` / `gpu/faults`。
 //!
 //! Linux 用 IOMMU + MMU 把设备与进程隔离开；Hib 把"保护"暴露成可感知的通道：
 //! 每个 token / 子意识一个保护域，绑定独立的 IOMMU 域与 VRAM 配额，
 //! 越界访问不会读写到别人的显存，而是**产生 fault、挂起该主体、留下可审计记录**。
 //!
-//! * `sense gpu://domains` / `sense gpu://faults`
-//! * `act gpu://domains create <id> <配额MiB>`
-//! * `act gpu://domains access <id> <MiB>`（模拟一次显存访问）
-//! * `act gpu://domains resume <id>` / `quota <id> <MiB>` / `list`
+//! * `sense gpu/domains` / `sense gpu/faults`
+//! * `act gpu/domains create <id> <配额MiB>`
+//! * `act gpu/domains access <id> <MiB>`（模拟一次显存访问）
+//! * `act gpu/domains resume <id>` / `quota <id> <MiB>` / `list`
 
 use std::collections::BTreeMap;
 use std::sync::{Mutex, OnceLock};

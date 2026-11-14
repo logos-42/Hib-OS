@@ -12,7 +12,7 @@
 //! 并发：全局 `PagedMemoryManager` 单例由 `OnceLock<Mutex<...>>` 守护；上层可
 //! 沿用 `kernel/lease.rs` 的单写者租约对页表条目做独占写。
 //! 能力：页表映射/取消映射受 `kernel/caps.rs` 的 `CAP_SYS_ADMIN` 门禁。
-//! 通道：`pagetable://walk` 映射到 `sense.rs` / `act_pagetable`。
+//! 通道：`pagetable/walk` 映射到 `sense.rs` / `act_pagetable`。
 
 use std::collections::BTreeMap;
 use std::sync::{Mutex, OnceLock};
@@ -850,9 +850,9 @@ pub fn pt_fault_count() -> u64 {
     page_table_sim().lock().unwrap().fault_count()
 }
 // =====================================================================================
-// 通道行动：act_pagetable —— 供 sense.rs `pagetable://walk` 分支调用
+// 通道行动：act_pagetable —— 供 sense.rs `pagetable/walk` 分支调用
 // =====================================================================================
-/// `pagetable://walk` 通道的行动入口。
+/// `pagetable/walk` 通道的行动入口。
 ///
 /// 支持子命令：
 /// * `map <vaddr> <paddr> [present] [writable] [user]` —— 映射虚拟地址到物理地址；
@@ -867,7 +867,7 @@ pub fn act_pagetable(payload: &str) -> Result<String, String> {
         "map" => {
             let vaddr: u64 = it
                 .next()
-                .ok_or("用法: act pagetable://walk map <vaddr> <paddr> [present] [writable] [user]")?
+                .ok_or("用法: act pagetable/walk map <vaddr> <paddr> [present] [writable] [user]")?
                 .parse()
                 .map_err(|_| "无效虚拟地址".to_string())?;
             let paddr: u64 = it
@@ -888,7 +888,7 @@ pub fn act_pagetable(payload: &str) -> Result<String, String> {
         "unmap" => {
             let vaddr: u64 = it
                 .next()
-                .ok_or("用法: act pagetable://walk unmap <vaddr>")?
+                .ok_or("用法: act pagetable/walk unmap <vaddr>")?
                 .parse()
                 .map_err(|_| "无效虚拟地址".to_string())?;
             pt_unmap(vaddr).map_err(|e| format!("取消映射失败: {:?}", e))?;
@@ -897,7 +897,7 @@ pub fn act_pagetable(payload: &str) -> Result<String, String> {
         "translate" => {
             let vaddr: u64 = it
                 .next()
-                .ok_or("用法: act pagetable://walk translate <vaddr> [write] [user]")?
+                .ok_or("用法: act pagetable/walk translate <vaddr> [write] [user]")?
                 .parse()
                 .map_err(|_| "无效虚拟地址".to_string())?;
             let write: bool = it.next().unwrap_or("0").parse().unwrap_or(false);
@@ -913,7 +913,7 @@ pub fn act_pagetable(payload: &str) -> Result<String, String> {
         "walk" => {
             let vaddr: u64 = it
                 .next()
-                .ok_or("用法: act pagetable://walk walk <vaddr>")?
+                .ok_or("用法: act pagetable/walk walk <vaddr>")?
                 .parse()
                 .map_err(|_| "无效虚拟地址".to_string())?;
             let mut mgr = page_table_sim().lock().unwrap();
@@ -931,7 +931,7 @@ pub fn act_pagetable(payload: &str) -> Result<String, String> {
         "flush" => {
             let vaddr: u64 = it
                 .next()
-                .ok_or("用法: act pagetable://walk flush <vaddr>")?
+                .ok_or("用法: act pagetable/walk flush <vaddr>")?
                 .parse()
                 .map_err(|_| "无效虚拟地址".to_string())?;
             pt_flush_tlb(vaddr);

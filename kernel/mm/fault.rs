@@ -1,7 +1,7 @@
-//! 内存页故障模拟 —— `mem://fault` 的后端（向后兼容）。
+//! 内存页故障模拟 —— `mem/fault` 的后端（向后兼容）。
 //! 
 //! Linux 思维：页表、缺页中断、OOM killer、交换分区。
-//! AI 通道思维：内存 = `mem://ram` 通道；分配 = `lease acquire <内存通道>`；
+//! AI 通道思维：内存 = `mem/ram` 通道；分配 = `lease acquire <内存通道>`；
 //! 页故障 = `wait_next` 阻塞到内存可用；OOM = 租约冲突，治理域（root）强制回收。
 //! 
 //! 本模块维护一个极简页框分配器，用于演示「页故障 → 阻塞 → 内存可用 → 唤醒」的闭环。
@@ -128,7 +128,7 @@ pub fn stats() -> String {
     )
 }
 
-/// 回收指定进程的全部页框（供 `proc://kill` 弹出时调用）。
+/// 回收指定进程的全部页框（供 `proc/kill` 弹出时调用）。
 pub fn reclaim_proc(owner: u64) -> usize {
     let mut g = mm_state().lock().unwrap();
     let pt = match g.page_tables.remove(&owner) {

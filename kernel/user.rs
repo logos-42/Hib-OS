@@ -1,7 +1,7 @@
 //! 用户 / 身份 / 权限模型 —— AI 原生的「身份意识」。
 //!
 //! 不复制 Linux 的 /etc/passwd，而是把「当前以谁的身份行动」建模成
-//! 可感知 (sense) / 可切换 (act) 的通道 `user://db`。
+//! 可感知 (sense) / 可切换 (act) 的通道 `user/db`。
 
 use std::collections::BTreeSet;
 use std::sync::{Mutex, OnceLock};
@@ -68,7 +68,7 @@ impl UserDb {
     /// 给定 uid 能持有的 capability 集合。
     ///
     /// root (uid=0) 持有全部能力；其它用户默认只持有 `CAP_SYS_ADMIN`
-    ///（演示环境下可自行提权），其余能力需通过 `sec://caps` 显式授予。
+    ///（演示环境下可自行提权），其余能力需通过 `sec/caps` 显式授予。
     /// 这是「root 以能力集合而非 uid=0 全权」的具体体现。
     pub fn capabilities_of(uid: u32) -> BTreeSet<String> {
         if uid == 0 {

@@ -1,4 +1,4 @@
-﻿//! 模型加载器 —— GGUF/ONNX/RawTensor 模型加载、张量视图、量化与元数据。
+//! 模型加载器 —— GGUF/ONNX/RawTensor 模型加载、张量视图、量化与元数据。
 //!
 //! `ModelLoader` 提供 `load` / `unload` / `get_tensor` / `get_metadata` /
 //! `quantize` / `dequantize`。`TensorView` 描述形状、数据类型、数据指针与步长；
@@ -486,7 +486,7 @@ pub fn model_loader() -> &'static Mutex<ModelLoader> {
     MODEL_LOADER.get_or_init(|| Mutex::new(ModelLoader::new()))
 }
 
-/// `sense ai://model`：返回模型加载器状态摘要。
+/// `sense ai/model`：返回模型加载器状态摘要。
 pub fn model_loader_sense() -> String {
     let l = model_loader().lock().unwrap();
     format!(
@@ -497,7 +497,7 @@ pub fn model_loader_sense() -> String {
     )
 }
 
-/// `act ai://model <op> ...`：对模型加载器执行行动。
+/// `act ai/model <op> ...`：对模型加载器执行行动。
 pub fn model_loader_act(payload: &str) -> Result<String, String> {
     let mut it = payload.split_whitespace();
     let l = model_loader();

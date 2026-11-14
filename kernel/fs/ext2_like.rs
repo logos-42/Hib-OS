@@ -1,4 +1,4 @@
-﻿//! ext2 兼容文件系统。
+//! ext2 兼容文件系统。
 //!
 //! 参考 ext2/ext3 布局实现一个可在块设备上格式化、挂载与读写的文件系统：
 //! 超级块（魔数 0xEF53）、块组、inode 位图、数据块位图、inode 表、
@@ -1394,16 +1394,16 @@ impl Ext2FsCaps {
 }
 
 // ============================================================================
-// sense/act 通道接口：ext2://<设备路径>
+// sense/act 通道接口：ext2/<设备路径>
 // ============================================================================
 
 /// 感知 ext2 文件系统通道：返回文件系统状态摘要。
 ///
-/// 通道名形式：`ext2://<设备路径>`
+/// 通道名形式：`ext2/<设备路径>`
 pub fn probe_ext2(name: &str) -> Option<String> {
-    let dev = name.strip_prefix("ext2://")?;
+    let dev = name.strip_prefix("ext2/")?;
     let _ = dev; // 实际实例由调用方持有；此处返回通道元数据
-    let channel = format!("ext2://{}", dev);
+    let channel = format!("ext2/{}", dev);
     let epoch = lease::epoch(&channel);
     Some(format!(
         "channel={} type=ext2_fs epoch={} ops=create|open|read|write|close|unlink|mkdir|stat",
@@ -1417,13 +1417,13 @@ pub fn probe_ext2(name: &str) -> Option<String> {
 /// - `status` —— 返回文件系统状态摘要（占位）
 /// - `epoch` —— 返回当前 epoch
 pub fn act_ext2(name: &str, payload: &str) -> Option<Result<String, String>> {
-    let dev = name.strip_prefix("ext2://")?;
+    let dev = name.strip_prefix("ext2/")?;
     let mut tokens = payload.split_whitespace();
     let sub = tokens.next().unwrap_or("");
-    let channel = format!("ext2://{}", dev);
+    let channel = format!("ext2/{}", dev);
     match sub {
         "status" => Some(Ok(format!(
-            "ext2://{} status=mounted epoch={}",
+            "ext2/{} status=mounted epoch={}",
             dev,
             lease::epoch(&channel)
         ))),
@@ -1633,7 +1633,7 @@ mod tests {
         let mut img = crate::fs::diskimg::DiskImage::create(&path, 4096 * 512).unwrap();
         let fs = Ext2FsLeased::format(
             Box::new(img),
-            "ext2://test-lease",
+            "ext2/test-lease",
         ).unwrap();
         assert!(fs.acquire_write_lease(101).is_ok());
         let err = fs.acquire_write_lease(102).unwrap_err();
@@ -1655,7 +1655,7 @@ mod tests {
         let mut img = crate::fs::diskimg::DiskImage::create(&path, 4096 * 512).unwrap();
         let fs = Ext2FsLeased::format(
             Box::new(img),
-            "ext2://test-lease2",
+            "ext2/test-lease2",
         ).unwrap();
         let root = fs.root_ino();
         let ep0 = fs.epoch();
@@ -1689,7 +1689,7 @@ mod tests {
         let mut img = crate::fs::diskimg::DiskImage::create(&path, 4096 * 512).unwrap();
         let fs = Ext2FsLeased::format(
             Box::new(img),
-            "ext2://test-lease3",
+            "ext2/test-lease3",
         ).unwrap();
         let root = fs.root_ino();
         let ep = fs.acquire_write_lease(301).unwrap();
@@ -1713,7 +1713,7 @@ mod tests {
         let mut img = crate::fs::diskimg::DiskImage::create(&path, 4096 * 512).unwrap();
         let mut fs = Ext2FsLeased::format(
             Box::new(img),
-            "ext2://test-lease4",
+            "ext2/test-lease4",
         ).unwrap();
         let ep0 = fs.epoch();
         let ep1 = fs.sync_metadata_force(401);
@@ -1783,17 +1783,17 @@ mod tests {
 
     #[test]
     fn ext2_probe_channel() {
-        let snap = probe_ext2("ext2://ram0").unwrap();
-        assert!(snap.contains("ext2://ram0"));
+        let snap = probe_ext2("ext2/ram0").unwrap();
+        assert!(snap.contains("ext2/ram0"));
         assert!(snap.contains("epoch="));
         assert!(snap.contains("ops="));
     }
 
     #[test]
     fn ext2_act_channel_status_epoch() {
-        let r = act_ext2("ext2://ram0", "status").unwrap().unwrap();
+        let r = act_ext2("ext2/ram0", "status").unwrap().unwrap();
         assert!(r.contains("status=mounted"));
-        let r = act_ext2("ext2://ram0", "epoch").unwrap().unwrap();
+        let r = act_ext2("ext2/ram0", "epoch").unwrap().unwrap();
         assert!(r.contains("epoch="));
     }
 }

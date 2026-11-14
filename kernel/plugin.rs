@@ -2,10 +2,10 @@
 //!
 //! 与 `modules.rs` 的内核模块管理器不同，这里面向"自造插件"：
 //! * 插件声明自身协议（kind）、能力位（caps）与对外暴露的通道（channel）；
-//! * 安装后即拥有自己的通道 `plugin://<name>`，可被 AI 直接 `sense` / `act`；
+//! * 安装后即拥有自己的通道 `plugin/<name>`，可被 AI 直接 `sense` / `act`；
 //! * 支持热重载（hot reload）：卸载后按原规格重装，并记录重载次数。
 //!
-//! 统一入口：`plugin://modules`（安装/卸载/列表）、`plugin://hotreload`（热重载）。
+//! 统一入口：`plugin/modules`（安装/卸载/列表）、`plugin/hotreload`（热重载）。
 
 use std::collections::BTreeMap;
 use std::sync::{Mutex, OnceLock};
@@ -54,7 +54,7 @@ pub struct PluginSpec {
     pub kind: PluginKind,
     /// 能力位（caps 权限位掩码）。
     pub caps: u32,
-    /// 对外暴露的通道名（默认 `plugin://<name>`）。
+    /// 对外暴露的通道名（默认 `plugin/<name>`）。
     pub channel: String,
     /// 来源：builtin（内置）/ user（用户自造）。
     pub source: String,
@@ -67,7 +67,7 @@ impl PluginSpec {
             version: crate::version::VERSION.to_string(),
             kind: PluginKind::Generic,
             caps: 0,
-            channel: format!("plugin://{}", name),
+            channel: format!("plugin/{}", name),
             source: "user".to_string(),
         }
     }
@@ -170,9 +170,9 @@ impl PluginRegistry {
         out.trim_end().to_string()
     }
 
-    /// 按通道名找插件（`plugin://<name>` → 插件名）。
+    /// 按通道名找插件（`plugin/<name>` → 插件名）。
     pub fn plugin_of_channel(&self, channel: &str) -> Option<&PluginSpec> {
-        let name = channel.strip_prefix("plugin://")?;
+        let name = channel.strip_prefix("plugin/")?;
         self.plugins.get(name)
     }
 }
@@ -184,18 +184,18 @@ pub fn plugins() -> &'static Mutex<PluginRegistry> {
     PLUGINS.get_or_init(|| Mutex::new(PluginRegistry::new()))
 }
 
-/// `sense plugin://modules`：插件快照。
+/// `sense plugin/modules`：插件快照。
 pub fn plugin_sense() -> String {
     plugins().lock().unwrap().list()
 }
 
-/// `sense plugin://hotreload`：热重载状态。
+/// `sense plugin/hotreload`：热重载状态。
 pub fn plugin_hotreload_sense() -> String {
     let p = plugins().lock().unwrap();
     format!("hot_reload count={} plugins={}", p.hot_reloads, p.plugins.len())
 }
 
-/// `sense plugin://<name>`：单个自造插件状态。
+/// `sense plugin/<name>`：单个自造插件状态。
 pub fn plugin_sense_one(channel: &str) -> Option<String> {
     let p = plugins().lock().unwrap();
     let spec = p.plugin_of_channel(channel)?;
@@ -212,7 +212,7 @@ pub fn plugin_sense_one(channel: &str) -> Option<String> {
     ))
 }
 
-/// `act plugin://modules <payload>`：
+/// `act plugin/modules <payload>`：
 /// `install <名称> [版本] [kind] [caps]` | `uninstall <名称>` | `list`
 pub fn plugin_act_modules(payload: &str) -> Result<String, String> {
     let mut p = plugins().lock().unwrap();
@@ -245,11 +245,11 @@ pub fn plugin_act_modules(payload: &str) -> Result<String, String> {
             Ok(format!("已卸载插件 {} v{}", s.name, s.version))
         }
         Some("list") => Ok(p.list()),
-        _ => Err("用法: act plugin://modules install <名称> [版本] [kind] [caps] | uninstall <名称> | list".to_string()),
+        _ => Err("用法: act plugin/modules install <名称> [版本] [kind] [caps] | uninstall <名称> | list".to_string()),
     }
 }
 
-/// `act plugin://hotreload <payload>`：`reload <名称>` | `status`
+/// `act plugin/hotreload <payload>`：`reload <名称>` | `status`
 pub fn plugin_act_hotreload(payload: &str) -> Result<String, String> {
     let mut p = plugins().lock().unwrap();
     let parts: Vec<&str> = payload.split_whitespace().collect();
@@ -265,14 +265,14 @@ pub fn plugin_act_hotreload(payload: &str) -> Result<String, String> {
             ))
         }
         Some("status") => Ok(plugin_hotreload_sense()),
-        _ => Err("用法: act plugin://hotreload reload <名称> | status".to_string()),
+        _ => Err("用法: act plugin/hotreload reload <名称> | status".to_string()),
     }
 }
 
-/// `act plugin://<name> <payload>`：把负载投递给自造插件并记录。
+/// `act plugin/<name> <payload>`：把负载投递给自造插件并记录。
 pub fn plugin_act_dynamic(channel: &str, payload: &str) -> Result<String, String> {
     let name = channel
-        .strip_prefix("plugin://")
+        .strip_prefix("plugin/")
         .ok_or_else(|| format!("非法插件通道: {}", channel))?
         .to_string();
     plugins().lock().unwrap().record_action(&name, payload)
@@ -286,11 +286,11 @@ mod tests {
     fn install_and_act() {
         let mut r = PluginRegistry::new();
         let spec = r.install(PluginSpec::new("demo")).unwrap();
-        assert_eq!(spec.channel, "plugin://demo");
+        assert_eq!(spec.channel, "plugin/demo");
         assert!(r.install(PluginSpec::new("demo")).is_err());
         assert!(r.record_action("demo", "hello").is_ok());
         assert!(r.record_action("nope", "x").is_err());
-        assert_eq!(r.plugin_of_channel("plugin://demo").unwrap().name, "demo");
+        assert_eq!(r.plugin_of_channel("plugin/demo").unwrap().name, "demo");
     }
 
     #[test]

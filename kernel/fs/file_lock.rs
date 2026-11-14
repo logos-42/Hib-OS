@@ -1,4 +1,4 @@
-﻿//! 文件锁（顾问锁 + 强制锁 + 范围锁）。
+//! 文件锁（顾问锁 + 强制锁 + 范围锁）。
 //!
 //! 提供对打开文件描述符（fd）的字节范围加锁：
 //! - 顾问锁（默认）：仅在通过本管理器检查时生效，不强制阻塞实际 IO。
@@ -6,7 +6,7 @@
 //! - 范围锁：锁定文件的指定字节区间 [start, start+len)。
 //! - 死锁检测：简化为超时机制（等待超时则返回错误）。
 //!
-//! 与 `kernel/lease.rs` 的 epoch 并发模型配合，供 `fs://` / `file://` 通道使用。
+//! 与 `kernel/lease.rs` 的 epoch 并发模型配合，供 `fs/` / `file://` 通道使用。
 
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::{Arc, Mutex};
@@ -565,14 +565,14 @@ impl FileLockManagerCaps {
 }
 
 // ============================================================================
-// sense/act 通道接口：filelock://<设备名>
+// sense/act 通道接口：filelock/<设备名>
 // ============================================================================
 
 /// 感知文件锁通道：返回锁管理器状态摘要。
 ///
-/// 通道名形式：`filelock://<设备名>`
+/// 通道名形式：`filelock/<设备名>`
 pub fn probe_file_lock(name: &str) -> Option<String> {
-    let channel = format!("filelock://{}", name);
+    let channel = format!("filelock/{}", name);
     let epoch = lease::epoch(&channel);
     Some(format!(
         "channel={} type=file_lock epoch={} ops=lock|unlock|test_lock|list_locks|release_fd",
@@ -588,10 +588,10 @@ pub fn probe_file_lock(name: &str) -> Option<String> {
 pub fn act_file_lock(name: &str, payload: &str) -> Option<Result<String, String>> {
     let mut tokens = payload.split_whitespace();
     let sub = tokens.next().unwrap_or("");
-    let channel = format!("filelock://{}", name);
+    let channel = format!("filelock/{}", name);
     match sub {
         "status" => Some(Ok(format!(
-            "filelock://{} status=active epoch={}",
+            "filelock/{} status=active epoch={}",
             name,
             lease::epoch(&channel)
         ))),
@@ -757,7 +757,7 @@ mod tests {
 
     #[test]
     fn file_lock_leased_single_writer() {
-        let mgr = FileLockManagerLeased::new("filelock://test-lease");
+        let mgr = FileLockManagerLeased::new("filelock/test-lease");
         mgr.register_fd(1).unwrap();
         assert!(mgr.acquire_lock_lease(101).is_ok());
         let err = mgr.acquire_lock_lease(102).unwrap_err();
@@ -769,7 +769,7 @@ mod tests {
 
     #[test]
     fn file_lock_leased_lock_unlock_commit_epoch() {
-        let mgr = FileLockManagerLeased::new("filelock://test-lease2");
+        let mgr = FileLockManagerLeased::new("filelock/test-lease2");
         mgr.register_fd(1).unwrap();
         let ep0 = mgr.epoch();
         let ep1 = mgr.acquire_lock_lease(201).unwrap();
@@ -783,7 +783,7 @@ mod tests {
 
     #[test]
     fn file_lock_leased_stale_epoch_rejected() {
-        let mgr = FileLockManagerLeased::new("filelock://test-lease3");
+        let mgr = FileLockManagerLeased::new("filelock/test-lease3");
         mgr.register_fd(1).unwrap();
         let ep = mgr.acquire_lock_lease(301).unwrap();
         let _ = mgr.lock_under_lease(301, ep, 1, LockType::WrLock, 0, 100, 301).unwrap();
@@ -796,7 +796,7 @@ mod tests {
 
     #[test]
     fn file_lock_leased_force_unlock_all() {
-        let mgr = FileLockManagerLeased::new("filelock://test-lease4");
+        let mgr = FileLockManagerLeased::new("filelock/test-lease4");
         let ep0 = mgr.epoch();
         let ep1 = mgr.force_unlock_all(401);
         assert!(ep1 > ep0);
@@ -841,17 +841,17 @@ mod tests {
 
     #[test]
     fn file_lock_probe_channel() {
-        let snap = probe_file_lock("filelock://ram0").unwrap();
-        assert!(snap.contains("filelock://ram0"));
+        let snap = probe_file_lock("filelock/ram0").unwrap();
+        assert!(snap.contains("filelock/ram0"));
         assert!(snap.contains("epoch="));
         assert!(snap.contains("ops="));
     }
 
     #[test]
     fn file_lock_act_channel_status_epoch() {
-        let r = act_file_lock("filelock://ram0", "status").unwrap().unwrap();
+        let r = act_file_lock("filelock/ram0", "status").unwrap().unwrap();
         assert!(r.contains("status=active"));
-        let r = act_file_lock("filelock://ram0", "epoch").unwrap().unwrap();
+        let r = act_file_lock("filelock/ram0", "epoch").unwrap().unwrap();
         assert!(r.contains("epoch="));
     }
 }

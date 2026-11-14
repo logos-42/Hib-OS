@@ -8,7 +8,7 @@
 //! * DhcpLease：IP 地址、子网掩码、网关、DNS 服务器、租约时间、剩余时间
 //! * DhcpClient：new / discover / request / renew / release / bound / lease
 //! * DHCP 报文：DISCOVER/OFFER/REQUEST/ACK/NAK/RELEASE、XID 事务 ID、选项字段
-//! * sense/act 通道：`net://dhcp`
+//! * sense/act 通道：`net/dhcp`
 
 use alloc::collections::VecDeque;
 use crate::ksync::{SpinLock, OnceLock};
@@ -198,7 +198,7 @@ impl DhcpClient {
         }
     }
 
-    /// 全局 DHCP 客户端实例（`net://dhcp` 通道后端，默认 eth0）。
+    /// 全局 DHCP 客户端实例（`net/dhcp` 通道后端，默认 eth0）。
     pub fn client() -> &'static SpinLock<DhcpClient> {
         static CLIENT: OnceLock<SpinLock<DhcpClient>> = OnceLock::new();
         CLIENT.get_or_init(|| SpinLock::new(Self::new("eth0", [0x02, 0x00, 0x00, 0x00, 0x00, 0x01])))
@@ -609,16 +609,16 @@ fn parse_ack(msg: &DhcpMessage) -> Result<([u8; 4], [u8; 4], [u8; 4], Vec<[u8; 4
 }
 
 // =======================================================================
-// sense/act 接口（net://dhcp）
+// sense/act 接口（net/dhcp）
 // ======================================================================
 
-/// 查询 DHCP 状态快照（供 `sense net://dhcp`）。
+/// 查询 DHCP 状态快照（供 `sense net/dhcp`）。
 pub fn dhcp_sense_snapshot() -> String {
     let c = DhcpClient::client().lock();
     c.status()
 }
 
-/// 对 DHCP 通道执行行动（供 `act net://dhcp`）。负载：`stats` / `discover` / `request` / `renew` / `release` / `bound` / `lease`。
+/// 对 DHCP 通道执行行动（供 `act net/dhcp`）。负载：`stats` / `discover` / `request` / `renew` / `release` / `bound` / `lease`。
 pub fn dhcp_act_raw(payload: &str) -> Result<String, String> {
     let mut it = payload.split_whitespace();
     match it.next() {
@@ -656,7 +656,7 @@ pub fn dhcp_act_raw(payload: &str) -> Result<String, String> {
             let c = DhcpClient::client().lock();
             Ok(c.lease.summary())
         }
-        _ => Err("用法: act net://dhcp stats | discover | request | renew | release | bound | lease".to_string()),
+        _ => Err("用法: act net/dhcp stats | discover | request | renew | release | bound | lease".to_string()),
     }
 }
 

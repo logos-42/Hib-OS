@@ -10,7 +10,7 @@
 //! * 能力沙箱友好：包操作本身不依赖 uid，仅依赖调用方显式能力校验；
 //! * 可持久化：本地包数据库以手写最小 JSON 保存，脱网可重启恢复。
 //!
-//! 通道遵循 sense/act 对：`pkg://store` 通道的 `probe` 返回已安装包列表；
+//! 通道遵循 sense/act 对：`pkg/store` 通道的 `probe` 返回已安装包列表；
 //! `act` 支持 install/remove/upgrade/search/list 操作（供 shell/sense 层调用）。
 //!
 //! 并发: 所有公共方法对内部状态加锁；读取为短锁快照，写入独占，优先于悲观锁。
@@ -566,7 +566,7 @@ impl Default for PackageManager {
 // sense/act 通道接入（供 shell / sense 层）
 // ========================================================================
 
-/// `pkg://store` 通道的 probe：返回已安装包列表的快照。
+/// `pkg/store` 通道的 probe：返回已安装包列表的快照。
 pub fn pkg_probe(_name: &str) -> Option<String> {
     // 全局单例惰性初始化（读取无副作用）。
     let mgr = package_manager();
@@ -577,7 +577,7 @@ pub fn pkg_probe(_name: &str) -> Option<String> {
     Some(g.list().join("\n"))
 }
 
-/// `pkg://store` 通道的 act：执行包管理操作。
+/// `pkg/store` 通道的 act：执行包管理操作。
 ///
 /// 支持的负载:
 /// * `install <名>` —— 安装包（含依赖）
@@ -887,24 +887,24 @@ mod tests {
     #[test]
     fn pkg_act_install_list() {
         // 确保全局单例干净：先移除（忽略结果），避免受前序测试污染。
-        let _ = pkg_act("pkg://store", "remove coreutils");
-        let out = pkg_act("pkg://store", "install coreutils").unwrap().unwrap();
+        let _ = pkg_act("pkg/store", "remove coreutils");
+        let out = pkg_act("pkg/store", "install coreutils").unwrap().unwrap();
         assert!(out.contains("coreutils"));
-        let list = pkg_act("pkg://store", "list").unwrap().unwrap();
+        let list = pkg_act("pkg/store", "list").unwrap().unwrap();
         assert!(list.contains("coreutils"));
         // 重复安装失败。
-        let err = pkg_act("pkg://store", "install coreutils").unwrap().unwrap_err();
+        let err = pkg_act("pkg/store", "install coreutils").unwrap().unwrap_err();
         assert!(err.contains("已安装"));
-        let _ = pkg_act("pkg://store", "remove coreutils").unwrap();
+        let _ = pkg_act("pkg/store", "remove coreutils").unwrap();
     }
 
     #[test]
     fn pkg_probe_snapshot() {
-        let _ = pkg_act("pkg://store", "install net-tools").unwrap();
-        let snap = pkg_probe("pkg://store").unwrap();
+        let _ = pkg_act("pkg/store", "install net-tools").unwrap();
+        let snap = pkg_probe("pkg/store").unwrap();
         assert!(snap.contains("net-tools"));
         assert!(snap.contains("coreutils"));
-        let _ = pkg_act("pkg://store", "remove net-tools").unwrap();
-        let _ = pkg_act("pkg://store", "remove coreutils").unwrap();
+        let _ = pkg_act("pkg/store", "remove net-tools").unwrap();
+        let _ = pkg_act("pkg/store", "remove coreutils").unwrap();
     }
 }

@@ -12,7 +12,7 @@
 //! * DMARegion (DMA 区域) —— 直接内存访问区域，等价于 DMA 缓冲区；
 //! * DeviceTree (设备树) —— 硬件拓扑描述，等价于设备树 (DTB)；
 //! * HotPlugManager (热插拔管理器) —— 设备热插拔管理，等价于 udev / hotplug；
-//! * DriverAI (AI 原生驱动引擎) —— 统一入口，通过 driver_ai://* 通道暴露。
+//! * DriverAI (AI 原生驱动引擎) —— 统一入口，通过 driver_ai/* 通道暴露。
 //!
 //! 所有结构均为纯 Rust 原型，无真实硬件依赖，供内核统一核算与调度。
 
@@ -814,7 +814,7 @@ pub fn driver_ai_act(payload: &str) -> Result<String, String> {
             let irq = it.next().and_then(|s| s.parse::<u32>().ok()).ok_or("缺少 IRQ")?;
             let mut eng = driver_ai().lock();
             eng.set_device_irq(device_id, irq)?;
-            // 注入：激活 L1 中断控制器子系统，使 `sense dev://irq_ctrl` 可见。
+            // 注入：激活 L1 中断控制器子系统，使 `sense dev/irq_ctrl` 可见。
             let _ = IrqController::instance().lock().idt_present_vectors();
             Ok(format!("已为设备 {} 设置 IRQ {}", device_id, irq))
         }
@@ -823,7 +823,7 @@ pub fn driver_ai_act(payload: &str) -> Result<String, String> {
             let size = it.next().and_then(|s| s.parse::<u64>().ok()).unwrap_or(4096);
             let mut eng = driver_ai().lock();
             let id = eng.allocate_dma(device_id, size)?;
-            // 注入：激活 L1 DMA 引擎通道，使 `sense drv://dma` 可见。
+            // 注入：激活 L1 DMA 引擎通道，使 `sense drv/dma` 可见。
             let _ch = DmaEngine::engine().lock().alloc_channel();
             Ok(format!("已为设备 {} 分配 DMA 区域 id={} 大小={}B", device_id, id, size))
         }
@@ -831,7 +831,7 @@ pub fn driver_ai_act(payload: &str) -> Result<String, String> {
             let irq = it.next().and_then(|s| s.parse::<u32>().ok()).ok_or("缺少 IRQ")?;
             let mut eng = driver_ai().lock();
             let handled = eng.invoke_irq(irq);
-            // 注入：激活 L1 中断控制器子系统，使 `sense dev://irq_ctrl` 可见。
+            // 注入：激活 L1 中断控制器子系统，使 `sense dev/irq_ctrl` 可见。
             let _ = IrqController::instance().lock().idt_present_vectors();
             Ok(format!("IRQ {} 处理结果: {}", irq, if handled { "已处理" } else { "未处理" }))
         }
@@ -856,7 +856,7 @@ pub fn driver_ai_act(payload: &str) -> Result<String, String> {
                 irq_pin: 0,
                 irq_line: 0,
             });
-            // 注入：激活 L1 PCI 总线子系统，使 `sense drv://pci` 可见。
+            // 注入：激活 L1 PCI 总线子系统，使 `sense drv/pci` 可见。
             let _ = crate::drivers::pci_enumerator::pci_enumerate();
             Ok(format!("已添加 PCI 设备 bus={} device={} function={}", bus, device, function))
         }
@@ -864,7 +864,7 @@ pub fn driver_ai_act(payload: &str) -> Result<String, String> {
             let name = it.next().ok_or("缺少节点名")?;
             let mut eng = driver_ai().lock();
             let id = eng.device_tree.add_node(name, None);
-            // 注入：同步写入 L1 设备树，使 `sense dev://tree` 可见。
+            // 注入：同步写入 L1 设备树，使 `sense dev/tree` 可见。
             let _ = devtree_insert(name, &format!("/{}", name), BTreeMap::new());
             Ok(format!("已添加设备树节点 id={} 名称={}", id, name))
         }

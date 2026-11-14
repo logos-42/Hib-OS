@@ -1,7 +1,7 @@
 //! 主机内存子系统 —— AI 原生的「工作记忆」。
 //!
 //! 把主机 RAM 与 mmap 区域建模为可感知 / 可分配 / 可映射的通道：
-//! `mem://ram` 负责 RAM 配额，`mem://mmap` 负责虚拟映射区域。
+//! `mem/ram` 负责 RAM 配额，`mem/mmap` 负责虚拟映射区域。
 
 use std::sync::{Mutex, OnceLock};
 

@@ -1,14 +1,14 @@
 //! 外部世界网关 —— AI 原生的「出站策略与流量闸门」。
 //!
-//! 所有离开内核的请求（目前是 `browser://gateway` 抓取页面）都要先过这里：
+//! 所有离开内核的请求（目前是 `browser/gateway` 抓取页面）都要先过这里：
 //! 命中规则的按规则放行 / 拦截，未命中的按默认策略处理，
 //! 每一次判定都会累加到 `allowed` / `blocked` 计数。
 //!
-//! * `sense gateway://net`
-//! * `act gateway://net upstream <direct|http(s)://...>`
-//! * `act gateway://net policy <allow|deny>`
-//! * `act gateway://net allow|deny <域名>` / `del <域名>`
-//! * `act gateway://net check <域名>`
+//! * `sense gateway/net`
+//! * `act gateway/net upstream <direct|http(s)/...>`
+//! * `act gateway/net policy <allow|deny>`
+//! * `act gateway/net allow|deny <域名>` / `del <域名>`
+//! * `act gateway/net check <域名>`
 
 use std::sync::{Mutex, OnceLock};
 
@@ -75,7 +75,7 @@ impl Gateway {
     pub fn set_upstream(&mut self, u: &str) -> Result<String, String> {
         let u = u.trim();
         if u != "direct" && !(u.starts_with("http://") || u.starts_with("https://")) {
-            return Err("上游必须是 direct 或 http(s):// 地址".to_string());
+            return Err("上游必须是 direct 或 http(s)/ 地址".to_string());
         }
         self.upstream = u.to_string();
         Ok(format!("网关上游设为 {}", u))
@@ -161,7 +161,7 @@ fn normalize_domain(d: &str) -> Result<String, String> {
 
 static GATEWAY: OnceLock<Mutex<Gateway>> = OnceLock::new();
 
-/// 全局网关（`gateway://net` 的实体）。
+/// 全局网关（`gateway/net` 的实体）。
 pub fn gateway() -> &'static Mutex<Gateway> {
     GATEWAY.get_or_init(|| Mutex::new(Gateway::new()))
 }
@@ -221,7 +221,7 @@ mod tests {
     fn upstream_and_counters() {
         let mut g = gw();
         assert!(g.set_upstream("direct").is_ok());
-        assert!(g.set_upstream("socks5://x").is_err());
+        assert!(g.set_upstream("socks5/x").is_err());
         g.set_upstream("http://10.0.0.1:8080").unwrap();
         g.record("example.com", true, 100);
         g.record("bad.example", false, 0);

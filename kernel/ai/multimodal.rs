@@ -382,7 +382,7 @@ pub fn multimodal_sense() -> &'static Mutex<MultimodalSense> {
     MULTIMODAL_SENSE.get_or_init(|| Mutex::new(MultimodalSense::new()))
 }
 
-/// `sense ai://multimodal`：返回多模态感知器状态摘要。
+/// `sense ai/multimodal`：返回多模态感知器状态摘要。
 pub fn multimodal_sense_status() -> String {
     let m = multimodal_sense().lock().unwrap();
     let mut lines = vec![format!(
@@ -410,7 +410,7 @@ pub fn multimodal_sense_status() -> String {
     lines.join("\n")
 }
 
-/// `act ai://multimodal <op> ...`：对多模态感知器执行行动。
+/// `act ai/multimodal <op> ...`：对多模态感知器执行行动。
 pub fn multimodal_act(payload: &str) -> Result<String, String> {
     let mut it = payload.split_whitespace();
     let m = multimodal_sense();

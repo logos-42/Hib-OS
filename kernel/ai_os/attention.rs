@@ -15,7 +15,7 @@
 //! * AttentionDeficit (注意力缺陷) —— 注意力资源不足时的降级处理。
 //!
 //! 所有结构均为纯 Rust 原型，供内核统一核算与调度，
-//! 并通过 `attention://*` 通道接入 `sense`/`act` 感知层。
+//! 并通过 `attention/*` 通道接入 `sense`/`act` 感知层。
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::{Mutex, OnceLock};
@@ -692,7 +692,7 @@ pub fn attention_act(payload: &str) -> Result<String, String> {
             Ok(format!("注意力引擎已推进 now={} 更新={}", now, eng.total_updates))
         }
         Some("lens-mode") => {
-            let mode_str = it.next().ok_or("用法: attention:// lens-mode <open|narrow|selective|closed>")?;
+            let mode_str = it.next().ok_or("用法: attention/ lens-mode <open|narrow|selective|closed>")?;
             let mode = match mode_str {
                 "open" => LensMode::Open,
                 "narrow" => LensMode::Narrow,

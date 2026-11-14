@@ -1,17 +1,17 @@
-//! 桌面外壳 —— `gui://shell`。
+//! 桌面外壳 —— `gui/shell`。
 //!
 //! GUI 内核（窗口 / 输入 / 合成）已经具备，这里补上**桌面环境层**：
 //! 启动器、剪贴板、DPI、多显示器、焦点策略，以及两处闭环：
 //!
 //! * **输入 → 通道**：把一次点击翻译成一条可执行的 `act` 建议（命中窗口/启动器）；
-//! * **合成 → GPU**：把合成器输出的窗口信息光栅到 `gpu://framebuffer`，
+//! * **合成 → GPU**：把合成器输出的窗口信息光栅到 `gpu/framebuffer`，
 //!   让软件合成结果与 GPU 帧缓冲走同一份可感知像素。
 //!
-//! * `sense gui://shell`
-//! * `act gui://shell launch <应用>`
-//! * `act gui://shell clipboard set <文本>` / `clipboard get`
-//! * `act gui://shell dpi <n>` / `monitor add <名> <宽>x<高>` / `focus <策略>`
-//! * `act gui://shell route <x> <y>` / `compose`
+//! * `sense gui/shell`
+//! * `act gui/shell launch <应用>`
+//! * `act gui/shell clipboard set <文本>` / `clipboard get`
+//! * `act gui/shell dpi <n>` / `monitor add <名> <宽>x<高>` / `focus <策略>`
+//! * `act gui/shell route <x> <y>` / `compose`
 
 use std::sync::{Mutex, OnceLock};
 
@@ -132,12 +132,12 @@ impl DesktopShell {
             d.hit_test(x, y)
         };
         match hit {
-            Some((id, _)) => format!("act gui://windows focus {}  (命中 win#{})", id, id),
+            Some((id, _)) => format!("act gui/windows focus {}  (命中 win#{})", id, id),
             None if y < 28 => {
                 let app = self.launcher.first().cloned().unwrap_or_default();
-                format!("act gui://shell launch {}  (命中启动器)", app)
+                format!("act gui/shell launch {}  (命中启动器)", app)
             }
-            None => format!("act gui://shell clipboard set <{}:{}>  (桌面空白处)", x, y),
+            None => format!("act gui/shell clipboard set <{}:{}>  (桌面空白处)", x, y),
         }
     }
 

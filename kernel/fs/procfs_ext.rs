@@ -633,7 +633,7 @@ pub fn procfs_ext() -> &'static Mutex<ProcFsExt> {
     PROC_FS_EXT.get_or_init(|| Mutex::new(ProcFsExt::new()))
 }
 
-/// `proc://sysinfo` 通道的 probe：返回系统统计快照文本。
+/// `proc/sysinfo` 通道的 probe：返回系统统计快照文本。
 pub fn procfs_ext_probe(_name: &str) -> Option<String> {
     let g = procfs_ext().lock().unwrap();
     let s = g.sys_stats();
@@ -649,7 +649,7 @@ pub fn procfs_ext_probe(_name: &str) -> Option<String> {
     ))
 }
 
-/// `proc://sysinfo` 通道的 act：执行 procfs 操作。
+/// `proc/sysinfo` 通道的 act：执行 procfs 操作。
 ///
 /// 支持的负载:
 /// * `read <路径>` —— 读取 /proc 条目内容
@@ -884,21 +884,21 @@ mod tests {
 
     #[test]
     fn procfs_ext_probe_and_act() {
-        let out = procfs_ext_act("proc://sysinfo", "spawn 0 0 0").unwrap().unwrap();
+        let out = procfs_ext_act("proc/sysinfo", "spawn 0 0 0").unwrap().unwrap();
         assert!(out.contains("pid="));
-        let stats_out = procfs_ext_act("proc://sysinfo", "stats").unwrap().unwrap();
+        let stats_out = procfs_ext_act("proc/sysinfo", "stats").unwrap().unwrap();
         assert!(stats_out.contains("uptime="));
         let read_out = procfs_ext_act(
-            "proc://sysinfo",
+            "proc/sysinfo",
             "read /proc/version",
         )
         .unwrap()
         .unwrap();
         assert!(read_out.contains("Hib OS"));
         // probe 返回系统快照。
-        let probe = procfs_ext_probe("proc://sysinfo").unwrap();
+        let probe = procfs_ext_probe("proc/sysinfo").unwrap();
         assert!(probe.contains("uptime="));
         // 清理：尝试退出刚注册的进程（全局单例中 pid 未知，允许成功或失败）。
-        let _ = procfs_ext_act("proc://sysinfo", "exit 0");
+        let _ = procfs_ext_act("proc/sysinfo", "exit 0");
     }
 }

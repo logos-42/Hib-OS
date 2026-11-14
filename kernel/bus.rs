@@ -1,13 +1,13 @@
 //! 设备总线 —— AI 原生的「热插拔 / 驱动绑定」视图。
 //!
-//! `dev://tree` 管的是**设备节点**（/dev 下的字符块设备、主次设备号），
-//! `dev://bus` 管的是**总线枚举**（PCI 地址、厂商/设备号、哪个驱动接管）。
+//! `dev/tree` 管的是**设备节点**（/dev 下的字符块设备、主次设备号），
+//! `dev/bus` 管的是**总线枚举**（PCI 地址、厂商/设备号、哪个驱动接管）。
 //! 两者互补，共同构成设备管理能力。
 //!
-//! * `sense dev://bus`
-//! * `act dev://bus bind <地址> <驱动>` / `unbind <地址>`
-//! * `act dev://bus rescan`（模拟总线重新扫描）
-//! * `act dev://bus add <地址> <vendor:device> <类别> [驱动]` / `remove <地址>`
+//! * `sense dev/bus`
+//! * `act dev/bus bind <地址> <驱动>` / `unbind <地址>`
+//! * `act dev/bus rescan`（模拟总线重新扫描）
+//! * `act dev/bus add <地址> <vendor:device> <类别> [驱动]` / `remove <地址>`
 
 use std::sync::{Mutex, OnceLock};
 
@@ -182,7 +182,7 @@ fn parse_id(s: &str) -> Result<(u16, u16), String> {
 
 static BUS: OnceLock<Mutex<Bus>> = OnceLock::new();
 
-/// 全局设备总线（`dev://bus` 的实体）。
+/// 全局设备总线（`dev/bus` 的实体）。
 pub fn bus() -> &'static Mutex<Bus> {
     BUS.get_or_init(|| Mutex::new(Bus::new()))
 }

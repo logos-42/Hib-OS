@@ -1,15 +1,15 @@
 //! 浏览器通道 —— AI 原生的「外部页面感知」。
 //!
-//! `browser://gateway` 之前只是占位符（"offline"）。现在它真正落地：
+//! `browser/gateway` 之前只是占位符（"offline"）。现在它真正落地：
 //!
-//! * 抓取 `http(s)://` 页面（真实网络，经 `gateway://net` 出站策略检查）
+//! * 抓取 `http(s)/` 页面（真实网络，经 `gateway/net` 出站策略检查）
 //! * 提取 `<title>`、把 HTML 转成纯文本、记录历史与字节数
 //! * `file://` 仍由 shell 层直接读 VFS（本模块不碰文件系统）
 //!
-//! * `sense browser://gateway`
-//! * `act browser://gateway open <url>`
-//! * `act browser://gateway text [字符数]`
-//! * `act browser://gateway history`
+//! * `sense browser/gateway`
+//! * `act browser/gateway open <url>`
+//! * `act browser/gateway text [字符数]`
+//! * `act browser/gateway history`
 
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
@@ -75,7 +75,7 @@ impl Browser {
     pub fn open(&mut self, url: &str) -> Result<String, String> {
         let url = url.trim();
         let host = host_of(url).ok_or_else(|| {
-            format!("URL 需形如 http(s)://host/path，收到: {}", url)
+            format!("URL 需形如 http(s)/host/path，收到: {}", url)
         })?;
 
         // 出站策略检查（不通过则不发起任何网络请求）。
@@ -215,7 +215,7 @@ fn html_to_text(html: &str) -> String {
 
 static BROWSER: OnceLock<Mutex<Browser>> = OnceLock::new();
 
-/// 全局浏览器（`browser://gateway` 的实体）。
+/// 全局浏览器（`browser/gateway` 的实体）。
 pub fn browser() -> &'static Mutex<Browser> {
     BROWSER.get_or_init(|| Mutex::new(Browser::new()))
 }
@@ -230,7 +230,7 @@ mod tests {
         assert_eq!(host_of("https://Example.COM").unwrap(), "example.com");
         assert_eq!(host_of("http://example.com:8080/x").unwrap(), "example.com");
         assert!(host_of("file:///etc/passwd").is_none());
-        assert!(host_of("ftp://example.com").is_none());
+        assert!(host_of("ftp/example.com").is_none());
         assert!(host_of("http://").is_none());
     }
 

@@ -1,4 +1,4 @@
-﻿//! 窗口管理器 —— 窗口生命周期、装饰绘制、焦点管理与 Z-order 排序。
+//! 窗口管理器 —— 窗口生命周期、装饰绘制、焦点管理与 Z-order 排序。
 //!
 //! `WindowManager` 管理窗口的创建、显示/隐藏、关闭、聚焦、最小化/最大化/还原、
 //! 移动、缩放、Z-order 调整与自动布局。`Window` 包含标题栏、客户区、边框、
@@ -830,7 +830,7 @@ pub fn window_manager() -> &'static Mutex<WindowManager> {
     WINDOW_MANAGER.get_or_init(|| Mutex::new(WindowManager::new(960, 600)))
 }
 
-/// `sense gui://wm`：返回窗口管理器状态摘要。
+/// `sense gui/wm`：返回窗口管理器状态摘要。
 pub fn wm_sense() -> String {
     let mgr = window_manager().lock().unwrap();
     let mut lines = vec![
@@ -860,7 +860,7 @@ pub fn wm_sense() -> String {
     lines.join("\n")
 }
 
-/// `act gui://wm <op> ...`：对窗口执行行动。
+/// `act gui/wm <op> ...`：对窗口执行行动。
 pub fn wm_act(payload: &str) -> Result<String, String> {
     let mut it = payload.split_whitespace();
     let mgr = window_manager();

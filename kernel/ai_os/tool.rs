@@ -259,7 +259,7 @@ pub fn init() {
     }
 }
 
-/// 状态摘要，供 `sense tool://registry` 使用。
+/// 状态摘要，供 `sense tool/registry` 使用。
 pub fn status() -> String {
     let reg = tools().lock().unwrap();
     format!(
@@ -270,7 +270,7 @@ pub fn status() -> String {
     )
 }
 
-/// `act tool://*` 的后端动作：
+/// `act tool/*` 的后端动作：
 /// * `list` 列出工具
 /// * `available <cap>...` 按能力过滤
 /// * `call <工具名> [k=v]...` 模拟一次调用
@@ -301,7 +301,7 @@ pub fn tool_act(payload: &str) -> Result<String, String> {
             Ok(out)
         }
         Some("call") => {
-            let name = it.next().ok_or("用法: tool://exec call <工具名> [k=v]...")?;
+            let name = it.next().ok_or("用法: tool/exec call <工具名> [k=v]...")?;
             let spec = reg
                 .find(name)
                 .ok_or_else(|| format!("工具不存在: {}", name))?;

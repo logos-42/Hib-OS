@@ -1,14 +1,14 @@
 //! 网卡资产表 —— AI 原生的「网络硬件视图」。
 //!
-//! `net://eth0` 是**协议栈视角**（发包、ARP、路由），
-//! `net://interfaces` 是**网卡资产视角**（有几张卡、各自 IP/掩码/MTU/链路状态）。
+//! `net/eth0` 是**协议栈视角**（发包、ARP、路由），
+//! `net/interfaces` 是**网卡资产视角**（有几张卡、各自 IP/掩码/MTU/链路状态）。
 //! 两者通过 eth0 联动：在这里改 eth0 的地址，协议栈立刻跟着变。
 //!
-//! * `sense net://interfaces`
-//! * `act net://interfaces up|down <网卡>`
-//! * `act net://interfaces addr <网卡> <ip>/<前缀>`
-//! * `act net://interfaces mtu <网卡> <68-65535>`
-//! * `act net://interfaces add <网卡> [mac]` / `del <网卡>`
+//! * `sense net/interfaces`
+//! * `act net/interfaces up|down <网卡>`
+//! * `act net/interfaces addr <网卡> <ip>/<前缀>`
+//! * `act net/interfaces mtu <网卡> <68-65535>`
+//! * `act net/interfaces add <网卡> [mac]` / `del <网卡>`
 
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
@@ -208,7 +208,7 @@ fn mask_from_prefix(prefix: u8) -> [u8; 4] {
 
 static IFACES: OnceLock<SpinLock<IfaceTable>> = OnceLock::new();
 
-/// 全局网卡资产表（`net://interfaces` 的实体）。
+/// 全局网卡资产表（`net/interfaces` 的实体）。
 pub fn ifaces() -> &'static SpinLock<IfaceTable> {
     IFACES.get_or_init(|| SpinLock::new(IfaceTable::new()))
 }

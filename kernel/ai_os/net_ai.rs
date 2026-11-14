@@ -12,7 +12,7 @@
 //! * BandwidthManager (带宽管理器) —— 动态带宽分配，等价于流量整形；
 //! * LatencyMonitor (延迟监控) —— 端到端延迟监测，等价于 ping / traceroute；
 //! * CongestionControl (拥塞控制) —— 基于 AI 的拥塞避免，等价于 TCP 拥塞控制；
-//! * NetAI (AI 原生网络引擎) —— 统一入口，通过 net_ai://* 通道暴露。
+//! * NetAI (AI 原生网络引擎) —— 统一入口，通过 net_ai/* 通道暴露。
 //!
 //! 所有结构均为纯 Rust 原型，无真实网络依赖，供内核统一核算与调度。
 
@@ -827,7 +827,7 @@ pub fn net_ai_act(payload: &str) -> Result<String, String> {
             }
             let mut eng = net_ai().lock();
             let id = eng.send_packet(src, dst, &data, tag);
-            // 注入：激活 L1 TCP/IP 协议栈，使 `sense net://eth0` 可见。
+            // 注入：激活 L1 TCP/IP 协议栈，使 `sense net/eth0` 可见。
             let _ = net().lock().poll();
             Ok(format!("已发送数据包 id={} 源={} 大小={}B", id, src, data.len()))
         }
@@ -836,7 +836,7 @@ pub fn net_ai_act(payload: &str) -> Result<String, String> {
             let port = it.next().and_then(|s| s.parse::<u16>().ok()).unwrap_or(8080);
             let mut eng = net_ai().lock();
             let fd = eng.create_socket(agent, port);
-            // 注入：激活 L1 网络统计，使 `sense net://eth0` 可见。
+            // 注入：激活 L1 网络统计，使 `sense net/eth0` 可见。
             let _ = net().lock().stats();
             Ok(format!("已创建套接字 fd={} 代理={} 端口={}", fd, agent, port))
         }
@@ -846,7 +846,7 @@ pub fn net_ai_act(payload: &str) -> Result<String, String> {
             let port = it.next().and_then(|s| s.parse::<u16>().ok()).unwrap_or(8080);
             let mut eng = net_ai().lock();
             eng.connect_socket(fd, remote, port)?;
-            // 注入：激活 L1 路由查询子系统，使 `sense net://eth0` 可见。
+            // 注入：激活 L1 路由查询子系统，使 `sense net/eth0` 可见。
             let _ = net().lock().lookup_route(ETH_IP);
             Ok(format!("套接字 {} 已连接到 {}:{}", fd, remote, port))
         }
@@ -858,14 +858,14 @@ pub fn net_ai_act(payload: &str) -> Result<String, String> {
             }
             let mut eng = net_ai().lock();
             let n = eng.socket_send(fd, &data)?;
-            // 注入：激活 L1 TCP/IP 协议栈，使 `sense net://eth0` 可见。
+            // 注入：激活 L1 TCP/IP 协议栈，使 `sense net/eth0` 可见。
             let _ = net().lock().poll();
             Ok(format!("套接字 {} 已发送 {} 字节", fd, n))
         }
         Some("sock-recv") => {
             let fd = it.next().and_then(|s| s.parse::<u64>().ok()).ok_or("缺少 fd")?;
             let mut eng = net_ai().lock();
-            // 注入：激活 L1 TCP/IP 协议栈，使 `sense net://eth0` 可见。
+            // 注入：激活 L1 TCP/IP 协议栈，使 `sense net/eth0` 可见。
             let _ = net().lock().poll();
             match eng.socket_recv(fd) {
                 Some(data) => Ok(format!("套接字 {} 已接收 {} 字节", fd, data.len())),
@@ -879,7 +879,7 @@ pub fn net_ai_act(payload: &str) -> Result<String, String> {
             let metric = it.next().unwrap_or("default");
             let mut eng = net_ai().lock();
             eng.add_route(dst, next_hop, cost, metric);
-            // 注入：激活 L1 路由查询子系统，使 `sense net://eth0` 可见。
+            // 注入：激活 L1 路由查询子系统，使 `sense net/eth0` 可见。
             let _ = net().lock().lookup_route(ETH_IP);
             Ok(format!("已添加路由 {} -> {} 代价={}", dst, next_hop, cost))
         }
@@ -2418,7 +2418,7 @@ pub fn net_service_act(payload: &str) -> Result<String, String> {
         }
         Some("ws-create") => {
             let client_id = it.next().and_then(|s| s.parse::<u64>().ok()).unwrap_or(1);
-            let url = it.next().unwrap_or("ws://localhost");
+            let url = it.next().unwrap_or("ws/localhost");
             let mut eng = network_service_engine().lock();
             let id = eng.create_websocket(client_id, url);
             Ok(format!("已创建 WebSocket 连接 id={} 客户端={} URL={}", id, client_id, url))
@@ -2571,7 +2571,7 @@ mod net_service_tests {
 
     #[test]
     fn websocket_connection() {
-        let mut ws = WebSocketConnection::new(1, "ws://example.com");
+        let mut ws = WebSocketConnection::new(1, "ws/example.com");
         assert!(ws.open);
         let id = ws.send(vec![1, 2, 3], WSFrameType::Text);
         assert_eq!(id, 1);
@@ -2652,7 +2652,7 @@ mod net_service_tests {
     #[test]
     fn net_service_act_ws() {
         init();
-        let res = net_service_act("ws-create 1 ws://localhost").unwrap();
+        let res = net_service_act("ws-create 1 ws/localhost").unwrap();
         assert!(res.contains("已创建 WebSocket 连接"));
         let res = net_service_act("ws-send hello world").unwrap();
         assert!(res.contains("WebSocket 已发送"));

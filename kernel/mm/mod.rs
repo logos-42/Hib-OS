@@ -10,9 +10,9 @@
 //! * 四级页表（PGD → PUD → PMD → PTE → 4KB 物理页），48 位虚拟地址
 //! * 页框位图/伙伴分配器（简化版）
 //! * 地址空间（AddressSpace）：每进程/智能体独立页表根，用户/内核空间分离
-//! * 缺页中断 = `mem://fault/<pid>/<vaddr>` 通道事件
+//! * 缺页中断 = `mem/fault/<pid>/<vaddr>` 通道事件
 //! * 写时复制 (COW)：单写者租约共享页框，写入时复制
-//! * 全部封装为 `mem://paging` 通道，可被 `sense` / `act` 操作
+//! * 全部封装为 `mem/paging` 通道，可被 `sense` / `act` 操作
 //!
 //! 子模块：
 //! * `fault` —— 旧极简页框分配器与缺页模拟（向后兼容 `alloc_pfn`/`free_pfn`/`handle_fault`/`stats`）

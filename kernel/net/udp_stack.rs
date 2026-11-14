@@ -1,4 +1,4 @@
-﻿//! UDP 协议栈完善（kernel/net/udp_stack.rs）。
+//! UDP 协议栈完善（kernel/net/udp_stack.rs）。
 //!
 //! 本模块实现更完整的 UDP 传输层：端口多路复用、已连接/未连接模式、
 //! 发送/接收队列、伪首部 + UDP 首部 + 数据的校验和计算与验证。
@@ -9,7 +9,7 @@
 //! * UdpStack：create_socket / bind / sendto / recvfrom / connect / close
 //! * 校验和计算（伪首部 + UDP 首部 + 数据）、校验和为 0 时按 RFC 发送 0xFFFF
 //! * 端口 → socket 的多路复用映射
-//! * sense/act 通道：`net://udp`
+//! * sense/act 通道：`net/udp`
 
 use std::collections::{BTreeMap, VecDeque};
 use crate::ksync::{SpinLock, OnceLock};
@@ -177,7 +177,7 @@ impl UdpStack {
         }
     }
 
-    /// 全局 UDP 协议栈实例（`net://udp` 通道后端）。
+    /// 全局 UDP 协议栈实例（`net/udp` 通道后端）。
     pub fn stack() -> &'static SpinLock<UdpStack> {
         static STACK: OnceLock<SpinLock<UdpStack>> = OnceLock::new();
         STACK.get_or_init(|| SpinLock::new(Self::new([10, 0, 0, 2])))
@@ -315,16 +315,16 @@ impl UdpStack {
 }
 
 // =======================================================================
-// sense/act 接口（net://udp）
+// sense/act 接口（net/udp）
 // ======================================================================
 
-/// 查询 UDP 协议栈状态快照（供 `sense net://udp`）。
+/// 查询 UDP 协议栈状态快照（供 `sense net/udp`）。
 pub fn udp_sense_snapshot() -> String {
     let st = UdpStack::stack().lock();
     format!("udp sockets={} local_ip={}.{}.{}.{}", st.socket_count(), st.local_ip[0], st.local_ip[1], st.local_ip[2], st.local_ip[3])
 }
 
-/// 对 UDP 通道执行行动（供 `act net://udp`）。负载：`stats` / `sockets`。
+/// 对 UDP 通道执行行动（供 `act net/udp`）。负载：`stats` / `sockets`。
 pub fn udp_act_raw(payload: &str) -> Result<String, String> {
     let mut it = payload.split_whitespace();
     match it.next() {
@@ -338,7 +338,7 @@ pub fn udp_act_raw(payload: &str) -> Result<String, String> {
             }
             Ok(lines.join("\n"))
         }
-        _ => Err("用法: act net://udp stats | sockets".to_string()),
+        _ => Err("用法: act net/udp stats | sockets".to_string()),
     }
 }
 

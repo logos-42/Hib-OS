@@ -1,6 +1,6 @@
-//! IRQ 投递 —— `irq://<设备>` 通道后端（复用 kernel/irq.rs 的 bind/fire）。
+//! IRQ 投递 —— `irq/<设备>` 通道后端（复用 kernel/irq.rs 的 bind/fire）。
 //!
-//! 设备中断通过 `irq://<设备>` 通道投递为 `signal` 事件，
+//! 设备中断通过 `irq/<设备>` 通道投递为 `signal` 事件，
 //! 唤醒等待该通道的执行体/纤程。
 
 use alloc::string::String;
@@ -34,7 +34,7 @@ mod tests {
     fn bind_and_fire_irq() {
         bind_irq("nvme0", 7);
         let n = fire_irq("nvme0");
-        // 没有 exec 在等待 irq://nvme0，signal 返回 0，但 fire_count 已递增
+        // 没有 exec 在等待 irq/nvme0，signal 返回 0，但 fire_count 已递增
         assert_eq!(n, 0);
         let s = list_irqs();
         assert!(s.contains("nvme0"));

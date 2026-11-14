@@ -1,11 +1,11 @@
-﻿//! 异步 IO（提交队列 SQ / 完成队列 CQ，io_uring 简化版）。
+//! 异步 IO（提交队列 SQ / 完成队列 CQ，io_uring 简化版）。
 //!
 //! 提供 `AioContext`：提交读/写请求到 SQ，后台工作线程模拟异步处理，
 //! 结果写入 CQ，通过 `poll` / `poll_many` 查询完成。支持 `cancel` 与
 //! `shutdown`。
 //!
 //! 注意：此为用户态原型模拟，后台工作线程在本线程上轮询执行（不依赖
-//! 真实 io_uring），供 `fs://` 通道异步读写使用。
+//! 真实 io_uring），供 `fs/` 通道异步读写使用。
 
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::{
@@ -548,14 +548,14 @@ impl AioContextCaps {
 }
 
 // ============================================================================
-// sense/act 通道接口：aio://<设备名>
+// sense/act 通道接口：aio/<设备名>
 // ============================================================================
 
 /// 感知异步 IO 通道：返回 AIO 上下文状态摘要。
 ///
-/// 通道名形式：`aio://<设备名>`
+/// 通道名形式：`aio/<设备名>`
 pub fn probe_aio(name: &str) -> Option<String> {
-    let channel = format!("aio://{}", name);
+    let channel = format!("aio/{}", name);
     let epoch = lease::epoch(&channel);
     Some(format!(
         "channel={} type=aio_context epoch={} ops=submit|poll|start|shutdown",
@@ -571,10 +571,10 @@ pub fn probe_aio(name: &str) -> Option<String> {
 pub fn act_aio(name: &str, payload: &str) -> Option<Result<String, String>> {
     let mut tokens = payload.split_whitespace();
     let sub = tokens.next().unwrap_or("");
-    let channel = format!("aio://{}", name);
+    let channel = format!("aio/{}", name);
     match sub {
         "status" => Some(Ok(format!(
-            "aio://{} status=active epoch={}",
+            "aio/{} status=active epoch={}",
             name,
             lease::epoch(&channel)
         ))),
@@ -812,7 +812,7 @@ mod tests {
 
     #[test]
     fn aio_leased_single_writer() {
-        let ctx = AioContextLeased::new(32, "aio://test-lease");
+        let ctx = AioContextLeased::new(32, "aio/test-lease");
         assert!(ctx.acquire_sq_lease(101).is_ok());
         let err = ctx.acquire_sq_lease(102).unwrap_err();
         assert_eq!(err.holder, crate::exec::101);
@@ -823,7 +823,7 @@ mod tests {
 
     #[test]
     fn aio_leased_submit_commit_epoch() {
-        let ctx = AioContextLeased::new(32, "aio://test-lease2");
+        let ctx = AioContextLeased::new(32, "aio/test-lease2");
         let fd = 1;
         ctx.register_device(fd, Box::new(MemBlockDevice::new("ram0", 64)));
         ctx.start().unwrap();
@@ -842,7 +842,7 @@ mod tests {
 
     #[test]
     fn aio_leased_stale_epoch_rejected() {
-        let ctx = AioContextLeased::new(32, "aio://test-lease3");
+        let ctx = AioContextLeased::new(32, "aio/test-lease3");
         let fd = 1;
         ctx.register_device(fd, Box::new(MemBlockDevice::new("ram0", 64)));
         ctx.start().unwrap();
@@ -862,7 +862,7 @@ mod tests {
 
     #[test]
     fn aio_leased_force_shutdown() {
-        let ctx = AioContextLeased::new(32, "aio://test-lease4");
+        let ctx = AioContextLeased::new(32, "aio/test-lease4");
         let ep0 = ctx.epoch();
         let ep1 = ctx.force_shutdown(401);
         assert!(ep1 > ep0);
@@ -909,17 +909,17 @@ mod tests {
 
     #[test]
     fn aio_probe_channel() {
-        let snap = probe_aio("aio://ram0").unwrap();
-        assert!(snap.contains("aio://ram0"));
+        let snap = probe_aio("aio/ram0").unwrap();
+        assert!(snap.contains("aio/ram0"));
         assert!(snap.contains("epoch="));
         assert!(snap.contains("ops="));
     }
 
     #[test]
     fn aio_act_channel_status_epoch() {
-        let r = act_aio("aio://ram0", "status").unwrap().unwrap();
+        let r = act_aio("aio/ram0", "status").unwrap().unwrap();
         assert!(r.contains("status=active"));
-        let r = act_aio("aio://ram0", "epoch").unwrap().unwrap();
+        let r = act_aio("aio/ram0", "epoch").unwrap().unwrap();
         assert!(r.contains("epoch="));
     }
 }

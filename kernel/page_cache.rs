@@ -1,4 +1,4 @@
-﻿//! 页缓存与缓冲区缓存。
+//! 页缓存与缓冲区缓存。
 //!
 //! 页缓存（PageCache）缓存由键（key）索引的页框，支持引用计数、脏页标记、
 //! LRU 淘汰与脏页刷写；缓冲区缓存（BufferCache）以扇区为单位缓存磁盘块，
@@ -969,10 +969,10 @@ mod tests {
 
     #[test]
     fn global_page_cache_functions() {
-        let h = get_page("global://page");
-        assert_eq!(h.key, "global://page");
+        let h = get_page("global/page");
+        assert_eq!(h.key, "global/page");
         release_page(&h);
-        assert!(mark_page_dirty("global://page").is_ok());
+        assert!(mark_page_dirty("global/page").is_ok());
         let _ = flush_dirty_pages();
         let _ = evict_lru_pages();
         let _rate = page_cache_hit_rate();

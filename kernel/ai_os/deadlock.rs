@@ -223,7 +223,7 @@ pub fn status() -> String {
     )
 }
 
-/// `act deadlock://*` 的后端动作：
+/// `act deadlock/*` 的后端动作：
 /// * `graph` 打印等待图
 /// * `request <agent> <kind> <id>` 申请资源（被占用则登记等待）
 /// * `acquire <agent> <kind> <id>` 强制授予

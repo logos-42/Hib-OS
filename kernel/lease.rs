@@ -330,7 +330,7 @@ pub fn commit(channel: &str, owner: ExecId, expected: Epoch, data: &str) -> Resu
     let epoch = slot.commit(owner, expected, data)?;
     // 提交即事件：向各调度域发 wake_key，让等待该通道的令牌回到 MLFQ 就绪队列。
     exec::signal(channel);
-    exec::signal(&format!("lease://wait/{}", channel));
+    exec::signal(&format!("lease/wait/{}", channel));
     Ok(epoch)
 }
 
@@ -339,14 +339,14 @@ pub fn force(channel: &str, data: &str) -> Epoch {
     let slot = slot(channel);
     let epoch = slot.force(data);
     exec::signal(channel);
-    exec::signal(&format!("lease://wait/{}", channel));
+    exec::signal(&format!("lease/wait/{}", channel));
     epoch
 }
 
 /// 在这条通道的下一版上等待（事件驱动，不轮询）。
 pub fn wait_next(channel: &str, timeout: Option<Duration>) -> Option<Arc<Snapshot>> {
     let before = epoch(channel);
-    let reason = exec::block_on(&format!("lease://wait/{}", channel), timeout);
+    let reason = exec::block_on(&format!("lease/wait/{}", channel), timeout);
     if reason == exec::WakeReason::Timeout {
         return None;
     }
@@ -358,7 +358,7 @@ pub fn wait_next(channel: &str, timeout: Option<Duration>) -> Option<Arc<Snapsho
     }
 }
 
-/// 记录一次「因 epoch 过期被拒绝」的写入，供 `sense lease://channels` 观测。
+/// 记录一次「因 epoch 过期被拒绝」的写入，供 `sense lease/channels` 观测。
 pub fn note_stale(channel: &str) {
     let s = slot(channel);
     let mut g = s.state.lock().unwrap();
@@ -366,7 +366,7 @@ pub fn note_stale(channel: &str) {
     g.conflicts += 1;
 }
 
-/// 汇总状态（供 `sense lease://channels`）。
+/// 汇总状态（供 `sense lease/channels`）。
 pub fn status() -> String {
     let snapshot_map: Vec<Arc<Slot>> = {
         let m = slots().lock().unwrap();
@@ -409,7 +409,7 @@ mod tests {
 
     #[test]
     fn single_writer_enforced() {
-        let ch = "unittest://lease/single-writer";
+        let ch = "unittest/lease/single-writer";
         let a = 101u64;
         let b = 102u64;
         assert!(acquire(ch, a, None).is_ok());
@@ -422,7 +422,7 @@ mod tests {
 
     #[test]
     fn stale_commit_is_rejected() {
-        let ch = "unittest://lease/stale";
+        let ch = "unittest/lease/stale";
         let owner = 201u64;
         let ep = acquire(ch, owner, None).unwrap();
         assert_eq!(ep, 0);
@@ -446,14 +446,14 @@ mod tests {
 
     #[test]
     fn commit_without_lease_is_rejected() {
-        let ch = "unittest://lease/no-lease";
+        let ch = "unittest/lease/no-lease";
         let err = commit(ch, 301, 0, "x").unwrap_err();
         assert_eq!(err, CommitError::NotLeaseOwner { holder: None });
     }
 
     #[test]
     fn snapshot_carries_writer_and_epoch() {
-        let ch = "unittest://lease/snapshot";
+        let ch = "unittest/lease/snapshot";
         let owner = 401u64;
         let ep = acquire(ch, owner, None).unwrap();
         commit(ch, owner, ep, "hello").unwrap();
@@ -466,7 +466,7 @@ mod tests {
 
     #[test]
     fn ttl_expiry_frees_the_channel() {
-        let ch = "unittest://lease/ttl";
+        let ch = "unittest/lease/ttl";
         assert!(acquire(ch, 501, Some(Duration::from_millis(10))).is_ok());
         assert_eq!(slot(ch).holder(), Some(501));
         std::thread::sleep(Duration::from_millis(20));
@@ -478,7 +478,7 @@ mod tests {
 
     #[test]
     fn force_bumps_epoch_without_lease() {
-        let ch = "unittest://lease/force";
+        let ch = "unittest/lease/force";
         let ep = force(ch, "root-write");
         assert_eq!(ep, 1);
         assert_eq!(&*snapshot(ch).data, "root-write");
@@ -488,7 +488,7 @@ mod tests {
     fn commit_wakes_waiter() {
         use std::sync::atomic::{AtomicBool, Ordering};
         use std::sync::Arc;
-        let ch = "unittest://lease/wake";
+        let ch = "unittest/lease/wake";
 
         let hit = Arc::new(AtomicBool::new(false));
         let hit2 = hit.clone();

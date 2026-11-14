@@ -53,7 +53,7 @@ pub fn desktop() -> &'static Mutex<Compositor> {
     DESKTOP.get_or_init(|| Mutex::new(Compositor::new(DEFAULT_WIDTH, DEFAULT_HEIGHT)))
 }
 
-/// 全局输入队列（`input://kbd` / `input://mouse` 的实体）。
+/// 全局输入队列（`input/kbd` / `input/mouse` 的实体）。
 pub fn input_queue() -> &'static Mutex<input::InputQueue> {
     static QUEUE: OnceLock<Mutex<input::InputQueue>> = OnceLock::new();
     QUEUE.get_or_init(|| Mutex::new(input::InputQueue::new(1024)))

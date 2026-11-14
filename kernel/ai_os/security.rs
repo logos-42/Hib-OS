@@ -240,7 +240,7 @@ pub fn status() -> String {
     )
 }
 
-/// `act security://*` 的后端动作：
+/// `act security/*` 的后端动作：
 /// * `scan <text...>` 注入检测
 /// * `grant <agent> <cap>...` 授权
 /// * `revoke <agent> <cap>` 撤权
@@ -263,7 +263,7 @@ pub fn security_act(payload: &str) -> Result<String, String> {
             let agent = it
                 .next()
                 .and_then(|x| x.parse::<u64>().ok())
-                .ok_or("用法: security://caps grant <agent> <cap>...")?;
+                .ok_or("用法: security/caps grant <agent> <cap>...")?;
             let caps: Vec<&str> = it.next().unwrap_or("").split(',').filter(|c| !c.is_empty()).collect();
             s.policy.grant(agent, &caps);
             Ok(format!("已授权 agent={} caps={:?}", agent, caps))
@@ -272,8 +272,8 @@ pub fn security_act(payload: &str) -> Result<String, String> {
             let agent = it
                 .next()
                 .and_then(|x| x.parse::<u64>().ok())
-                .ok_or("用法: security://caps revoke <agent> <cap>")?;
-            let cap = it.next().ok_or("用法: security://caps revoke <agent> <cap>")?;
+                .ok_or("用法: security/caps revoke <agent> <cap>")?;
+            let cap = it.next().ok_or("用法: security/caps revoke <agent> <cap>")?;
             s.policy.revoke(agent, cap);
             Ok(format!("已撤权 agent={} cap={}", agent, cap))
         }
@@ -281,8 +281,8 @@ pub fn security_act(payload: &str) -> Result<String, String> {
             let agent = it
                 .next()
                 .and_then(|x| x.parse::<u64>().ok())
-                .ok_or("用法: security://caps check <agent> <cap>")?;
-            let cap = it.next().ok_or("用法: security://caps check <agent> <cap>")?;
+                .ok_or("用法: security/caps check <agent> <cap>")?;
+            let cap = it.next().ok_or("用法: security/caps check <agent> <cap>")?;
             s.policy
                 .allowed(agent, cap)
                 .map(|_| format!("允许 agent={} cap={}", agent, cap))
