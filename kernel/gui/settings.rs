@@ -144,7 +144,7 @@ pub fn settings_read(key: &str) -> Result<String, String> {
         },
     };
     let reg = crate::capability::capability_registry();
-    match reg.lock().unwrap_or_else(|e| e.into_inner()).get("settings") {
+    match reg.read().unwrap_or_else(|e| e.into_inner()).get("settings") {
         Some(cap) => match cap.execute(req) {
             Ok(resp) => {
                 let value = resp.output.get("value").cloned().unwrap_or(json!(null));
@@ -178,7 +178,7 @@ pub fn settings_update(key: &str, value: serde_json::Value) -> Result<String, St
         },
     };
     let reg = crate::capability::capability_registry();
-    match reg.lock().unwrap_or_else(|e| e.into_inner()).get("settings") {
+    match reg.read().unwrap_or_else(|e| e.into_inner()).get("settings") {
         Some(cap) => match cap.execute(req) {
             Ok(_resp) => Ok(format!("已更新设置: {} = {}", key, value)),
             Err(e) => Err(format!("更新失败: {} (code={})", e.message, e.code)),

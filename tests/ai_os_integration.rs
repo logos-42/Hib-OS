@@ -475,7 +475,7 @@ fn cross_interface_filesystem_consistency() {
     };
 
     let reg = capability_registry();
-    let fs_cap = reg.lock().unwrap().get("filesystem").expect("filesystem capability 未注册");
+    let fs_cap = reg.read().unwrap().get("filesystem").expect("filesystem capability 未注册");
 
     // 写入
     let write_req = hibos::capability::CapabilityRequest {
@@ -582,7 +582,7 @@ fn cross_interface_task_consistency() {
     };
 
     let reg = capability_registry();
-    let task_cap = reg.lock().unwrap().get("task").expect("task capability 未注册");
+    let task_cap = reg.read().unwrap().get("task").expect("task capability 未注册");
 
     // 创建任务
     let create_req = hibos::capability::CapabilityRequest {
@@ -679,7 +679,7 @@ fn capability_registry_has_expected_capabilities() {
     use hibos::capability::capability_registry;
 
     let reg = capability_registry();
-    let ids = reg.lock().unwrap().list_ids();
+    let ids = reg.read().unwrap().list_ids();
     let expected = ["filesystem", "process", "agent", "task", "system", "settings"];
     for id in expected {
         assert!(
@@ -705,7 +705,7 @@ fn system_status_consistency() {
     };
 
     let reg = capability_registry();
-    let sys_cap = reg.lock().unwrap().get("system").expect("system capability 未注册");
+    let sys_cap = reg.read().unwrap().get("system").expect("system capability 未注册");
 
     for caller in ["shell", "gui", "agent"] {
         let caller_type = match caller {

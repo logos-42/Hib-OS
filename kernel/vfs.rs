@@ -927,17 +927,37 @@ impl Vfs {
 }
 
 /// 全局 VFS 单例（供统一系统能力层使用）。
-static GLOBAL_VFS: std::sync::OnceLock<std::sync::Mutex<Vfs>> =
+///
+/// 与能力注册表同理：文件读操作远多于写操作，用 `RwLock` 让
+/// `ls` / `cat` / `stat` 等只读调用可以并发执行，只有写入才独占。
+static GLOBAL_VFS: std::sync::OnceLock<std::sync::RwLock<Vfs>> =
     std::sync::OnceLock::new();
 
-/// 获取全局 VFS。
-pub fn global_vfs() -> &'static std::sync::Mutex<Vfs> {
-    GLOBAL_VFS.get_or_init(|| std::sync::Mutex::new(Vfs::new()))
+/// 获取全局 VFS（读用 `.read()`，写用 `.write()`）。
+pub fn global_vfs() -> &'static std::sync::RwLock<Vfs> {
+    GLOBAL_VFS.get_or_init(|| std::sync::RwLock::new(Vfs::new()))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 全局 VFS 改为 RwLock 后，多个只读调用应能并发进入而不死锁。
+    #[test]
+    fn global_vfs_allows_concurrent_reads() {
+        let handles: Vec<_> = (0..8)
+            .map(|_| {
+                std::thread::spawn(|| {
+                    let vfs = global_vfs().read().unwrap();
+                    assert!(vfs.cat("/etc/hibos.toml").is_ok());
+                    assert!(vfs.ls(None).is_ok());
+                })
+            })
+            .collect();
+        for h in handles {
+            h.join().unwrap();
+        }
+    }
 
     #[test]
     fn initial_tree_is_linux_like() {

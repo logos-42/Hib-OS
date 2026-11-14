@@ -11,7 +11,7 @@ use super::{
 use crate::event::{publish_from_capability, SystemEventType};
 use crate::monitor;
 use crate::process::{process_manager, spawn_process, ProcessId, ProcessManager, ProcessState};
-use crate::vfs::{global_vfs, NodeKind, VfsError};
+use crate::vfs::{global_vfs, NodeKind, Vfs, VfsError};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -354,6 +354,37 @@ impl FilesystemCapability {
     }
 }
 
+/// 一次文件系统操作持有的锁守卫。
+///
+/// `ls` / `cat` / `stat` 这类只读操作拿共享读锁，多个入口可以同时查；
+/// `write` / `mkdir` / `touch` / `rm` 这类写操作才拿独占写锁。
+/// 这样既保留原有「一个 guard 覆盖整段 match」的写法，又真正获得读并发。
+enum VfsGuard<'a> {
+    Read(std::sync::RwLockReadGuard<'a, Vfs>),
+    Write(std::sync::RwLockWriteGuard<'a, Vfs>),
+}
+
+impl std::ops::Deref for VfsGuard<'_> {
+    type Target = Vfs;
+
+    fn deref(&self) -> &Vfs {
+        match self {
+            VfsGuard::Read(g) => g,
+            VfsGuard::Write(g) => g,
+        }
+    }
+}
+
+impl std::ops::DerefMut for VfsGuard<'_> {
+    fn deref_mut(&mut self) -> &mut Vfs {
+        match self {
+            // 只有写操作会调用需要 &mut Vfs 的方法；读操作走到这里是编程错误。
+            VfsGuard::Write(g) => g,
+            VfsGuard::Read(_) => unreachable!("只读文件系统操作不应请求可变引用"),
+        }
+    }
+}
+
 impl SystemCapability for FilesystemCapability {
     fn id(&self) -> String {
         "filesystem".to_string()
@@ -367,7 +398,7 @@ impl SystemCapability for FilesystemCapability {
         json!({
             "type": "object",
             "properties": {
-                "op": {"type": "string", "enum": ["list", "read", "write", "mkdir", "touch", "rm", "stat"]},
+                "op": {"type": "string", "enum": ["list", "read", "write", "mkdir", "touch", "rm", "delete", "stat"]},
                 "path": {"type": "string"},
                 "content": {"type": "string"}
             },
@@ -395,7 +426,21 @@ impl SystemCapability for FilesystemCapability {
         let op = req.input.get("op").and_then(|v| v.as_str()).unwrap_or("");
         let path = req.input.get("path").and_then(|v| v.as_str()).unwrap_or("");
 
-        let mut vfs = global_vfs().lock().unwrap();
+        // 写操作独占，读操作共享：这是 PERF-002 的核心。
+        let write_op = matches!(op, "write" | "mkdir" | "touch" | "rm" | "delete");
+        let mut vfs = if write_op {
+            VfsGuard::Write(
+                global_vfs()
+                    .write()
+                    .unwrap_or_else(|e| e.into_inner()),
+            )
+        } else {
+            VfsGuard::Read(
+                global_vfs()
+                    .read()
+                    .unwrap_or_else(|e| e.into_inner()),
+            )
+        };
 
         let result = match op {
             "list" => {
@@ -487,7 +532,9 @@ impl SystemCapability for FilesystemCapability {
                 );
                 json!({"path": path, "created": true})
             }
-            "rm" => {
+            // `delete` 是 `rm` 的别名：Shell、GUI、Agent API 用同一个能力，
+            // 避免「同一删除操作三个入口三种叫法」导致的跨接口不一致。
+            "rm" | "delete" => {
                 vfs.rm(path).map_err(|e| CapabilityError {
                     code: ErrorCode::NotFound,
                     message: format!("rm {path}: {e:?}"),
@@ -1010,21 +1057,37 @@ impl SystemCapability for AgentCapability {
     }
 
     fn execute(&self, req: CapabilityRequest) -> Result<CapabilityResponse, CapabilityError> {
-        enforce_permissions(&req.context, &self.required_permissions())?;
         check_cancellation(&req.cancellation_token)?;
         let start_ns = now_ns();
         check_timeout(start_ns, req.timeout_ns)?;
         let op = req.input.get("op").and_then(|v| v.as_str()).unwrap_or("");
 
+        // 按操作细分权限：查询只要 agent:read，启停只要 agent:control。
+        // 原先无条件要求两个权限，导致 Shell 的 inspect 与 GUI 的 start 必然被拒，
+        // 三个入口出现「同一个操作有的成功有的失败」的不一致。
+        let required: Vec<Permission> = match op {
+            "list" | "inspect" => vec!["agent:read".to_string()],
+            "start" | "stop" => vec!["agent:control".to_string()],
+            _ => self.required_permissions(),
+        };
+        enforce_permissions(&req.context, &required)?;
+
         match op {
             "list" => {
-                let agents = crate::agent::list();
-                let entries: Vec<Value> = agents
-                    .lines()
-                    .filter(|l| !l.is_empty())
-                    .map(|l| json!({"info": l}))
+                // 结构化快照，不再让调用方去解析 human-readable 文本。
+                let agents: Vec<Value> = crate::agent::snapshot()
+                    .iter()
+                    .map(|a| {
+                        json!({
+                            "id": a.id,
+                            "name": a.name,
+                            "role": a.role,
+                            "state": a.state.name(),
+                            "exec_id": a.exec_id,
+                        })
+                    })
                     .collect();
-                Ok(ok_response(&req, json!({"agents": entries}), "agent.list"))
+                Ok(ok_response(&req, json!({"agents": agents}), "agent.list"))
             }
             "inspect" => {
                 let id = req
@@ -1038,34 +1101,46 @@ impl SystemCapability for AgentCapability {
                         retryable: false,
                         audit: req.audit.clone(),
                     })?;
-                // 通过 list 输出查找指定 id 的智能体
-                let list_output = crate::agent::list();
-                let found = list_output.lines().any(|l| l.contains(&format!("id={id}"))) || list_output.contains(&id.to_string());
-                if !found {
-                    return Err(CapabilityError {
+                match crate::agent::snapshot().into_iter().find(|a| a.id == id) {
+                    Some(a) => Ok(ok_response(
+                        &req,
+                        json!({
+                            "id": a.id,
+                            "name": a.name,
+                            "role": a.role,
+                            "state": a.state.name(),
+                            "exec_id": a.exec_id,
+                            "found": true,
+                        }),
+                        "agent.inspect",
+                    )),
+                    None => Err(CapabilityError {
                         code: ErrorCode::NotFound,
                         message: format!("智能体 {id} 不存在"),
                         source: Some("agent".to_string()),
                         retryable: false,
                         audit: req.audit.clone(),
-                    });
+                    }),
                 }
-                Ok(ok_response(&req, json!({"id": id, "found": true}), "agent.inspect"))
             }
             "start" => {
                 let id = req.input.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
-                let result = crate::agent::dispatch(&format!("agent/start {id}"));
-                match result {
+                // 与 Shell/GUI/act 通道共用同一个 agent::start 实现。
+                match crate::agent::start(&id.to_string()) {
                     Ok(msg) => {
                         publish_from_capability(
                             &req.context,
                             SystemEventType::AgentStarted,
-                            json!({"id": id, "result": msg}),
+                            json!({"agent_id": id.to_string(), "id": id, "result": msg}),
                         );
-                        Ok(ok_response(&req, json!({"op": "start", "id": id, "result": msg}), "agent.start"))
+                        Ok(ok_response(
+                            &req,
+                            json!({"op": "start", "id": id, "result": msg}),
+                            "agent.start",
+                        ))
                     }
                     Err(e) => Err(CapabilityError {
-                        code: ErrorCode::InternalError,
+                        code: ErrorCode::NotFound,
                         message: e,
                         source: Some("agent".to_string()),
                         retryable: false,
@@ -1075,18 +1150,21 @@ impl SystemCapability for AgentCapability {
             }
             "stop" => {
                 let id = req.input.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
-                let result = crate::agent::stop(&id.to_string());
-                match result {
+                match crate::agent::stop(&id.to_string()) {
                     Ok(msg) => {
                         publish_from_capability(
                             &req.context,
                             SystemEventType::AgentStopped,
-                            json!({"id": id, "result": msg}),
+                            json!({"agent_id": id.to_string(), "id": id, "result": msg}),
                         );
-                        Ok(ok_response(&req, json!({"op": "stop", "id": id, "result": msg}), "agent.stop"))
+                        Ok(ok_response(
+                            &req,
+                            json!({"op": "stop", "id": id, "result": msg}),
+                            "agent.stop",
+                        ))
                     }
                     Err(e) => Err(CapabilityError {
-                        code: ErrorCode::InternalError,
+                        code: ErrorCode::NotFound,
                         message: e,
                         source: Some("agent".to_string()),
                         retryable: false,
@@ -1585,7 +1663,9 @@ impl SystemCapability for SettingsCapability {
 /// 注册所有内置系统能力到全局注册表。
 pub fn register_all_capabilities() {
     let reg = capability_registry();
-    let mut caps = reg.lock().unwrap();
+    // 注册是写操作；注意 CapabilityRegistry::register 内部还有一层写锁，
+    // 这里持有的是外层写锁，两层都是写锁、顺序固定，不会形成读写互相等待。
+    let caps = reg.write().unwrap_or_else(|e| e.into_inner());
 
     caps.register(FilesystemCapability::new());
     caps.register(ProcessCapability::new());
@@ -1601,5 +1681,7 @@ pub fn register_all_capabilities() {
 /// 获取所有能力的元数据。
 pub fn list_capability_metadata() -> Vec<CapabilityMetadata> {
     let reg = capability_registry();
-    reg.lock().unwrap().list_metadata()
+    reg.read()
+        .unwrap_or_else(|e| e.into_inner())
+        .list_metadata()
 }

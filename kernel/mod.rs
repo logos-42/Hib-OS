@@ -164,6 +164,8 @@ pub fn boot_subsystems() {
     syscall::init();
     verification::init();
     capability::caps_impl::register_all_capabilities();
+    // GUI 订阅 EventBus：Shell / Agent 通过能力层产生的状态变化会实时推送到界面。
+    gui::init_event_subscription();
 }
 
 /// 内核入口: 初始化各子系统并运行一次演示调度。

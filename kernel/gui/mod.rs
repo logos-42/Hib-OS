@@ -40,7 +40,12 @@ pub mod wm;
 #[cfg(feature = "gui")]
 pub mod backend;
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
+
+use crate::event::{
+    event_bus, EventFilter, EventSubscriber, SystemEvent, SystemEventType,
+};
 
 use compositor::{Compositor, Wallpaper};
 use surface::{argb, palette, Surface};
@@ -109,6 +114,8 @@ pub fn pump_all() -> Vec<input::Effect> {
 
 /// 确保桌面已初始化（首次调用会构建演示桌面）。
 pub fn ensure_demo() {
+    // GUI 一启动就订阅系统事件，实时视图由事件驱动而不是定时轮询。
+    init_event_subscription();
     let mut d = desktop().lock().unwrap();
     if d.windows().is_empty() {
         build_demo(&mut d);
@@ -224,7 +231,7 @@ pub fn build_task_workspace(comp: &mut Compositor, x: i32, y: i32, w: u32, h: u3
             },
         };
         let reg = crate::capability::capability_registry();
-        if let Some(cap) = reg.lock().unwrap().get("task") {
+        if let Some(cap) = reg.read().unwrap().get("task") {
             match cap.execute(req) {
                 Ok(resp) => {
                     if let Some(tasks) = resp.output.get("tasks").and_then(|v| v.as_array()) {
@@ -333,7 +340,7 @@ pub fn refresh_workspaces(comp: &mut Compositor) {
                         },
                     };
                     let reg = crate::capability::capability_registry();
-                    if let Some(cap) = reg.lock().unwrap().get("task") {
+                    if let Some(cap) = reg.read().unwrap().get("task") {
                         if let Ok(resp) = cap.execute(req) {
                             if let Some(tasks) = resp.output.get("tasks").and_then(|v| v.as_array())
                             {
@@ -453,6 +460,113 @@ pub fn paint_lines(win: &mut Window, lines: &[String]) {
     win.content_epoch += 1;
 }
 
+// ==========================================================================
+// 事件驱动实时刷新（ARCH-002）
+//
+// 旧实现由 GUI 后端每 400ms 无条件重画一遍实时视图，属于轮询：
+// 系统没变化时白白烧 CPU，系统刚变化又要等最多 400ms 才看得见。
+// 现在 GUI 在启动时向 EventBus 注册订阅者，能力层发布事件时只递增一个
+// 「脏」代号；GUI 线程发现代号变化才真正重画。
+// ==========================================================================
+
+/// 事件代号：每收到一个相关事件就 +1。
+static LIVE_EVENT_GENERATION: AtomicU64 = AtomicU64::new(1);
+/// 已应用到画面的事件代号。
+static LIVE_APPLIED_GENERATION: AtomicU64 = AtomicU64::new(0);
+/// 保证订阅者只注册一次（多个 GUI 会话 / 测试共用同一个全局总线）。
+static LIVE_SUBSCRIPTION: OnceLock<()> = OnceLock::new();
+
+/// 实时视图订阅者：只做一次原子递增，绝不持有锁或重画，避免发布线程被拖慢。
+struct LiveRefreshSubscriber;
+
+impl EventSubscriber for LiveRefreshSubscriber {
+    fn on_event(&self, _event: &SystemEvent) {
+        LIVE_EVENT_GENERATION.fetch_add(1, Ordering::SeqCst);
+    }
+}
+
+/// 通知中心订阅者：把系统事件变成通知中心里的一条记录。
+struct NotificationSubscriber;
+
+impl EventSubscriber for NotificationSubscriber {
+    fn on_event(&self, event: &SystemEvent) {
+        // `notify()` 已经自己入队过一条通知并发布了同名事件，
+        // 这里跳过它，避免一条通知被存两遍。
+        if event.payload.get("notification_id").is_some() {
+            return;
+        }
+        notification::on_system_event(event);
+    }
+}
+
+/// 哪些事件需要刷新实时视图（基本覆盖全部运行时状态变化）。
+fn live_refresh_filter() -> EventFilter {
+    use SystemEventType as T;
+    EventFilter {
+        event_types: Some(vec![
+            T::AgentStarted, T::AgentStopped, T::AgentStateChanged,
+            T::TaskCreated, T::TaskStarted, T::TaskProgress, T::TaskCompleted,
+            T::TaskFailed, T::TaskCancelled, T::TaskPaused, T::TaskResumed,
+            T::ToolInvoked, T::ToolCompleted, T::ToolFailed,
+            T::PermissionRequested, T::PermissionGranted, T::PermissionDenied,
+            T::PermissionRevoked,
+            T::FileCreated, T::FileChanged, T::FileDeleted, T::FileMoved,
+            T::ProcessStarted, T::ProcessExited, T::ProcessSignaled,
+            T::WindowCreated, T::WindowClosed, T::WindowFocused,
+            T::WindowMoved, T::WindowResized,
+            T::SystemResourceChanged,
+        ]),
+        ..Default::default()
+    }
+}
+
+/// 注册 GUI 的事件订阅者（幂等，可在 boot / GUI 启动 / 测试里重复调用）。
+pub fn init_event_subscription() {
+    LIVE_SUBSCRIPTION.get_or_init(|| {
+        let bus = event_bus().lock().unwrap_or_else(|e| e.into_inner());
+        bus.subscribe(live_refresh_filter(), Box::new(LiveRefreshSubscriber));
+        bus.subscribe(
+            EventFilter {
+                event_types: Some(vec![
+                    SystemEventType::AgentStarted,
+                    SystemEventType::AgentStopped,
+                    SystemEventType::TaskCompleted,
+                    SystemEventType::TaskFailed,
+                    SystemEventType::PermissionRequested,
+                ]),
+                ..Default::default()
+            },
+            Box::new(NotificationSubscriber),
+        );
+    });
+}
+
+/// 订阅是否已建立（供测试与诊断使用）。
+pub fn event_subscription_active() -> bool {
+    LIVE_SUBSCRIPTION.get().is_some()
+}
+
+/// 当前事件代号（供测试判断事件是否送达 GUI）。
+pub fn live_event_generation() -> u64 {
+    LIVE_EVENT_GENERATION.load(Ordering::SeqCst)
+}
+
+/// 手工把画面标记为需要刷新（例如 Shell 直接改了内核状态但没有发布事件时）。
+pub fn mark_live_dirty() {
+    LIVE_EVENT_GENERATION.fetch_add(1, Ordering::SeqCst);
+}
+
+/// 仅当 EventBus 上有新事件时才刷新实时视图；返回是否真的重画了。
+pub fn refresh_live_if_dirty() -> bool {
+    init_event_subscription();
+    let gen = LIVE_EVENT_GENERATION.load(Ordering::SeqCst);
+    if gen == LIVE_APPLIED_GENERATION.load(Ordering::SeqCst) {
+        return false;
+    }
+    refresh_live();
+    true
+}
+
 /// 刷新所有「实时视图」窗口。
 pub fn refresh_live() {
     let mut d = desktop().lock().unwrap();
@@ -471,6 +585,36 @@ pub fn refresh_live() {
         if let Some(w) = d.window_mut(id) {
             paint_lines(w, &lines);
         }
+    }
+    drop(d);
+    // 画面已经与本代号对应的事件同步，后续无需重复重画。
+    LIVE_APPLIED_GENERATION.store(LIVE_EVENT_GENERATION.load(Ordering::SeqCst), Ordering::SeqCst);
+}
+
+#[cfg(test)]
+mod event_subscription_tests {
+    use super::*;
+    use crate::event::{publish_event, EventSource};
+    use serde_json::json;
+
+    #[test]
+    fn gui_refresh_is_driven_by_events() {
+        init_event_subscription();
+        assert!(event_subscription_active());
+
+        let before = live_event_generation();
+        publish_event(
+            EventSource::System,
+            SystemEventType::AgentStarted,
+            None,
+            json!({"agent_id": "1"}),
+        );
+        // 订阅者收到了事件，代号推进。
+        assert!(live_event_generation() > before);
+
+        // 事件驱动的刷新入口能真正执行刷新，并把代号标记为已应用。
+        let _ = refresh_live_if_dirty();
+        assert!(LIVE_APPLIED_GENERATION.load(Ordering::SeqCst) >= before);
     }
 }
 

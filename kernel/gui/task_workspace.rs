@@ -122,7 +122,7 @@ fn list_tasks() -> Vec<TaskSummary> {
         },
     };
     let reg = crate::capability::capability_registry();
-    match reg.lock().unwrap_or_else(|e| e.into_inner()).get("task") {
+    match reg.read().unwrap_or_else(|e| e.into_inner()).get("task") {
         Some(cap) => match cap.execute(req) {
             Ok(resp) => {
                 parse_task_list(&resp.output)
@@ -155,7 +155,7 @@ fn inspect_task(task_id: u64) -> Option<TaskDetail> {
         },
     };
     let reg = crate::capability::capability_registry();
-    match reg.lock().unwrap_or_else(|e| e.into_inner()).get("task") {
+    match reg.read().unwrap_or_else(|e| e.into_inner()).get("task") {
         Some(cap) => match cap.execute(req) {
             Ok(resp) => parse_task_detail(&resp.output),
             Err(_) => None,
@@ -186,7 +186,7 @@ pub fn cancel_task(task_id: u64) -> Result<String, String> {
         },
     };
     let reg = crate::capability::capability_registry();
-    match reg.lock().unwrap_or_else(|e| e.into_inner()).get("task") {
+    match reg.read().unwrap_or_else(|e| e.into_inner()).get("task") {
         Some(cap) => match cap.execute(req) {
             Ok(_resp) => Ok(format!("任务 #{} 已取消", task_id)),
             Err(e) => Err(format!("取消失败: {} (code={})", e.message, e.code)),
@@ -217,7 +217,7 @@ pub fn pause_task(task_id: u64) -> Result<String, String> {
         },
     };
     let reg = crate::capability::capability_registry();
-    match reg.lock().unwrap_or_else(|e| e.into_inner()).get("task") {
+    match reg.read().unwrap_or_else(|e| e.into_inner()).get("task") {
         Some(cap) => match cap.execute(req) {
             Ok(_resp) => Ok(format!("任务 #{} 已暂停", task_id)),
             Err(e) => Err(format!("暂停失败: {} (code={})", e.message, e.code)),
@@ -248,7 +248,7 @@ pub fn resume_task(task_id: u64) -> Result<String, String> {
         },
     };
     let reg = crate::capability::capability_registry();
-    match reg.lock().unwrap_or_else(|e| e.into_inner()).get("task") {
+    match reg.read().unwrap_or_else(|e| e.into_inner()).get("task") {
         Some(cap) => match cap.execute(req) {
             Ok(_resp) => Ok(format!("任务 #{} 已恢复", task_id)),
             Err(e) => Err(format!("恢复失败: {} (code={})", e.message, e.code)),

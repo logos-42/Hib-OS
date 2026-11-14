@@ -171,6 +171,48 @@ impl PermissionManager {
         id
     }
 
+    /// 登记一个由其它子系统（例如 `agent::Orchestrator`）创建的 Agent。
+    ///
+    /// 两个注册表必须共用同一个 Agent ID，否则 GUI 显示的 ID、Shell 操作的 ID
+    /// 和能力层校验的 ID 会对不上。已存在的 ID 只更新状态，不重复插入。
+    pub fn register_external_agent(
+        &self,
+        agent_id: AgentId,
+        name: &str,
+        role: &str,
+        capabilities: Vec<PermissionStr>,
+        state: AgentLifecycleState,
+    ) {
+        let mut agents = self.agents.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(existing) = agents.get_mut(&agent_id) {
+            existing.state = state;
+            return;
+        }
+        agents.insert(
+            agent_id,
+            AgentEntry {
+                identity: AgentIdentity {
+                    agent_id,
+                    owner: Principal::System,
+                    name: name.to_string(),
+                    role: role.to_string(),
+                    created_at: now_ns(),
+                },
+                state,
+                capabilities: capabilities.into_iter().collect(),
+                authorizations: BTreeMap::new(),
+                quota: super::capability::ResourceQuota::default(),
+                audit_log: Vec::new(),
+            },
+        );
+        drop(agents);
+        // 自增 ID 必须越过外部 ID，避免后续 create_agent 撞号。
+        let mut next = self.next_id.lock().unwrap_or_else(|e| e.into_inner());
+        if *next <= agent_id {
+            *next = agent_id + 1;
+        }
+    }
+
     /// 授予权限。
     pub fn grant_permission(
         &self,

@@ -3,9 +3,7 @@
 //! 展示系统通知、权限请求、Agent 事件、任务状态变更等。
 //! 支持订阅事件总线，实时推送而非轮询。
 
-use crate::event::{
-    event_bus, publish_event, EventSource, SystemEventType, EventFilter, SystemEvent,
-};
+use crate::event::{publish_event, EventSource, SystemEvent, SystemEventType};
 use serde_json::json;
 use std::collections::VecDeque;
 use std::sync::{Mutex, OnceLock};

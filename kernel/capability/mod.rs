@@ -9,7 +9,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub mod caps_impl;
@@ -276,38 +276,46 @@ pub trait SystemCapability: Send + Sync {
 }
 
 /// 能力注册表。存储所有已注册的系统能力。
+///
+/// 注册表是典型的「读多写少」：启动时注册一次，运行期绝大多数调用都是
+/// `get` / `list_ids` / `list_metadata` 这类只读查询。
+/// 因此用 `RwLock` 而不是 `Mutex`，让多个入口（Shell / GUI / Agent）可以并发查询，
+/// 只有注册新能力时才独占写锁。
 pub struct CapabilityRegistry {
-    capabilities: Mutex<HashMap<CapabilityId, Arc<dyn SystemCapability>>>,
+    capabilities: RwLock<HashMap<CapabilityId, Arc<dyn SystemCapability>>>,
 }
 
 impl CapabilityRegistry {
     pub fn new() -> Self {
         Self {
-            capabilities: Mutex::new(HashMap::new()),
+            capabilities: RwLock::new(HashMap::new()),
         }
     }
 
-    /// 注册一个能力。
+    /// 注册一个能力（独占写锁）。
     pub fn register(&self, cap: Arc<dyn SystemCapability>) {
         let id = cap.id().clone();
-        self.capabilities.lock().unwrap().insert(id, cap);
+        self.capabilities
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(id, cap);
     }
 
-    /// 查找一个能力（返回 Arc 克隆，避免生命周期问题）。
+    /// 查找一个能力（共享读锁，返回 Arc 克隆，避免生命周期问题）。
     pub fn get(&self, id: &str) -> Option<Arc<dyn SystemCapability>> {
-        let caps = self.capabilities.lock().unwrap();
+        let caps = self.capabilities.read().unwrap_or_else(|e| e.into_inner());
         caps.get(id).cloned()
     }
 
-    /// 列出所有能力 ID。
+    /// 列出所有能力 ID（共享读锁）。
     pub fn list_ids(&self) -> Vec<CapabilityId> {
-        let caps = self.capabilities.lock().unwrap();
+        let caps = self.capabilities.read().unwrap_or_else(|e| e.into_inner());
         caps.keys().cloned().collect()
     }
 
-    /// 获取所有能力的元数据（用于 capability list --json）。
+    /// 获取所有能力的元数据（共享读锁，用于 capability list --json）。
     pub fn list_metadata(&self) -> Vec<CapabilityMetadata> {
-        let caps = self.capabilities.lock().unwrap();
+        let caps = self.capabilities.read().unwrap_or_else(|e| e.into_inner());
         caps.values()
             .map(|c| CapabilityMetadata {
                 id: c.id().clone(),
@@ -333,16 +341,32 @@ impl Default for CapabilityRegistry {
 }
 
 /// 全局能力注册表单例。
-static CAP_REGISTRY: std::sync::OnceLock<Mutex<CapabilityRegistry>> = std::sync::OnceLock::new();
+static CAP_REGISTRY: std::sync::OnceLock<RwLock<CapabilityRegistry>> =
+    std::sync::OnceLock::new();
 
 /// 获取全局能力注册表。
-pub fn capability_registry() -> &'static Mutex<CapabilityRegistry> {
-    CAP_REGISTRY.get_or_init(|| Mutex::new(CapabilityRegistry::new()))
+///
+/// 只读查询请用 `.read()`，注册新能力请用 `.write()`。
+/// 返回值仍是一个锁，保持了原有调用形态；锁中毒时用 `into_inner()` 恢复，
+/// 避免一个调用方 panic 导致整个能力层永久不可用。
+pub fn capability_registry() -> &'static RwLock<CapabilityRegistry> {
+    CAP_REGISTRY.get_or_init(|| RwLock::new(CapabilityRegistry::new()))
 }
 
-/// 注册一个能力到全局注册表。
+/// 注册一个能力到全局注册表（写锁）。
 pub fn register_capability(cap: Arc<dyn SystemCapability>) {
-    capability_registry().lock().unwrap().register(cap);
+    capability_registry()
+        .write()
+        .unwrap_or_else(|e| e.into_inner())
+        .register(cap);
+}
+
+/// 以共享读锁执行一次只读查询，省去每个调用点手写 `.read()` 的样板。
+pub fn with_registry_read<R>(f: impl FnOnce(&CapabilityRegistry) -> R) -> R {
+    let reg = capability_registry()
+        .read()
+        .unwrap_or_else(|e| e.into_inner());
+    f(&reg)
 }
 
 #[cfg(test)]
@@ -388,6 +412,40 @@ mod tests {
     fn now_ns_nonzero() {
         let t = now_ns();
         assert!(t > 0);
+    }
+
+    /// 读多写少：多个线程同时查询注册表不应互相阻塞，也不应死锁。
+    #[test]
+    fn registry_allows_concurrent_reads() {
+        struct DummyCapability;
+        impl SystemCapability for DummyCapability {
+            fn id(&self) -> CapabilityId { "test.dummy".to_string() }
+            fn description(&self) -> &str { "测试用能力" }
+            fn input_schema(&self) -> Value { Value::Null }
+            fn output_schema(&self) -> Value { Value::Null }
+            fn error_schema(&self) -> Value { Value::Null }
+            fn required_permissions(&self) -> Vec<Permission> { Vec::new() }
+            fn execute(&self, _req: CapabilityRequest) -> Result<CapabilityResponse, CapabilityError> {
+                unimplemented!()
+            }
+        }
+
+        let reg = Arc::new(RwLock::new(CapabilityRegistry::new()));
+        reg.write().unwrap().register(Arc::new(DummyCapability));
+
+        let handles: Vec<_> = (0..8)
+            .map(|_| {
+                let reg = Arc::clone(&reg);
+                std::thread::spawn(move || {
+                    let guard = reg.read().unwrap();
+                    assert_eq!(guard.list_ids(), vec!["test.dummy".to_string()]);
+                    assert!(guard.get("test.dummy").is_some());
+                })
+            })
+            .collect();
+        for h in handles {
+            h.join().unwrap();
+        }
     }
 
     #[test]

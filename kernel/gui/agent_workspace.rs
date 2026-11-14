@@ -5,9 +5,7 @@
 //! 状态区分：Created / Initializing / Idle / Running / Waiting / Blocked / Paused /
 //! Completed / Failed / Stopped。
 
-use crate::permission::{
-    AgentLifecycleState, permission_manager,
-};
+use crate::permission::permission_manager;
 use crate::capability::{CapabilityRequest, ExecutionContext,
     now_ns, AuditInfo, AuditResult, CallerType};
 use serde_json::json;
@@ -15,39 +13,52 @@ use serde_json::json;
 /// 渲染 Agent Workspace 的文本表示（供终端和 GUI 共用）。
 pub fn render_agent_workspace() -> String {
     let pm = permission_manager().lock().unwrap_or_else(|e| e.into_inner());
-    let agents = pm.list_agents();
+    let identities = pm.list_agents();
+    drop(pm);
+
+    // 运行时状态以编排器为准，权限数量以权限模型为准；按 ID 合并，
+    // 这样 Shell / GUI / Agent API 三个入口看到的是同一批 Agent、同一套状态。
+    let mut rows: Vec<(u64, String, String, String, usize)> = Vec::new();
+    for a in crate::agent::snapshot() {
+        let caps = identities
+            .iter()
+            .find(|i| i.agent_id == a.id)
+            .map(|i| i.capabilities.len())
+            .unwrap_or(0);
+        rows.push((a.id, a.name, a.role, a.state.name().to_string(), caps));
+    }
+    for i in &identities {
+        if !rows.iter().any(|r| r.0 == i.agent_id) {
+            rows.push((
+                i.agent_id,
+                i.name.clone(),
+                i.role.clone(),
+                i.state.name().to_string(),
+                i.capabilities.len(),
+            ));
+        }
+    }
+    rows.sort_by_key(|r| r.0);
 
     let mut out = String::new();
     out.push_str("═══════════════════════════════════════════════════════════════════════════════\n");
     out.push_str("                           Agent Workspace\n");
     out.push_str("═══════════════════════════════════════════════════════════════════════════════\n\n");
 
-    if agents.is_empty() {
+    if rows.is_empty() {
         out.push_str("  (暂无 Agent)\n");
-        out.push_str("\n  创建 Agent: agent create <名称> <角色>\n");
+        out.push_str("\n  创建 Agent: act agent/orchestrator spawn <名称> <角色>\n");
         return out;
     }
 
-    out.push_str(&format!("  活跃 Agent 总数: {}\n\n", agents.len()));
+    out.push_str(&format!("  活跃 Agent 总数: {}\n\n", rows.len()));
     out.push_str("  ID   名称       角色        状态          权限数    操作\n");
     out.push_str("  --   ----       ----        ------        ------    ------\n");
 
-    for a in &agents {
-        let state_str = match a.state {
-            AgentLifecycleState::Created => "created",
-            AgentLifecycleState::Initializing => "initializing",
-            AgentLifecycleState::Idle => "idle",
-            AgentLifecycleState::Running => "running",
-            AgentLifecycleState::Waiting => "waiting",
-            AgentLifecycleState::Blocked => "blocked",
-            AgentLifecycleState::Paused => "paused",
-            AgentLifecycleState::Completed => "completed",
-            AgentLifecycleState::Failed => "failed",
-            AgentLifecycleState::Stopped => "stopped",
-        };
+    for (id, name, role, state_str, cap_count) in &rows {
         out.push_str(&format!(
             "  {:<3} {:<11} {:<11} {:<13} {:<8}    [start|stop|inspect|logs]\n",
-            a.agent_id, a.name, a.role, state_str, a.capabilities.len()
+            id, name, role, state_str, cap_count
         ));
     }
 
@@ -115,9 +126,16 @@ pub fn start_agent(agent_id: u64) -> Result<String, String> {
         },
     };
     let reg = crate::capability::capability_registry();
-    match reg.lock().unwrap_or_else(|e| e.into_inner()).get("agent") {
+    match reg.read().unwrap_or_else(|e| e.into_inner()).get("agent") {
         Some(cap) => match cap.execute(req) {
-            Ok(_resp) => Ok(format!("Agent #{} 已启动", agent_id)),
+            // 直接使用能力层返回的文本，保证 GUI 与 Shell 看到同一份结果。
+            Ok(resp) => Ok(
+                resp.output
+                    .get("result")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("Agent 已启动")
+                    .to_string(),
+            ),
             Err(e) => Err(format!("启动失败: {} (code={})", e.message, e.code)),
         },
         None => Err("能力 agent 未注册".to_string()),
@@ -146,9 +164,15 @@ pub fn stop_agent(agent_id: u64) -> Result<String, String> {
         },
     };
     let reg = crate::capability::capability_registry();
-    match reg.lock().unwrap_or_else(|e| e.into_inner()).get("agent") {
+    match reg.read().unwrap_or_else(|e| e.into_inner()).get("agent") {
         Some(cap) => match cap.execute(req) {
-            Ok(_resp) => Ok(format!("Agent #{} 已停止", agent_id)),
+            Ok(resp) => Ok(
+                resp.output
+                    .get("result")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("Agent 已停止")
+                    .to_string(),
+            ),
             Err(e) => Err(format!("停止失败: {} (code={})", e.message, e.code)),
         },
         None => Err("能力 agent 未注册".to_string()),

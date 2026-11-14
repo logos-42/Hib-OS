@@ -4,9 +4,135 @@
 //! 在终端下为真 REPL (↑↓ 历史 / Tab 补全 / 光标编辑)，
 //! 在管道下自动降级为逐行读取 (`echo help | hibos --shell`)。
 
+use std::cell::RefCell;
 use std::io;
 use std::io::IsTerminal;
+use std::io::Write as _;
 use std::time::{SystemTime, UNIX_EPOCH};
+
+// ---------------------------------------------------------------------------
+// 命令输出捕获
+//
+// 管道 `|`、重定向 `>` / `>>` 要求「先拿到上一条命令的输出，再决定送去哪」。
+// 原先所有命令都用 println! 直接写屏幕，输出无法被收集，管道传的一直是空串。
+// 这里用一个线程局部缓冲区：正常交互时照旧打印；执行一条命令时打开捕获，
+// 命令结束后取回文本，由执行器决定打印、写入文件还是传给下一条命令。
+// 用线程局部而不是全局锁，是为了让 `&` 后台作业在别的线程里独立打印。
+// ---------------------------------------------------------------------------
+thread_local! {
+    static SHELL_OUTPUT_BUFFER: RefCell<Option<String>> = const { RefCell::new(None) };
+}
+
+fn shell_emit(text: &str, newline: bool) {
+    SHELL_OUTPUT_BUFFER.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        if let Some(buf) = slot.as_mut() {
+            buf.push_str(text);
+            if newline {
+                buf.push('\n');
+            }
+        } else if newline {
+            println!("{}", text);
+        } else {
+            print!("{}", text);
+            let _ = io::stdout().flush();
+        }
+    });
+}
+
+/// 与 `println!` 用法完全一致，但输出可被管道/重定向捕获。
+macro_rules! sh_println {
+    () => {
+        shell_emit("", true)
+    };
+    ($($arg:tt)*) => {
+        shell_emit(&format!($($arg)*), true)
+    };
+}
+
+/// 与 `print!` 用法完全一致，但输出可被管道/重定向捕获。
+macro_rules! sh_print {
+    () => {};
+    ($($arg:tt)*) => {
+        shell_emit(&format!($($arg)*), false)
+    };
+}
+
+/// 在捕获模式下运行 `f`，返回其结果和捕获到的输出。
+/// 支持嵌套（例如命令内部再次 dispatch），用替换 + 还原保存上一层缓冲区。
+fn with_output_capture<T>(f: impl FnOnce() -> T) -> (T, String) {
+    let previous = SHELL_OUTPUT_BUFFER.with(|slot| slot.borrow_mut().replace(String::new()));
+    let result = f();
+    let captured = SHELL_OUTPUT_BUFFER.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        let text = slot.take().unwrap_or_default();
+        *slot = previous;
+        text
+    });
+    (result, captured)
+}
+
+/// 一条后台作业（`&`）的记录。
+#[derive(Clone, Debug)]
+pub struct BackgroundJob {
+    pub id: u64,
+    pub command: String,
+    pub running: bool,
+    pub success: bool,
+    pub output: String,
+}
+
+/// 全局后台作业表。
+struct BackgroundJobs {
+    next_id: u64,
+    jobs: Vec<BackgroundJob>,
+}
+
+impl BackgroundJobs {
+    fn next_id(&mut self) -> u64 {
+        let id = self.next_id;
+        self.next_id += 1;
+        id
+    }
+
+    fn add(&mut self, id: u64, command: &str) {
+        self.jobs.push(BackgroundJob {
+            id,
+            command: command.to_string(),
+            running: true,
+            success: false,
+            output: String::new(),
+        });
+    }
+
+    fn finish(&mut self, id: u64, success: bool, output: &str) {
+        if let Some(job) = self.jobs.iter_mut().find(|j| j.id == id) {
+            job.running = false;
+            job.success = success;
+            job.output = output.to_string();
+        }
+    }
+
+    fn list(&self) -> Vec<BackgroundJob> {
+        self.jobs.clone()
+    }
+}
+
+fn bg_jobs() -> &'static std::sync::Mutex<BackgroundJobs> {
+    static JOBS: std::sync::OnceLock<std::sync::Mutex<BackgroundJobs>> =
+        std::sync::OnceLock::new();
+    JOBS.get_or_init(|| {
+        std::sync::Mutex::new(BackgroundJobs {
+            next_id: 1,
+            jobs: Vec::new(),
+        })
+    })
+}
+
+/// 供测试与 GUI 查询后台作业。
+pub fn background_jobs() -> Vec<BackgroundJob> {
+    bg_jobs().lock().unwrap_or_else(|e| e.into_inner()).list()
+}
 
 use crate::ai_token::{AIConsciousness, ComputeGraph, GraphOpType, TokenId};
 use crate::channels::{ChannelKind, ChannelRegistry};
@@ -79,7 +205,7 @@ mod theme {
 /// 例：`tagged_out!("[llm]", "Provider '{}' => {}", provider, masked)`
 macro_rules! tagged_out {
     ($tag:expr, $($body:tt)*) => {
-        println!("{} {}", theme::green($tag), format!($($body)*))
+        sh_println!("{} {}", theme::green($tag), format!($($body)*))
     };
 }
 
@@ -129,6 +255,18 @@ pub const COMMANDS: &[&str] = &[
     "capability",
     "system",
     "app",
+    // 管道过滤器与作业控制（UX-001）
+    "echo",
+    "true",
+    "false",
+    "sleep",
+    "grep",
+    "wc",
+    "head",
+    "tail",
+    "sort",
+    "uniq",
+    "jobs",
 ];
 
 /// 交互式内核外壳。
@@ -189,7 +327,7 @@ impl Shell {
     ///
     /// 极简 Linux 风启动画面（彩色；管道下自动去色）。
     fn linux_boot(&self) {
-        println!(
+        sh_println!(
             "{}",
             theme::bold(concat!(
                 "Hib OS ",
@@ -197,15 +335,15 @@ impl Shell {
                 " (linux)"
             ))
         );
-        println!(
+        sh_println!(
             "{} hibos: GPU-Centric macro-kernel (by logos-42, MIT)",
             theme::grey("[    0.000000 ]")
         );
-        println!("{}", theme::ok("GPU 显存 / IOMMU"));
-        println!("{}", theme::ok("GPU 调度器"));
-        println!("{}", theme::ok("系统调用门闸 (10 种调用)"));
-        println!("{}", theme::ok("形式化验证框架"));
-        println!("{}", theme::ok("虚拟文件系统 (VFS)"));
+        sh_println!("{}", theme::ok("GPU 显存 / IOMMU"));
+        sh_println!("{}", theme::ok("GPU 调度器"));
+        sh_println!("{}", theme::ok("系统调用门闸 (10 种调用)"));
+        sh_println!("{}", theme::ok("形式化验证框架"));
+        sh_println!("{}", theme::ok("虚拟文件系统 (VFS)"));
     }
 
     /// 默认进入 LLM 闭环循环模式 (loop)：AI 自动感知系统状态、思考、执行行动。
@@ -228,7 +366,7 @@ impl Shell {
 
         if !providers.is_empty() {
             // 极简启动（无大横幅、无子系统噪声日志）。
-            println!("Hib OS — AI OS 已就绪 (exit 退出)");
+            sh_println!("Hib OS — AI OS 已就绪 (exit 退出)");
             self.run_llm_loop(&providers);
             return;
         }
@@ -236,10 +374,10 @@ impl Shell {
         // 传统 shell 模式才输出启动画面；AI 模式保持极简。
         self.linux_boot();
 
-        println!("Hib OS — interactive shell ready (help / exit)");
+        sh_println!("Hib OS — interactive shell ready (help / exit)");
         if io::stdin().is_terminal() {
-            println!("↑↓ 历史, Tab 补全, ←→ 移动光标");
-            println!("设置环境变量 HIBOS_LLM_<PROVIDER>_KEY（兼容 DEEPSEEK_API_KEY）可启用 AI 闭环模式");
+            sh_println!("↑↓ 历史, Tab 补全, ←→ 移动光标");
+            sh_println!("设置环境变量 HIBOS_LLM_<PROVIDER>_KEY（兼容 DEEPSEEK_API_KEY）可启用 AI 闭环模式");
         }
 
         loop {
@@ -260,10 +398,10 @@ impl Shell {
         }
 
         match self.vfs.save_to_path(&state) {
-            Ok(()) => println!("[vfs] 状态已保存到 {}", state.display()),
-            Err(e) => println!("[vfs] 保存失败: {}", e),
+            Ok(()) => sh_println!("[vfs] 状态已保存到 {}", state.display()),
+            Err(e) => sh_println!("[vfs] 保存失败: {}", e),
         }
-        println!("[shell] 再见。");
+        sh_println!("[shell] 再见。");
     }
 
     /// Tab 补全(含参数提示)。
@@ -315,357 +453,490 @@ impl Shell {
     }
 
     /// 处理一条命令行；返回 false 表示退出 shell。
-    /// 支持：管道 |、重定向 > >> <、命令链 && || ;、后台 &。
+    /// 支持：管道 |、重定向 > >> <、命令链 && || ;、后台 &、--json。
     pub fn dispatch(&mut self, line: &str) -> bool {
-        // 兼容带 BOM / 前后空白的输入 (例如管道输入)。
+        // 兼容带 BOM / 前后空白的输入（例如管道输入）。
         let line = line.trim_start_matches('\u{feff}').trim();
         if line.is_empty() {
             return true;
         }
-        // 使用真正的 Shell Parser（支持引号、转义、管道、重定向）。
         let pipelines = match parse_command_line(line) {
             Ok(p) => p,
             Err(e) => {
-                println!("解析错误: {}", e);
+                sh_println!("解析错误: {}", e);
                 return true;
             }
         };
 
         let mut last_success = true;
-
-        for pipeline in pipelines {
-            // 对管道内的每条命令依次执行；| 的左侧输出通过临时 VFS 文件传给右侧。
-            let mut pipe_input: Option<String> = None;
-
-            for cmd in &pipeline.commands {
-                let success = self.execute_pipeline_command(cmd, pipe_input.as_deref());
-                pipe_input = Some(self.last_command_output.take().unwrap_or_default());
-
-                match pipeline.separator {
-                    Separator::And => {
-                        if !success {
-                            last_success = false;
-                            break;
-                        }
-                    }
-                    Separator::Or => {
-                        if success {
-                            last_success = true;
-                            break;
-                        }
-                    }
-                    Separator::Semicolon => {}
+        for (index, pipeline) in pipelines.iter().enumerate() {
+            // 连接符属于「上一段与本段之间」：&& 看上一段是否成功，|| 看是否失败。
+            if index > 0 {
+                let should_run = match pipelines[index - 1].separator {
+                    Separator::And => last_success,
+                    Separator::Or => !last_success,
+                    Separator::Semicolon => true,
+                };
+                if !should_run {
+                    continue;
                 }
             }
+            match self.execute_pipeline(pipeline) {
+                Some(ok) => last_success = ok,
+                None => return false, // exit / quit
+            }
         }
-
         true
     }
 
-    /// 执行单条管道命令，支持重定向和管道输入。
-    /// 返回命令是否成功；将命令输出写入 self.last_command_output。
-    fn execute_pipeline_command(&mut self, cmd: &Command, pipe_stdin: Option<&str>) -> bool {
-        // 处理 stdin 重定向或管道输入：写入临时 VFS 文件，供后续命令读取。
-        let stdin_source = match &cmd.stdin {
-            Some(Redirection::Input { path, .. }) => {
-                // 从 VFS 读取作为 stdin
-                match self.vfs.cat(path) {
-                    Ok(content) => Some(content),
-                    Err(_) => {
-                        println!("无法打开输入文件: {}", path);
-                        return false;
-                    }
-                }
+    /// 执行一段管道：前一条命令的输出就是后一条命令的 stdin。
+    /// 返回 `Some(是否成功)`；遇到 `exit` 返回 `None`。
+    fn execute_pipeline(&mut self, pipeline: &Pipeline) -> Option<bool> {
+        let total = pipeline.commands.len();
+        let mut pipe_input: Option<String> = None;
+        let mut last_ok = true;
+
+        for (index, cmd) in pipeline.commands.iter().enumerate() {
+            let is_last = index + 1 == total;
+
+            // `&`：交给后台线程跑，主 shell 立刻继续接受输入。
+            if cmd.background {
+                self.spawn_background_job(cmd, pipe_input.take());
+                last_ok = true;
+                continue;
             }
-            None => pipe_stdin.map(|s| s.to_string()),
-            _ => None,
+
+            let (outcome, output) = self.run_command_capture(cmd, pipe_input.as_deref());
+            let ok = match outcome {
+                Some(v) => v,
+                None => return None,
+            };
+
+            // 输出去向优先级：> / >> 重定向 > 管道下一条 > 屏幕。
+            let redirected = self.write_redirect(cmd, &output);
+            if !redirected && is_last && !output.is_empty() {
+                shell_emit(&output, false);
+            }
+            pipe_input = if is_last { None } else { Some(output) };
+            last_ok = ok;
+        }
+        Some(last_ok)
+    }
+
+    /// 捕获一条命令的输出，并统一处理 `--json` 机器可读信封。
+    fn run_command_capture(
+        &mut self,
+        cmd: &Command,
+        pipe_stdin: Option<&str>,
+    ) -> (Option<bool>, String) {
+        let mut argv: Vec<String> = cmd.argv.clone();
+        let json_mode = argv.iter().any(|a| a == "--json");
+        // 这四条命令自己产出结构化 JSON；其余命令由这里统一包装成 JSON 信封，
+        // 于是 `ls --json`、`pwd --json`、`echo hi --json` 也都能被程序读取。
+        let structured = argv
+            .first()
+            .map(|s| matches!(s.as_str(), "agent" | "task" | "capability" | "system"))
+            .unwrap_or(false);
+        if json_mode && !structured {
+            argv.retain(|a| a != "--json");
+        }
+
+        // `< file` 优先于管道输入。
+        let stdin_source: Option<String> = match &cmd.stdin {
+            Redirection::FromFile(path) => match self.vfs.cat(path) {
+                Ok(content) => Some(content),
+                Err(e) => {
+                    sh_println!("无法打开输入文件: {} ({})", path, e);
+                    return (Some(false), String::new());
+                }
+            },
+            _ => pipe_stdin.map(|s| s.to_string()),
         };
 
-        // 如果命令不需要 stdin 但有管道输入，将管道输入作为首个参数（cat 等命令可读取）。
-        let mut argv: Vec<String> = cmd.argv.clone();
-        if let Some(stdin) = &stdin_source {
-            // 对于不带文件参数的 cat，将 stdin 作为内容处理
-            if argv.is_empty() || argv[0] == "cat" {
-                // 将管道输入写入临时文件，供 cat 读取
-                let tmp_path = format!("/tmp/.pipe_{}", std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_nanos());
-                if self.vfs.write(&tmp_path, stdin).is_ok() {
-                    if argv.is_empty() {
-                        argv.push(tmp_path.clone());
-                    }
-                    // 标记稍后清理
-                    let _ = self.vfs.rm(&tmp_path);
-                }
-            }
-        }
-
         if argv.is_empty() {
-            return true;
+            return (Some(true), String::new());
         }
 
+        let (outcome, output) =
+            with_output_capture(|| self.run_command_inner(&argv, stdin_source.as_deref()));
+        self.last_command_output = Some(output.clone());
+
+        let final_output = if json_mode && !structured {
+            let value = match serde_json::from_str::<serde_json::Value>(output.trim()) {
+                // 已是合法 JSON 就原样紧凑输出，避免二次包装。
+                Ok(v) => v,
+                Err(_) => serde_json::json!({
+                    "command": argv[0],
+                    "ok": outcome.unwrap_or(false),
+                    "output": output,
+                }),
+            };
+            format!("{}\n", serde_json::to_string(&value).unwrap_or_default())
+        } else {
+            output
+        };
+        (outcome, final_output)
+    }
+
+    /// 把输出写进 `>` / `>>` 指向的 VFS 文件；返回是否发生了重定向。
+    fn write_redirect(&mut self, cmd: &Command, output: &str) -> bool {
+        match &cmd.stdout {
+            Redirection::ToFile(path) => {
+                if let Err(e) = self.vfs.write(path, output) {
+                    sh_println!("重定向失败: {}", e);
+                }
+                true
+            }
+            Redirection::AppendFile(path) => {
+                let content = match self.vfs.cat(path) {
+                    Ok(existing) => format!("{}{}", existing, output),
+                    Err(_) => output.to_string(),
+                };
+                if let Err(e) = self.vfs.write(path, &content) {
+                    sh_println!("重定向失败: {}", e);
+                }
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// 后台作业：在自己的线程里用一份 VFS 快照执行，结果写入全局作业表。
+    fn spawn_background_job(&self, cmd: &Command, stdin: Option<String>) {
+        let id = bg_jobs().lock().unwrap_or_else(|e| e.into_inner()).next_id();
+        let label = cmd.argv.join(" ");
+        bg_jobs()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .add(id, &label);
+        let snapshot = self.vfs.to_json_string();
+        let cmd = cmd.clone();
+        std::thread::spawn(move || {
+            // Shell 在线程内部创建，避免把整个 Shell 跨线程移动。
+            let mut bg = Shell::new();
+            if let Ok(v) = Vfs::from_json_str(&snapshot) {
+                bg.vfs = v;
+            }
+            let (ok, output) =
+                with_output_capture(|| bg.run_command_inner(&cmd.argv, stdin.as_deref()));
+            let redirected = bg.write_redirect(&cmd, &output);
+            let kept = if redirected { String::new() } else { output };
+            bg_jobs()
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .finish(id, ok.unwrap_or(false), &kept);
+        });
+        sh_println!("[{}] {} 已放到后台", id, label);
+    }
+
+    /// 执行单条命令。所有输出都经由 sh_println! / sh_print!，因此可被捕获。
+    fn run_command_inner(&mut self, argv: &[String], stdin: Option<&str>) -> Option<bool> {
         let parts: Vec<&str> = argv.iter().map(|s| s.as_str()).collect();
-
-        // 处理 stdout 重定向：捕获命令输出并写入 VFS 文件。
-        let mut captured_output = String::new();
-        let stdout_redirect = cmd.stdout.clone();
-
         let success = match argv[0].as_str() {
             "help" | "?" => {
                 self.cmd_help(argv.get(1).map(|s| s.as_str()));
-                captured_output = self.last_command_output.take().unwrap_or_default();
                 true
             }
             "channels" => {
                 self.cmd_channels();
-                captured_output = self.last_command_output.take().unwrap_or_default();
                 true
             }
             "sense" => {
                 self.cmd_sense(&parts);
-                captured_output = self.last_command_output.take().unwrap_or_default();
                 true
             }
             "act" => {
                 self.cmd_act(&parts);
-                captured_output = self.last_command_output.take().unwrap_or_default();
                 true
             }
             "concepts" => {
                 self.cmd_concepts(argv.get(1).map(|s| s.as_str()));
-                captured_output = self.last_command_output.take().unwrap_or_default();
                 true
             }
             "policy" => {
                 self.cmd_policy(argv.get(1).map(|s| s.as_str()));
-                captured_output = self.last_command_output.take().unwrap_or_default();
                 true
             }
             "token" => {
                 self.cmd_token(&parts);
-                captured_output = self.last_command_output.take().unwrap_or_default();
                 true
             }
             "query" => {
                 self.cmd_query(&parts);
-                captured_output = self.last_command_output.take().unwrap_or_default();
                 true
             }
             "prio" => {
                 self.cmd_prio(&parts);
-                captured_output = self.last_command_output.take().unwrap_or_default();
                 true
             }
             "proc" => {
                 self.cmd_proc(&parts);
-                captured_output = self.last_command_output.take().unwrap_or_default();
                 true
             }
             "run" => {
                 self.cmd_run();
-                captured_output = self.last_command_output.take().unwrap_or_default();
                 true
             }
             "queue" => {
-                println!("就绪队列: {} 个任务", self.handler.scheduler.ready_count());
-                captured_output = self.last_command_output.take().unwrap_or_default();
+                sh_println!("就绪队列: {} 个任务", self.handler.scheduler.ready_count());
                 true
             }
             "stats" => {
                 self.cmd_stats();
-                captured_output = self.last_command_output.take().unwrap_or_default();
                 true
             }
             "desktop" => {
                 self.cmd_desktop(&parts);
-                captured_output = self.last_command_output.take().unwrap_or_default();
                 true
             }
             "gui" => {
                 self.cmd_gui(&parts);
-                captured_output = self.last_command_output.take().unwrap_or_default();
                 true
             }
             "pwd" => {
                 let path = self.vfs.cwd_path();
-                println!("{}", path);
-                captured_output = path;
+                sh_println!("{}", path);
                 true
             }
             "ls" => {
                 self.cmd_ls(argv.get(1).map(|s| s.as_str()));
-                captured_output = self.last_command_output.take().unwrap_or_default();
                 true
             }
             "cd" => {
                 match self.cmd_cd_result(argv.get(1).map(|s| s.as_str())) {
-                    Ok(()) => { captured_output = self.vfs.cwd_path(); true }
-                    Err(e) => { println!("cd: {}", e); false }
+                    Ok(()) => { true }
+                    Err(e) => { sh_println!("cd: {}", e); false }
                 }
             }
             "cat" => {
                 let target = argv.get(1).map(|s| s.as_str()).unwrap_or("");
-                match self.vfs.cat(target) {
-                    Ok(content) => {
-                        println!("{}", content);
-                        captured_output = content;
-                        true
+                if target.is_empty() {
+                    // 没有文件参数时读 stdin，让 `cat < f` 与 `... | cat` 都成立。
+                    match stdin {
+                        Some(text) => {
+                            shell_emit(text, false);
+                            if !text.ends_with('\n') {
+                                sh_println!();
+                            }
+                            true
+                        }
+                        None => {
+                            sh_println!("cat: 缺少文件路径");
+                            false
+                        }
                     }
-                    Err(e) => {
-                        println!("cat: {}", e);
-                        false
+                } else {
+                    match self.vfs.cat(target) {
+                        Ok(content) => {
+                            sh_println!("{}", content);
+                            true
+                        }
+                        Err(e) => {
+                            sh_println!("cat: {}", e);
+                            false
+                        }
                     }
                 }
             }
-            "write" => {
-                self.cmd_write(&parts, false);
-                captured_output = self.last_command_output.take().unwrap_or_default();
-                true
-            }
-            "append" => {
-                self.cmd_write(&parts, true);
-                captured_output = self.last_command_output.take().unwrap_or_default();
+            "write" | "append" => {
+                let is_append = argv[0] == "append";
+                if parts.len() < 3 {
+                    // 管道里可以把上游输出直接写成文件：`echo hi | write /tmp/f`。
+                    if let (Some(&path), Some(text)) = (parts.get(1), stdin) {
+                        self.cmd_write(&[parts[0], path, text.trim_end_matches('\n')], is_append);
+                    } else {
+                        self.cmd_write(&parts, is_append);
+                    }
+                } else {
+                    self.cmd_write(&parts, is_append);
+                }
                 true
             }
             "mkdir" => {
                 match self.cmd_mkdir_result(argv.get(1).map(|s| s.as_str())) {
-                    Ok(()) => { captured_output = format!("mkdir: {}", argv.get(1).map(|s| s.as_str()).unwrap_or("")); true }
-                    Err(e) => { println!("mkdir: {}", e); false }
+                    Ok(()) => { true }
+                    Err(e) => { sh_println!("mkdir: {}", e); false }
                 }
             }
             "touch" => {
                 match self.cmd_touch_result(argv.get(1).map(|s| s.as_str())) {
-                    Ok(()) => { captured_output = format!("touch: {}", argv.get(1).map(|s| s.as_str()).unwrap_or("")); true }
-                    Err(e) => { println!("touch: {}", e); false }
+                    Ok(()) => { true }
+                    Err(e) => { sh_println!("touch: {}", e); false }
                 }
             }
             "rm" => {
                 match self.cmd_rm_result(argv.get(1).map(|s| s.as_str())) {
-                    Ok(()) => { captured_output = format!("rm: {}", argv.get(1).map(|s| s.as_str()).unwrap_or("")); true }
-                    Err(e) => { println!("rm: {}", e); false }
+                    Ok(()) => { true }
+                    Err(e) => { sh_println!("rm: {}", e); false }
                 }
             }
             "tree" => {
-                print!("{}", self.vfs.tree());
-                captured_output = self.vfs.tree();
+                sh_print!("{}", self.vfs.tree());
                 true
             }
             "df" => {
                 self.cmd_df();
-                captured_output = self.last_command_output.take().unwrap_or_default();
                 true
             }
             "fbpreview" => {
                 self.cmd_fbpreview(&parts);
-                captured_output = self.last_command_output.take().unwrap_or_default();
                 true
             }
             "save" => {
                 self.cmd_save();
-                captured_output = self.last_command_output.take().unwrap_or_default();
                 true
             }
             "load" => {
                 self.cmd_load();
-                captured_output = self.last_command_output.take().unwrap_or_default();
                 true
             }
             "resetfs" => {
                 self.cmd_resetfs();
-                captured_output = self.last_command_output.take().unwrap_or_default();
                 true
             }
             "wallpaper" => {
                 self.cmd_wallpaper(&parts);
-                captured_output = self.last_command_output.take().unwrap_or_default();
                 true
             }
             "deepseek" => {
                 self.cmd_llm(&parts);
-                captured_output = self.last_command_output.take().unwrap_or_default();
                 true
             }
             "llm" => {
                 self.cmd_llm(&parts);
-                captured_output = self.last_command_output.take().unwrap_or_default();
                 true
             }
             "modules" => {
                 self.cmd_modules();
-                captured_output = self.last_command_output.take().unwrap_or_default();
                 true
             }
             "modload" => {
                 self.cmd_modload(&parts);
-                captured_output = self.last_command_output.take().unwrap_or_default();
                 true
             }
             "modunload" => {
                 self.cmd_modunload(&parts);
-                captured_output = self.last_command_output.take().unwrap_or_default();
                 true
             }
             "history" => {
                 self.cmd_history();
-                captured_output = self.last_command_output.take().unwrap_or_default();
                 true
             }
-            "exit" | "quit" => return false,
+            "exit" | "quit" => return None,
             "agent" => {
                 self.cmd_agent(&parts);
-                captured_output = self.last_command_output.take().unwrap_or_default();
                 true
             }
             "task" => {
                 self.cmd_task(&parts);
-                captured_output = self.last_command_output.take().unwrap_or_default();
                 true
             }
             "capability" => {
                 self.cmd_capability(&parts);
-                captured_output = self.last_command_output.take().unwrap_or_default();
                 true
             }
             "system" => {
                 self.cmd_system(&parts);
-                captured_output = self.last_command_output.take().unwrap_or_default();
                 true
             }
             "app" => {
                 self.cmd_app(&parts);
-                captured_output = self.last_command_output.take().unwrap_or_default();
+                true
+            }
+            // ---- 管道常用小工具与作业控制 ----
+            "echo" => {
+                sh_println!("{}", argv[1..].join(" "));
+                true
+            }
+            "true" => true,
+            "false" => false,
+            "sleep" => {
+                let ms = argv
+                    .get(1)
+                    .and_then(|s| s.parse::<u64>().ok())
+                    .unwrap_or(10)
+                    .min(2000);
+                std::thread::sleep(std::time::Duration::from_millis(ms));
+                true
+            }
+            "grep" => {
+                let pattern = argv.get(1).map(|s| s.as_str()).unwrap_or("");
+                let mut found = false;
+                for line in stdin.unwrap_or("").lines() {
+                    if line.contains(pattern) {
+                        sh_println!("{}", line);
+                        found = true;
+                    }
+                }
+                // 没匹配到返回失败，使 `grep x || echo 未找到` 能按预期工作。
+                found
+            }
+            "wc" => {
+                let text = stdin.unwrap_or("");
+                sh_println!(
+                    "{} {} {}",
+                    text.lines().count(),
+                    text.split_whitespace().count(),
+                    text.len()
+                );
+                true
+            }
+            "head" | "tail" => {
+                let n = argv
+                    .get(1)
+                    .and_then(|s| s.parse::<usize>().ok())
+                    .unwrap_or(10);
+                let lines: Vec<&str> = stdin.unwrap_or("").lines().collect();
+                let selected: &[&str] = if argv[0] == "head" {
+                    &lines[..n.min(lines.len())]
+                } else {
+                    &lines[lines.len().saturating_sub(n)..]
+                };
+                for line in selected {
+                    sh_println!("{}", line);
+                }
+                true
+            }
+            "sort" | "uniq" => {
+                let mut lines: Vec<&str> = stdin.unwrap_or("").lines().collect();
+                if argv[0] == "sort" {
+                    lines.sort();
+                } else {
+                    lines.dedup();
+                }
+                for line in lines {
+                    sh_println!("{}", line);
+                }
+                true
+            }
+            "jobs" => {
+                let jobs = background_jobs();
+                if jobs.is_empty() {
+                    sh_println!("(无后台作业)");
+                }
+                for job in jobs {
+                    sh_println!(
+                        "[{}] {} {} {}",
+                        job.id,
+                        if job.running { "运行中" } else { "已完成" },
+                        if job.success { "OK" } else { "FAIL" },
+                        job.command
+                    );
+                    if !job.running && !job.output.trim().is_empty() {
+                        for line in job.output.lines() {
+                            sh_println!("    {}", line);
+                        }
+                    }
+                }
                 true
             }
             other => {
-                println!("未知命令: {} (试试 help)", other);
+                sh_println!("未知命令: {} (试试 help)", other);
                 false
             }
         };
 
-        // 处理 stdout 重定向：将捕获的输出写入 VFS 文件。
-        if let Some(redirect) = &stdout_redirect {
-            let path = match redirect {
-                Redirection::Overwrite { path, .. } => path,
-                Redirection::Append { path, .. } => path,
-                Redirection::Input { .. } => unreachable!(),
-            };
-            let content = if matches!(redirect, Redirection::Append { .. }) {
-                // 追加模式：先读取现有内容
-                match self.vfs.cat(path) {
-                    Ok(existing) => format!("{}{}", existing, captured_output),
-                    Err(_) => captured_output.clone(),
-                }
-            } else {
-                captured_output.clone()
-            };
-            if let Err(e) = self.vfs.write(path, &content) {
-                println!("重定向失败: {}", e);
-            }
-        }
-
-        self.last_command_output = Some(captured_output);
-        success
+        Some(success)
     }
 
     // ------------------------------------------------------------------
@@ -676,50 +947,58 @@ impl Shell {
         if let Some(cmd) = topic {
             match (usage_line(cmd), describe(cmd)) {
                 (Some(usage), Some(desc)) => {
-                    println!("用法: {}", usage);
-                    println!("说明: {}", desc);
+                    sh_println!("用法: {}", usage);
+                    sh_println!("说明: {}", desc);
                 }
-                _ => println!("没有关于 '{}' 的帮助 (试试 help)", cmd),
+                _ => sh_println!("没有关于 '{}' 的帮助 (试试 help)", cmd),
             }
             return;
         }
-        println!("可用命令 (help <命令> 查看详细用法):");
-        println!("统一感知层:");
-        println!("  channels                 列出全部感知通道");
-        println!("  sense <通道>             通过通道感知 (context/file/gpu/action ...)");
-        println!("  act <通道> [负载...]     通过通道行动");
-        println!("内核 / AI:");
-        println!("  concepts [过滤]          列出概念本体 (可选名称过滤)");
-        println!("  policy <概念名>          查询概念的调度策略");
-        println!("  token <模型> [MiB] [prio] 创建 AI Action Token (默认 512 MiB / medium)");
-        println!("  query <token_id>         查询 Token 状态");
-        println!("  prio <token_id> <级别>   调整 Token 优先级 (low|medium|high|critical)");
-        println!("  proc <概念名> [MiB]      创建并提交一个 Action Process");
-        println!("  run                      调度并完成队首任务");
-        println!("  queue                    查看就绪队列长度");
-        println!("  stats                    系统统计");
-        println!("  llm <provider>           LLM 多提供商对话 (deepseek 等)");
-        println!("  llm key set <provider> <key>   设置 LLM Provider API Key");
-        println!("  llm key del <provider>           删除 LLM Provider API Key");
-        println!("  llm key list / show <provider>   查看已配置 Provider");
-        println!("  deepseek                 llm 命令别名 (深度求索)");
-        println!("  desktop [--pixels]       文本桌面面板 / 像素帧缓冲缩略图");
-        println!("文件系统:");
-        println!("  pwd / ls [路径] / cd [路径] / cat <路径>");
-        println!("  write <路径> <内容...> / append <路径> <内容...>");
-        println!("  mkdir <路径> / touch <路径> / rm <路径> / tree / df");
-        println!("  save / load / resetfs    持久化 (JSON) 保存 / 载入 / 重置");
-        println!("模块:");
-        println!("  modules / modload <名称> / modunload <名称>");
-        println!("Agent / 任务 / 能力 / 系统:");
-        println!("  agent list / inspect <id> / start <id> / stop <id>");
-        println!("  task create <描述> [--agent <id>] / list / inspect <id> / cancel <id> / pause <id> / resume <id>");
-        println!("  capability list / inspect <id>");
-        println!("  system status / resources / logs");
-        println!("  app list / launch <名> / stop <id>");
-        println!("其他:");
-        println!("  history                  查看命令历史");
-        println!("  exit                     退出");
+        sh_println!("可用命令 (help <命令> 查看详细用法):");
+        sh_println!("统一感知层:");
+        sh_println!("  channels                 列出全部感知通道");
+        sh_println!("  sense <通道>             通过通道感知 (context/file/gpu/action ...)");
+        sh_println!("  act <通道> [负载...]     通过通道行动");
+        sh_println!("内核 / AI:");
+        sh_println!("  concepts [过滤]          列出概念本体 (可选名称过滤)");
+        sh_println!("  policy <概念名>          查询概念的调度策略");
+        sh_println!("  token <模型> [MiB] [prio] 创建 AI Action Token (默认 512 MiB / medium)");
+        sh_println!("  query <token_id>         查询 Token 状态");
+        sh_println!("  prio <token_id> <级别>   调整 Token 优先级 (low|medium|high|critical)");
+        sh_println!("  proc <概念名> [MiB]      创建并提交一个 Action Process");
+        sh_println!("  run                      调度并完成队首任务");
+        sh_println!("  queue                    查看就绪队列长度");
+        sh_println!("  stats                    系统统计");
+        sh_println!("  llm <provider>           LLM 多提供商对话 (deepseek 等)");
+        sh_println!("  llm key set <provider> <key>   设置 LLM Provider API Key");
+        sh_println!("  llm key del <provider>           删除 LLM Provider API Key");
+        sh_println!("  llm key list / show <provider>   查看已配置 Provider");
+        sh_println!("  deepseek                 llm 命令别名 (深度求索)");
+        sh_println!("  desktop [--pixels]       文本桌面面板 / 像素帧缓冲缩略图");
+        sh_println!("文件系统:");
+        sh_println!("  pwd / ls [路径] / cd [路径] / cat <路径>");
+        sh_println!("  write <路径> <内容...> / append <路径> <内容...>");
+        sh_println!("  mkdir <路径> / touch <路径> / rm <路径> / tree / df");
+        sh_println!("  save / load / resetfs    持久化 (JSON) 保存 / 载入 / 重置");
+        sh_println!("模块:");
+        sh_println!("  modules / modload <名称> / modunload <名称>");
+        sh_println!("Agent / 任务 / 能力 / 系统:");
+        sh_println!("  agent list / inspect <id> / start <id> / stop <id>");
+        sh_println!("  task create <描述> [--agent <id>] / list / inspect <id> / cancel <id> / pause <id> / resume <id>");
+        sh_println!("  capability list / inspect <id>");
+        sh_println!("  system status / resources / logs");
+        sh_println!("  app list / launch <名> / stop <id>");
+        sh_println!("管道 / 重定向 / 命令链:");
+        sh_println!("  echo hi | grep h         管道：左输出作为右输入");
+        sh_println!("  echo hi > /tmp/a.txt     覆盖写 / >> 追加写");
+        sh_println!("  cat < /tmp/a.txt         stdin 重定向");
+        sh_println!("  true && echo ok          && 成功才继续 / || 失败才继续 / ; 无条件");
+        sh_println!("  sleep 100 &  ...  jobs   & 后台作业 + 查询");
+        sh_println!("  grep / wc / head / tail / sort / uniq   常用管道过滤器");
+        sh_println!("  <任意命令> --json        机器可读输出");
+        sh_println!("其他:");
+        sh_println!("  history                  查看命令历史");
+        sh_println!("  exit                     退出");
     }
 
     fn cmd_concepts(&self, filter: Option<&str>) {
@@ -731,7 +1010,7 @@ impl Shell {
             };
             if matched {
                 count += 1;
-                println!(
+                sh_println!(
                     "  {:<30} prio={:.2} policy={:<14} vram={}MiB",
                     node.name,
                     node.priority,
@@ -740,12 +1019,12 @@ impl Shell {
                 );
             }
         }
-        println!("共 {} 个概念", count);
+        sh_println!("共 {} 个概念", count);
     }
 
     fn cmd_policy(&self, name: Option<&str>) {
         let Some(name) = name else {
-            println!("用法: policy <概念名>");
+            sh_println!("用法: policy <概念名>");
             return;
         };
         match self.handler.consciousness.search_by_name(name) {
@@ -755,20 +1034,20 @@ impl Shell {
                     .consciousness
                     .find_schedule_policy(&node.compute_pattern)
                     .unwrap_or(crate::ai_token::SchedulePolicy::Batch);
-                println!(
+                sh_println!(
                     "{} → 策略={} 优先级={}",
                     node.name,
                     policy.name(),
                     node.priority
                 );
             }
-            None => println!("未找到概念: {}", name),
+            None => sh_println!("未找到概念: {}", name),
         }
     }
 
     fn cmd_token(&mut self, parts: &[&str]) -> Option<TokenId> {
         let Some(model) = parts.get(1) else {
-            println!("用法: token <模型> [MiB] [low|medium|high|critical]");
+            sh_println!("用法: token <模型> [MiB] [low|medium|high|critical]");
             return None;
         };
         let vram_mib: u64 = parts.get(2).and_then(|s| s.parse().ok()).unwrap_or(512);
@@ -787,7 +1066,7 @@ impl Shell {
         });
         match (result.success, result.token_id) {
             (true, Some(id)) => {
-                println!(
+                sh_println!(
                     "已创建 token #{} ({} MiB, {})",
                     id.0,
                     vram_mib,
@@ -796,7 +1075,7 @@ impl Shell {
                 Some(id)
             }
             _ => {
-                println!("创建失败: {:?}", result.error);
+                sh_println!("创建失败: {:?}", result.error);
                 None
             }
         }
@@ -804,14 +1083,14 @@ impl Shell {
 
     fn cmd_query(&mut self, parts: &[&str]) {
         let Some(id) = parts.get(1).and_then(|s| s.parse::<u64>().ok()) else {
-            println!("用法: query <token_id>");
+            sh_println!("用法: query <token_id>");
             return;
         };
         let result = self
             .handler
             .handle(AiSystemCall::QueryToken { token_id: TokenId(id) });
         match result.token_status {
-            Some(st) => println!(
+            Some(st) => sh_println!(
                 "#{} model={} valid={} caps=0x{:02x} prio={}",
                 st.token_id.0,
                 st.model_id,
@@ -819,7 +1098,7 @@ impl Shell {
                 st.capabilities.bits(),
                 st.priority.name()
             ),
-            None => println!("查询失败: {:?}", result.error),
+            None => sh_println!("查询失败: {:?}", result.error),
         }
     }
 
@@ -828,11 +1107,11 @@ impl Shell {
             parts.get(1).and_then(|s| s.parse::<u64>().ok()),
             parts.get(2),
         ) else {
-            println!("用法: prio <token_id> <low|medium|high|critical>");
+            sh_println!("用法: prio <token_id> <low|medium|high|critical>");
             return;
         };
         let Some(prio) = parse_priority(level) else {
-            println!("非法优先级: {}", level);
+            sh_println!("非法优先级: {}", level);
             return;
         };
         let result = self.handler.handle(AiSystemCall::SetPriority {
@@ -840,19 +1119,19 @@ impl Shell {
             new_priority: prio,
         });
         if result.success {
-            println!("token #{} 优先级 → {}", id, prio.name());
+            sh_println!("token #{} 优先级 → {}", id, prio.name());
         } else {
-            println!("失败: {:?}", result.error);
+            sh_println!("失败: {:?}", result.error);
         }
     }
 
     fn cmd_proc(&mut self, parts: &[&str]) {
         let Some(name) = parts.get(1) else {
-            println!("用法: proc <概念名> [MiB]");
+            sh_println!("用法: proc <概念名> [MiB]");
             return;
         };
         let Some(node) = self.handler.consciousness.search_by_name(name) else {
-            println!("未找到概念: {}", name);
+            sh_println!("未找到概念: {}", name);
             return;
         };
         let concept_id = node.id;
@@ -872,17 +1151,17 @@ impl Shell {
             priority,
         });
         match (result.success, result.process_id) {
-            (true, Some(pid)) => println!(
+            (true, Some(pid)) => sh_println!(
                 "已提交进程 #{} (概念={}, {} MiB)",
                 pid.0, concept_name, vram_mib
             ),
-            _ => println!("创建进程失败: {:?}", result.error),
+            _ => sh_println!("创建进程失败: {:?}", result.error),
         }
     }
 
     fn cmd_run(&mut self) {
         let Some(id) = self.handler.dispatch_next() else {
-            println!("就绪队列为空");
+            sh_println!("就绪队列为空");
             return;
         };
         if self.handler.processes.get(id).is_some() {
@@ -892,7 +1171,7 @@ impl Shell {
                 output: None,
             });
             if let Some((_, state, Some(res))) = result.process_status {
-                println!(
+                sh_println!(
                     "进程 #{} 执行完成: state={} elapsed={}ns",
                     id.0,
                     state.name(),
@@ -900,13 +1179,13 @@ impl Shell {
                 );
             }
         } else {
-            println!("调度 token #{} (无进程体, 空转完成)", id.0);
+            sh_println!("调度 token #{} (无进程体, 空转完成)", id.0);
         }
     }
 
     fn cmd_stats(&self) {
         let s = crate::monitor::get_stats();
-        println!(
+        sh_println!(
             "tokens={} (active={}) tasks: {} 完成 / {} 失败 avg={}ns vram={}B uptime={}ns",
             s.total_tokens,
             s.active_tokens,
@@ -1001,16 +1280,16 @@ impl Shell {
         if pixels {
             desktop::refresh_framebuffer(&info);
             let (w, h, bytes, lit) = desktop::framebuffer_stats();
-            println!(
+            sh_println!(
                 "帧缓冲 {}x{} ({} 字节, {} 点亮像素) —— 桌面合成后光栅化",
                 w, h, bytes, lit
             );
-            print!("{}", desktop::framebuffer_preview(76, 20));
+            sh_print!("{}", desktop::framebuffer_preview(76, 20));
         } else {
             // 先把本帧桌面光栅化进帧缓冲，供“ FRAMEBUFFER PREVIEW ”面板显示
             desktop::refresh_framebuffer(&info);
-            print!("{}", desktop::render(&info));
-            println!();
+            sh_print!("{}", desktop::render(&info));
+            sh_println!();
         }
     }
 
@@ -1024,42 +1303,42 @@ impl Shell {
         gui::ensure_demo();
         match sub {
             "status" | "info" => {
-                println!("{}", gui::status());
+                sh_println!("{}", gui::status());
             }
             "desktop" | "preview" => {
-                println!("{}", gui::status());
-                print!("{}", gui::preview(96, 26));
+                sh_println!("{}", gui::status());
+                sh_print!("{}", gui::preview(96, 26));
             }
             "shot" | "save" => {
                 let path = if rest.is_empty() { "gui-output.bmp".to_string() } else { rest };
                 match gui::screenshot(&path) {
-                    Ok(msg) => println!("{}", msg),
-                    Err(e) => println!("{}", e),
+                    Ok(msg) => sh_println!("{}", msg),
+                    Err(e) => sh_println!("{}", e),
                 }
             }
             "run" => match gui::run_native() {
                 Ok(()) => {
-                    println!("真实窗口已关闭");
+                    sh_println!("真实窗口已关闭");
                     let cmds = gui::take_commands();
                     if !cmds.is_empty() {
-                        println!("窗口内输入的命令 ({} 条):", cmds.len());
+                        sh_println!("窗口内输入的命令 ({} 条):", cmds.len());
                     }
                     for line in cmds {
-                        println!("[gui] > {}", line);
+                        sh_println!("[gui] > {}", line);
                         if !line.trim().is_empty() && !line.trim().starts_with("gui") {
                             self.dispatch(&line);
                         }
                     }
                 }
-                Err(e) => println!("{}", e),
+                Err(e) => sh_println!("{}", e),
             },
             "wallpaper" | "wp" => match gui::wallpaper::act(&rest) {
-                Ok(msg) => println!("{}", msg),
-                Err(e) => println!("gui wallpaper 失败: {}", e),
+                Ok(msg) => sh_println!("{}", msg),
+                Err(e) => sh_println!("gui wallpaper 失败: {}", e),
             },
             "app" | "launch" => match gui::open_app(&rest) {
-                Ok(id) => println!("已启动应用 {} -> win#{}", rest, id),
-                Err(e) => println!("{}", e),
+                Ok(id) => sh_println!("已启动应用 {} -> win#{}", rest, id),
+                Err(e) => sh_println!("{}", e),
             },
             "taskbar" => {
                 let mut p = rest.split_whitespace();
@@ -1068,27 +1347,27 @@ impl Shell {
                     p.next().and_then(|s| s.parse::<i32>().ok()),
                 );
                 match xy {
-                    (Some(x), Some(y)) => println!(
+                    (Some(x), Some(y)) => sh_println!(
                         "任务栏点击 ({},{}) -> {:?}",
                         x,
                         y,
                         gui::taskbar_click(x, y)
                     ),
-                    _ => println!("用法: gui taskbar <x> <y>"),
+                    _ => sh_println!("用法: gui taskbar <x> <y>"),
                 }
             }
             "open" | "term" | "terminal" => {
                 let title = if rest.is_empty() { "TERMINAL".to_string() } else { rest };
                 let id = gui::open_terminal(&title, 420, 280);
-                println!("已打开终端窗口 win#{} ({})", id, title);
+                sh_println!("已打开终端窗口 win#{} ({})", id, title);
             }
             "close" => match rest.parse::<u64>() {
-                Ok(id) => println!("{}", if gui::close_window(id) { format!("已关闭 win#{}", id) } else { format!("win#{} 不存在", id) }),
-                Err(_) => println!("用法: gui close <win-id>"),
+                Ok(id) => sh_println!("{}", if gui::close_window(id) { format!("已关闭 win#{}", id) } else { format!("win#{} 不存在", id) }),
+                Err(_) => sh_println!("用法: gui close <win-id>"),
             },
             "focus" => match rest.parse::<u64>() {
-                Ok(id) => println!("{}", if gui::focus_window(id) { format!("已聚焦 win#{}", id) } else { format!("win#{} 不存在", id) }),
-                Err(_) => println!("用法: gui focus <win-id>"),
+                Ok(id) => sh_println!("{}", if gui::focus_window(id) { format!("已聚焦 win#{}", id) } else { format!("win#{} 不存在", id) }),
+                Err(_) => sh_println!("用法: gui focus <win-id>"),
             },
             "move" => {
                 let mut p = rest.split_whitespace();
@@ -1096,7 +1375,7 @@ impl Shell {
                 let x = p.next().and_then(|s| s.parse::<i32>().ok());
                 let y = p.next().and_then(|s| s.parse::<i32>().ok());
                 match (id, x, y) {
-                    (Some(id), Some(x), Some(y)) => println!(
+                    (Some(id), Some(x), Some(y)) => sh_println!(
                         "{}",
                         if gui::move_window(id, x, y) {
                             format!("win#{} -> ({}, {})", id, x, y)
@@ -1104,7 +1383,7 @@ impl Shell {
                             format!("win#{} 不存在", id)
                         }
                     ),
-                    _ => println!("用法: gui move <win-id> <x> <y>"),
+                    _ => sh_println!("用法: gui move <win-id> <x> <y>"),
                 }
             }
             "click" => {
@@ -1112,9 +1391,9 @@ impl Shell {
                 match nums.as_slice() {
                     [x, y, ..] => {
                         let eff = gui::click(*x, *y);
-                        println!("点击 ({}, {}) -> {:?}", x, y, eff);
+                        sh_println!("点击 ({}, {}) -> {:?}", x, y, eff);
                     }
-                    _ => println!("用法: gui click <x> <y>"),
+                    _ => sh_println!("用法: gui click <x> <y>"),
                 }
             }
             "key" => {
@@ -1122,26 +1401,26 @@ impl Shell {
                 let effects = gui::key_text(&text);
                 for e in &effects {
                     if let gui::input::Effect::Command { line, window } = e {
-                        println!("[win#{}] 执行命令: {}", window, line);
+                        sh_println!("[win#{}] 执行命令: {}", window, line);
                         if !line.trim().is_empty() && !line.trim().starts_with("gui") {
                             self.dispatch(&line);
                             gui::app_output(*window, &format!("内核已执行: {}", line));
                         }
                     }
                 }
-                println!("已向焦点窗口输入 {} 字符", text.chars().count());
+                sh_println!("已向焦点窗口输入 {} 字符", text.chars().count());
             }
             "text" => {
                 if rest.is_empty() {
-                    println!("用法: gui text <文本...>");
+                    sh_println!("用法: gui text <文本...>");
                 } else {
                     match gui::render_text_bitmap(&rest, "gui-text.bmp") {
-                        Ok(msg) => println!("{}", msg),
-                        Err(e) => println!("{}", e),
+                        Ok(msg) => sh_println!("{}", msg),
+                        Err(e) => sh_println!("{}", e),
                     }
                 }
             }
-            _ => println!(
+            _ => sh_println!(
                 "用法: gui [desktop|shot [路径]|run|open <标题>|close <id>|focus <id>|move <id> <x> <y>|click <x> <y>|key <文本>|text <文本>]"
             ),
         }
@@ -1152,13 +1431,13 @@ impl Shell {
     // ------------------------------------------------------------------
 
     fn cmd_channels(&self) {
-        println!("感知通道 ({} 个) —— AI 的感官与行动接口:", self.channels.len());
-        println!(
+        sh_println!("感知通道 ({} 个) —— AI 的感官与行动接口:", self.channels.len());
+        sh_println!(
             "  {:<32} {:<10} {:<4} {:>5} {:>5}",
             "通道", "类别", "权限", "感知", "行动"
         );
         for c in self.channels.list() {
-            println!(
+            sh_println!(
                 "  {:<32} {:<10} {:<4} {:>5} {:>5}",
                 c.name,
                 c.kind.name(),
@@ -1167,7 +1446,7 @@ impl Shell {
                 c.acts
             );
         }
-        println!(
+        sh_println!(
             "  总计: 感知 {} 次 / 行动 {} 次",
             self.channels.total_senses(),
             self.channels.total_acts()
@@ -1236,7 +1515,7 @@ impl Shell {
 
     fn cmd_sense(&mut self, parts: &[&str]) {
         let Some(name) = parts.get(1).copied() else {
-            println!("用法: sense <通道>  (channels 查看全部通道)");
+            sh_println!("用法: sense <通道>  (channels 查看全部通道)");
             return;
         };
         let kind = match self.channels.sense(name) {
@@ -1244,14 +1523,14 @@ impl Shell {
             Err(e) => match self.ensure_dynamic_channel(name) {
                 Some(k) => k,
                 None => {
-                    println!("sense 失败: {}", e);
+                    sh_println!("sense 失败: {}", e);
                     return;
                 }
             },
         };
         let (probed, epoch) = crate::sense::probe_epoch(name);
         let text = probed.unwrap_or_else(|| self.sense_via_shell(kind, name));
-        println!("sense {} [{}] epoch={} → {}", name, kind.name(), epoch, text);
+        sh_println!("sense {} [{}] epoch={} → {}", name, kind.name(), epoch, text);
     }
 
     fn sense_via_shell(&self, kind: ChannelKind, name: &str) -> String {
@@ -1329,7 +1608,7 @@ impl Shell {
 
     fn cmd_act(&mut self, parts: &[&str]) {
         let Some(name) = parts.get(1).copied() else {
-            println!("用法: act <通道> [负载...]");
+            sh_println!("用法: act <通道> [负载...]");
             return;
         };
         let payload = parts[2..].join(" ");
@@ -1338,7 +1617,7 @@ impl Shell {
             Err(e) => match self.ensure_dynamic_channel(name) {
                 Some(k) => k,
                 None => {
-                    println!("act 失败: {}", e);
+                    sh_println!("act 失败: {}", e);
                     return;
                 }
             },
@@ -1346,8 +1625,8 @@ impl Shell {
         if let Some(result) = crate::sense::act(name, &payload) {
             let ok = result.is_ok();
             match result {
-                Ok(msg) => println!("act {} [{}] → {}", name, kind.name(), msg),
-                Err(e) => println!("act {} 失败: {}", name, e),
+                Ok(msg) => sh_println!("act {} [{}] → {}", name, kind.name(), msg),
+                Err(e) => sh_println!("act {} 失败: {}", name, e),
             }
             // 挂载表是唯一需要同步到 VFS 的通道：成功挂载后立刻建目录 / 写伪文件。
             if ok && name == "mount/table" {
@@ -1363,14 +1642,14 @@ impl Shell {
             ChannelKind::File => {
                 let line = format!("[{}] {}\n", name, payload);
                 match self.vfs.append("/var/log/channel.log", &line) {
-                    Ok(()) => println!("act {} → 已追加到 /var/log/channel.log", name),
-                    Err(e) => println!("act 写入失败: {}", e),
+                    Ok(()) => sh_println!("act {} → 已追加到 /var/log/channel.log", name),
+                    Err(e) => sh_println!("act 写入失败: {}", e),
                 }
             }
             ChannelKind::Action => self.cmd_run(),
             ChannelKind::Context => {
                 if payload.is_empty() {
-                    println!("act context 需要概念名作为负载");
+                    sh_println!("act context 需要概念名作为负载");
                 } else {
                     let _ = self.dispatch(&format!("proc {}", payload));
                 }
@@ -1378,14 +1657,14 @@ impl Shell {
             ChannelKind::Text => {
                 let line = format!("[{}] {}\n", name, payload);
                 match self.vfs.append("/var/log/kernel.log", &line) {
-                    Ok(()) => println!("act {} → 已写入内核日志", name),
-                    Err(e) => println!("act 写入失败: {}", e),
+                    Ok(()) => sh_println!("act {} → 已写入内核日志", name),
+                    Err(e) => sh_println!("act 写入失败: {}", e),
                 }
             }
             ChannelKind::Desktop => {
                 let info = self.desktop_info();
-                print!("{}", desktop::render(&info));
-                println!();
+                sh_print!("{}", desktop::render(&info));
+                sh_println!();
             }
             ChannelKind::Plugin => {
                 let mut it = payload.split_whitespace();
@@ -1396,7 +1675,7 @@ impl Shell {
                     (Some("unload"), Some(name)) => {
                         let _ = self.dispatch(&format!("modunload {}", name));
                     }
-                    _ => println!(
+                    _ => sh_println!(
                         "act plugin/modules → 用法: act <通道> load|unload <模块名>"
                     ),
                 }
@@ -1419,14 +1698,14 @@ impl Shell {
                                 {
                                     Ok(()) => {
                                         self.gpu_reserved_bytes += bytes;
-                                        println!(
+                                        sh_println!(
                                             "act driver/gpu → 已预留 {} MiB (累计 {} MiB)",
                                             mib,
                                             self.gpu_reserved_bytes / (1024 * 1024)
                                         );
                                     }
                                     Err(e) => {
-                                        println!(
+                                        sh_println!(
                                             "act driver/gpu → 预留失败: {}",
                                             e
                                         );
@@ -1441,15 +1720,15 @@ impl Shell {
                                         .unwrap()
                                         .release(bytes);
                                     self.gpu_reserved_bytes = 0;
-                                    println!(
+                                    sh_println!(
                                         "act driver/gpu → 已释放 {} MiB",
                                         bytes / (1024 * 1024)
                                     );
                                 } else {
-                                    println!("act driver/gpu → 无预留显存");
+                                    sh_println!("act driver/gpu → 无预留显存");
                                 }
                             }
-                            _ => println!(
+                            _ => sh_println!(
                                 "act driver/gpu → 用法: act <通道> alloc <MiB> | free"
                             ),
                         }
@@ -1482,31 +1761,31 @@ impl Shell {
                                     size,
                                     IommuFlags::empty(),
                                 ) {
-                                    Ok(_) => println!(
+                                    Ok(_) => sh_println!(
                                         "act driver/iommu → 域 {} 映射 0x{:x} size={}",
                                         domain.0, gpu_va, size
                                     ),
                                     Err(e) => {
-                                        println!(
+                                        sh_println!(
                                             "act driver/iommu → 映射失败: {}",
                                             e
                                         );
                                     }
                                 }
                             }
-                            _ => println!(
+                            _ => sh_println!(
                                 "act driver/iommu → 用法: act <通道> map <token_id> <va_hex> <size>"
                             ),
                         }
                     }
-                    _ => println!(
+                    _ => sh_println!(
                         "act driver → 驱动已在宏内核态运行 ({} 模块)",
                         self.modules.loaded_count()
                     ),
                 }
             }
             ChannelKind::App => {
-                println!("act app → 已投递给应用层 ({} 字节)", payload.len());
+                sh_println!("act app → 已投递给应用层 ({} 字节)", payload.len());
             }
             ChannelKind::Browser => {
                 let mut it = payload.split_whitespace();
@@ -1517,7 +1796,7 @@ impl Shell {
                             let path = rest.trim_start_matches('/');
                             match self.vfs.cat(path) {
                                 Ok(content) => {
-                                    println!(
+                                    sh_println!(
                                         "act browser/gateway → 打开 file:///{} ({} 字节)",
                                         path,
                                         content.len()
@@ -1529,7 +1808,7 @@ impl Shell {
                                         .note_local(url, &content);
                                 }
                                 Err(e) => {
-                                    println!(
+                                    sh_println!(
                                         "act browser/gateway → 打开失败: {}",
                                         e
                                     );
@@ -1537,10 +1816,10 @@ impl Shell {
                             }
                         } else {
                             // 非 file:// 的 URL 已由 sense 层（真实抓取）处理
-                            println!("act browser/gateway → 用法: open <url>");
+                            sh_println!("act browser/gateway → 用法: open <url>");
                         }
                     }
-                    _ => println!(
+                    _ => sh_println!(
                         "act browser/gateway → 用法: act <通道> open <url>"
                     ),
                 }
@@ -1562,13 +1841,13 @@ impl Shell {
                                     .vfs
                                     .append("/dev/disk.img", &content)
                                 {
-                                    Ok(()) => println!(
+                                    Ok(()) => sh_println!(
                                         "act dev/disk → 已写入扇区 {} ({} 字节)",
                                         sector,
                                         content.len()
                                     ),
                                     Err(e) => {
-                                        println!(
+                                        sh_println!(
                                             "act dev/disk → 写入失败: {}",
                                             e
                                         );
@@ -1591,19 +1870,19 @@ impl Shell {
                                                 ))
                                             })
                                             .unwrap_or(&"(空)");
-                                        println!("act dev/disk → {}", line);
+                                        sh_println!("act dev/disk → {}", line);
                                     }
                                     Err(_) => {
-                                        println!("act dev/disk → 镜像为空");
+                                        sh_println!("act dev/disk → 镜像为空");
                                     }
                                 }
                             }
-                            _ => println!(
+                            _ => sh_println!(
                                 "act dev/disk → 用法: act <通道> write|read <扇区> [数据]"
                             ),
                         }
                     }
-                    _ => println!(
+                    _ => sh_println!(
                         "act {} [{}] → 已确认 ({} 字节)",
                         name,
                         kind.name(),
@@ -1612,13 +1891,13 @@ impl Shell {
                 }
             }
             ChannelKind::Gateway => {
-                println!(
+                sh_println!(
                     "act gateway → {} 转发 ({} 字节)",
                     name,
                     payload.len()
                 );
             }
-            _ => println!(
+            _ => sh_println!(
                 "act {} [{}] → 已确认 ({} 字节)",
                 name,
                 kind.name(),
@@ -1774,11 +2053,11 @@ impl Shell {
         match self.vfs.ls(resolved.as_deref()) {
             Ok(items) => {
                 if items.is_empty() {
-                    println!("(空目录)");
+                    sh_println!("(空目录)");
                 }
                 for (name, kind, mode, size) in items {
                     let suffix = if kind == NodeKind::Dir { "/" } else { "" };
-                    println!(
+                    sh_println!(
                         "{} {:04o} {:>8}  {}{}",
                         kind.type_char(),
                         mode,
@@ -1788,7 +2067,7 @@ impl Shell {
                     );
                 }
             }
-            Err(e) => println!("ls 失败: {}", e),
+            Err(e) => sh_println!("ls 失败: {}", e),
         }
     }
 
@@ -1800,7 +2079,7 @@ impl Shell {
         };
         match self.vfs.cd(&target) {
             Ok(()) => {}
-            Err(e) => println!("cd 失败: {} ({})", e, target),
+            Err(e) => sh_println!("cd 失败: {} ({})", e, target),
         }
     }
 
@@ -1815,7 +2094,7 @@ impl Shell {
 
     fn cmd_cat(&mut self, path: Option<&str>) {
         let Some(path) = path else {
-            println!("用法: cat <路径>");
+            sh_println!("用法: cat <路径>");
             return;
         };
         let path = crate::worktree::resolve_path(path);
@@ -1823,21 +2102,21 @@ impl Shell {
         match self.vfs.cat(&path) {
             Ok(content) => {
                 if content.is_empty() {
-                    println!("(空文件)");
+                    sh_println!("(空文件)");
                 } else {
-                    print!("{}", content);
+                    sh_print!("{}", content);
                     if !content.ends_with('\n') {
-                        println!();
+                        sh_println!();
                     }
                 }
             }
-            Err(e) => println!("cat 失败: {}", e),
+            Err(e) => sh_println!("cat 失败: {}", e),
         }
     }
 
     fn cmd_write(&mut self, parts: &[&str], append: bool) {
         let Some(path) = parts.get(1) else {
-            println!("用法: {} <路径> <内容...>", if append { "append" } else { "write" });
+            sh_println!("用法: {} <路径> <内容...>", if append { "append" } else { "write" });
             return;
         };
         let mut content = parts[2..].join(" ");
@@ -1849,25 +2128,25 @@ impl Shell {
             self.vfs.write(&path, &content)
         };
         match result {
-            Ok(()) => println!(
+            Ok(()) => sh_println!(
                 "{} {} ({} 字节)",
                 if append { "已追加" } else { "已写入" },
                 path,
                 content.len()
             ),
-            Err(e) => println!("写入失败: {}", e),
+            Err(e) => sh_println!("写入失败: {}", e),
         }
     }
 
     fn cmd_mkdir(&mut self, path: Option<&str>) {
         let Some(path) = path else {
-            println!("用法: mkdir <路径>");
+            sh_println!("用法: mkdir <路径>");
             return;
         };
         let path = crate::worktree::resolve_path(path);
         match self.vfs.mkdir(&path) {
-            Ok(()) => println!("已创建目录 {}", path),
-            Err(e) => println!("mkdir 失败: {}", e),
+            Ok(()) => sh_println!("已创建目录 {}", path),
+            Err(e) => sh_println!("mkdir 失败: {}", e),
         }
     }
 
@@ -1881,13 +2160,13 @@ impl Shell {
 
     fn cmd_touch(&mut self, path: Option<&str>) {
         let Some(path) = path else {
-            println!("用法: touch <路径>");
+            sh_println!("用法: touch <路径>");
             return;
         };
         let path = crate::worktree::resolve_path(path);
         match self.vfs.touch(&path) {
-            Ok(()) => println!("已创建文件 {}", path),
-            Err(e) => println!("touch 失败: {}", e),
+            Ok(()) => sh_println!("已创建文件 {}", path),
+            Err(e) => sh_println!("touch 失败: {}", e),
         }
     }
 
@@ -1901,13 +2180,13 @@ impl Shell {
 
     fn cmd_rm(&mut self, path: Option<&str>) {
         let Some(path) = path else {
-            println!("用法: rm <路径>");
+            sh_println!("用法: rm <路径>");
             return;
         };
         let path = crate::worktree::resolve_path(path);
         match self.vfs.rm(&path) {
-            Ok(()) => println!("已删除 {}", path),
-            Err(e) => println!("rm 失败: {}", e),
+            Ok(()) => sh_println!("已删除 {}", path),
+            Err(e) => sh_println!("rm 失败: {}", e),
         }
     }
 
@@ -1924,8 +2203,8 @@ impl Shell {
         let total = vram.total_vram();
         let free = vram.available();
         let partitions = vram.partition_count();
-        println!("设备       总容量       已用        可用      分区");
-        println!(
+        sh_println!("设备       总容量       已用        可用      分区");
+        sh_println!(
             "gpu0        {:>6} MiB   {:>6} MiB   {:>6} MiB   {}",
             total / (1024 * 1024),
             (total - free) / (1024 * 1024),
@@ -1941,7 +2220,7 @@ impl Shell {
     fn cmd_modules(&self) {
         let loaded = self.modules.list_loaded();
         if loaded.is_empty() {
-            println!("未加载任何模块");
+            sh_println!("未加载任何模块");
         } else {
             for name in loaded {
                 let state = self
@@ -1949,15 +2228,15 @@ impl Shell {
                     .get_state(name)
                     .map(|s| s.name())
                     .unwrap_or("?");
-                println!("  {} [{}]", name, state);
+                sh_println!("  {} [{}]", name, state);
             }
         }
-        println!("已加载模块数: {}", self.modules.loaded_count());
+        sh_println!("已加载模块数: {}", self.modules.loaded_count());
     }
 
     fn cmd_modload(&mut self, parts: &[&str]) {
         let Some(name) = parts.get(1) else {
-            println!("用法: modload <名称>");
+            sh_println!("用法: modload <名称>");
             return;
         };
         let entry = ModuleEntry {
@@ -1971,19 +2250,19 @@ impl Shell {
             cleanup: || {},
         };
         match self.modules.load_module(entry, ModuleProtocol::GpuDriver) {
-            Ok(()) => println!("已加载模块 {}", name),
-            Err(e) => println!("加载失败: {}", e),
+            Ok(()) => sh_println!("已加载模块 {}", name),
+            Err(e) => sh_println!("加载失败: {}", e),
         }
     }
 
     fn cmd_modunload(&mut self, parts: &[&str]) {
         let Some(name) = parts.get(1) else {
-            println!("用法: modunload <名称>");
+            sh_println!("用法: modunload <名称>");
             return;
         };
         match self.modules.unload_module(name) {
-            Ok(()) => println!("已卸载模块 {}", name),
-            Err(e) => println!("卸载失败: {}", e),
+            Ok(()) => sh_println!("已卸载模块 {}", name),
+            Err(e) => sh_println!("卸载失败: {}", e),
         }
     }
 
@@ -1995,15 +2274,15 @@ impl Shell {
         let cols: usize = parts.get(1).and_then(|s| s.parse().ok()).unwrap_or(76);
         let rows: usize = parts.get(2).and_then(|s| s.parse().ok()).unwrap_or(20);
         let fb = crate::desktop::framebuffer().lock().unwrap();
-        print!("{}", fb.preview_ansi(cols, rows));
-        println!("[fbpreview] {}x{} 缩略图，{} 点亮像素", cols, rows, fb.lit_pixels());
+        sh_print!("{}", fb.preview_ansi(cols, rows));
+        sh_println!("[fbpreview] {}x{} 缩略图，{} 点亮像素", cols, rows, fb.lit_pixels());
     }
 
     fn cmd_save(&self) {
         let p = Vfs::default_state_path();
         match self.vfs.save_to_path(&p) {
-            Ok(()) => println!("[vfs] 已保存到 {}", p.display()),
-            Err(e) => println!("[vfs] 保存失败: {}", e),
+            Ok(()) => sh_println!("[vfs] 已保存到 {}", p.display()),
+            Err(e) => sh_println!("[vfs] 保存失败: {}", e),
         }
     }
 
@@ -2012,16 +2291,16 @@ impl Shell {
         match Vfs::load_from_path(&p) {
             Ok(Some(v)) => {
                 self.vfs = v;
-                println!("[vfs] 已从 {} 载入", p.display());
+                sh_println!("[vfs] 已从 {} 载入", p.display());
             }
-            Ok(None) => println!("[vfs] 没有状态文件: {}", p.display()),
-            Err(e) => println!("[vfs] 载入失败: {}", e),
+            Ok(None) => sh_println!("[vfs] 没有状态文件: {}", p.display()),
+            Err(e) => sh_println!("[vfs] 载入失败: {}", e),
         }
     }
 
     fn cmd_resetfs(&mut self) {
         self.vfs.reset();
-        println!("[vfs] 已重置为默认目录树");
+        sh_println!("[vfs] 已重置为默认目录树");
     }
 
     fn cmd_wallpaper(&mut self, parts: &[&str]) {
@@ -2031,9 +2310,9 @@ impl Shell {
         ];
         match parts.get(1).copied() {
             None | Some("list") => {
-                println!("可用壁纸: {}", available.join(", "));
-                println!("当前字符桌面壁纸: {}", self.wallpaper);
-                println!(
+                sh_println!("可用壁纸: {}", available.join(", "));
+                sh_println!("当前字符桌面壁纸: {}", self.wallpaper);
+                sh_println!(
                     "像素桌面: {}",
                     crate::gui::wallpaper::bank().lock().unwrap().status().lines().next().unwrap_or("")
                 );
@@ -2044,18 +2323,18 @@ impl Shell {
                     self.wallpaper = name.to_string();
                     // 同一份状态同步到真像素合成器，改一处全系统生效。
                     match crate::gui::wallpaper::set_named(name) {
-                        Ok(msg) => println!("[wallpaper] 已设置 {}: {}", name, msg),
-                        Err(e) => println!("[wallpaper] 像素壁纸同步失败: {}", e),
+                        Ok(msg) => sh_println!("[wallpaper] 已设置 {}: {}", name, msg),
+                        Err(e) => sh_println!("[wallpaper] 像素壁纸同步失败: {}", e),
                     }
                 } else {
-                    println!("未知壁纸: {} (可用: {})", name, available.join(", "));
+                    sh_println!("未知壁纸: {} (可用: {})", name, available.join(", "));
                 }
             }
             Some("current") => {
-                println!("当前字符桌面壁纸: {}", self.wallpaper);
-                println!("当前像素壁纸: {}", crate::gui::wallpaper::bank().lock().unwrap().name);
+                sh_println!("当前字符桌面壁纸: {}", self.wallpaper);
+                sh_println!("当前像素壁纸: {}", crate::gui::wallpaper::bank().lock().unwrap().name);
             }
-            _ => println!("用法: wallpaper [list|set <name>|current]"),
+            _ => sh_println!("用法: wallpaper [list|set <name>|current]"),
         }
     }
     fn cmd_llm(&mut self, parts: &[&str]) {
@@ -2063,7 +2342,7 @@ impl Shell {
             Some("providers") => {
                 // 列出内置 provider（地址 / 默认模型），便于后续接入更多 model。
                 for line in crate::llm::providers_text().lines() {
-                    println!("{}", line);
+                    sh_println!("{}", line);
                 }
             }
             None | Some("status") => {
@@ -2078,7 +2357,7 @@ impl Shell {
                         } else {
                             "****".to_string()
                         };
-                        println!("  {} => {}", provider, masked);
+                        sh_println!("  {} => {}", provider, masked);
                     }
                 }
             }
@@ -2095,7 +2374,7 @@ impl Shell {
                             } else {
                                 "****".to_string()
                             };
-                            println!("  {} => {}", provider, masked);
+                            sh_println!("  {} => {}", provider, masked);
                         }
                     }
                 }
@@ -2103,7 +2382,7 @@ impl Shell {
                     let provider = parts.get(3).copied().unwrap_or("");
                     let key = parts.get(4).copied().unwrap_or("");
                     if provider.is_empty() || key.is_empty() {
-                        println!("用法: llm key set <provider> <key>");
+                        sh_println!("用法: llm key set <provider> <key>");
                     } else {
                         self.handler.consciousness.set_api_key(provider, key.to_string());
                         tagged_out!("[llm]", "Provider '{}' API Key 已设置 (长度: {})", provider, key.len());
@@ -2112,7 +2391,7 @@ impl Shell {
                 Some("del") => {
                     let provider = parts.get(3).copied().unwrap_or("");
                     if provider.is_empty() {
-                        println!("用法: llm key del <provider>");
+                        sh_println!("用法: llm key del <provider>");
                     } else {
                         self.handler.consciousness.del_api_key(provider);
                         tagged_out!("[llm]", "Provider '{}' API Key 已删除", provider);
@@ -2121,7 +2400,7 @@ impl Shell {
                 Some("show") => {
                     let provider = parts.get(3).copied().unwrap_or("");
                     if provider.is_empty() {
-                        println!("用法: llm key show <provider>");
+                        sh_println!("用法: llm key show <provider>");
                     } else {
                         match self.handler.consciousness.api_key(provider) {
                             Some(key) => {
@@ -2136,17 +2415,17 @@ impl Shell {
                         }
                     }
                 }
-                _ => println!("用法: llm key [list|set <provider> <key>|del <provider>|show <provider>]"),
+                _ => sh_println!("用法: llm key [list|set <provider> <key>|del <provider>|show <provider>]"),
             },
             Some("chat") => {
                 let provider = parts.get(2).copied().unwrap_or("");
                 if provider.is_empty() {
-                    println!("用法: llm chat <provider> <消息>");
+                    sh_println!("用法: llm chat <provider> <消息>");
                     return;
                 }
                 let message = parts[3..].join(" ");
                 if message.is_empty() {
-                    println!("用法: llm chat <provider> <消息>");
+                    sh_println!("用法: llm chat <provider> <消息>");
                     return;
                 }
                 let key = match self.handler.consciousness.api_key(provider) {
@@ -2173,7 +2452,7 @@ impl Shell {
             Some("loop") => {
                 let provider = parts.get(2).copied().unwrap_or("");
                 if provider.is_empty() {
-                    println!("用法: llm loop <provider|all>");
+                    sh_println!("用法: llm loop <provider|all>");
                     return;
                 }
                 if provider == "all" {
@@ -2188,7 +2467,7 @@ impl Shell {
                     self.run_llm_loop(&[provider.to_string()]);
                 }
             }
-            _ => println!("用法: llm [status|providers|key [list|set <provider> <key>|del <provider>|show <provider>]|chat <provider> <消息>|loop <provider>]"),
+            _ => sh_println!("用法: llm [status|providers|key [list|set <provider> <key>|del <provider>|show <provider>]|chat <provider> <消息>|loop <provider>]"),
         }
     }
 
@@ -2591,7 +2870,7 @@ impl Shell {
                         format!("{} {}", args[0], p)
                     }
                     _ => {
-                        println!(
+                        sh_println!(
                             "[llm] 未知 file 子指令: {}",
                             args.first().copied().unwrap_or("")
                         );
@@ -2674,11 +2953,11 @@ impl Shell {
     }
 
     fn cmd_history(&self) {        if self.editor.history().is_empty() {
-            println!("(无历史)");
+            sh_println!("(无历史)");
             return;
         }
         for (i, cmd) in self.editor.history().iter().enumerate() {
-            println!("  {:>3}  {}", i + 1, cmd);
+            sh_println!("  {:>3}  {}", i + 1, cmd);
         }
     }
 
@@ -2698,77 +2977,108 @@ impl Shell {
     /// 输出 JSON 值：--json 时紧凑，否则 pretty print。
     fn print_json(value: &serde_json::Value, json_mode: bool) {
         if json_mode {
-            println!("{}", serde_json::to_string(value).unwrap());
+            sh_println!("{}", serde_json::to_string(value).unwrap());
         } else {
-            println!("{}", serde_json::to_string_pretty(value).unwrap());
+            sh_println!("{}", serde_json::to_string_pretty(value).unwrap());
         }
+    }
+
+    /// 通过统一能力层调用一项能力。
+    ///
+    /// Shell 与 GUI、Agent API 走同一条路径：同样的权限校验、同样的审计、
+    /// 同样的事件发布。调用方只负责组装输入和展示结果。
+    fn invoke_capability(
+        &self,
+        cap_id: &str,
+        input: serde_json::Value,
+        permissions: Vec<String>,
+        action: &str,
+    ) -> Result<serde_json::Value, String> {
+        let req = crate::capability::CapabilityRequest {
+            id: cap_id.to_string(),
+            input,
+            context: crate::capability::ExecutionContext {
+                caller_id: "shell".to_string(),
+                caller_type: crate::capability::CallerType::Shell,
+                permissions,
+                resource_quota: crate::capability::ResourceQuota::default(),
+            },
+            timeout_ns: None,
+            cancellation_token: None,
+            audit: crate::capability::AuditInfo {
+                actor: "shell".to_string(),
+                action: action.to_string(),
+                timestamp: crate::capability::now_ns(),
+                result: crate::capability::AuditResult::Executed,
+                correlation_id: None,
+            },
+        };
+        // 只持有读锁到取出 Arc 为止，能力执行期间不占用注册表锁。
+        let cap = crate::capability::with_registry_read(|reg| reg.get(cap_id))
+            .ok_or_else(|| format!("能力 {} 未注册", cap_id))?;
+        cap.execute(req)
+            .map(|resp| resp.output)
+            .map_err(|e| format!("{} (code={})", e.message, e.code))
     }
 
     fn cmd_agent(&mut self, parts: &[&str]) {
         let mut argv = parts.to_vec();
         let json_mode = Self::json_flag(&mut argv);
         let sub = argv.get(1).copied().unwrap_or("list");
-        match sub {
-            "list" => {
-                let output = crate::agent::list();
-                if json_mode {
-                    let agents: Vec<serde_json::Value> = output
-                        .lines()
-                        .filter(|l| !l.is_empty())
-                        .map(|l| serde_json::json!({"line": l}))
-                        .collect();
-                    println!("{}", serde_json::to_string(&agents).unwrap());
+
+        // 权限按操作细分，与能力层的要求严格对应。
+        let (op, permissions): (&str, Vec<String>) = match sub {
+            "list" => ("list", vec!["agent:read".to_string()]),
+            "inspect" => ("inspect", vec!["agent:read".to_string()]),
+            "start" => ("start", vec!["agent:control".to_string()]),
+            "stop" => ("stop", vec!["agent:control".to_string()]),
+            _ => {
+                sh_println!("用法: agent list / inspect <id> / start <id> / stop <id> [--json]");
+                return;
+            }
+        };
+
+        let mut input = serde_json::json!({"op": op});
+        if matches!(sub, "inspect" | "start" | "stop") {
+            let Some(id) = argv.get(2).and_then(|s| s.parse::<u64>().ok()) else {
+                sh_println!("用法: agent {} <id> [--json]", sub);
+                return;
+            };
+            input["id"] = serde_json::json!(id);
+        }
+
+        match self.invoke_capability("agent", input, permissions, &format!("agent.{op}")) {
+            Ok(output) => {
+                if !json_mode && sub == "list" {
+                    // 人类可读模式仍保留原来的列表样式；--json 走结构化数组。
+                    match output.get("agents").and_then(|v| v.as_array()) {
+                        Some(agents) if !agents.is_empty() => {
+                            for a in agents {
+                                sh_println!(
+                                    "agent={:<4} {:<16} role={:<10} state={:<8} exec={}",
+                                    a.get("id").and_then(|v| v.as_u64()).unwrap_or(0),
+                                    a.get("name").and_then(|v| v.as_str()).unwrap_or(""),
+                                    a.get("role").and_then(|v| v.as_str()).unwrap_or(""),
+                                    a.get("state").and_then(|v| v.as_str()).unwrap_or(""),
+                                    a.get("exec_id").and_then(|v| v.as_u64()).unwrap_or(0),
+                                );
+                            }
+                        }
+                        _ => sh_println!("（无子智能体）"),
+                    }
+                } else if !json_mode && matches!(sub, "start" | "stop") {
+                    sh_println!(
+                        "{}",
+                        output
+                            .get("result")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("操作完成")
+                    );
                 } else {
-                    println!("{}", output);
+                    Self::print_json(&output, json_mode);
                 }
             }
-            "inspect" => {
-                let id: u64 = argv.get(2).and_then(|s| s.parse().ok()).unwrap_or(0);
-                let req = crate::capability::CapabilityRequest {
-                    id: "agent".to_string(),
-                    input: serde_json::json!({"op": "inspect", "id": id}),
-                    context: crate::capability::ExecutionContext {
-                        caller_id: "shell".to_string(),
-                        caller_type: crate::capability::CallerType::Shell,
-                        permissions: vec!["agent:read".to_string()],
-                        resource_quota: crate::capability::ResourceQuota::default(),
-                    },
-                    timeout_ns: None,
-                    cancellation_token: None,
-                    audit: crate::capability::AuditInfo {
-                        actor: "shell".to_string(),
-                        action: "agent.inspect".to_string(),
-                        timestamp: crate::capability::now_ns(),
-                        result: crate::capability::AuditResult::Executed,
-                        correlation_id: None,
-                    },
-                };
-                let reg = crate::capability::capability_registry();
-                match reg.lock().unwrap_or_else(|e| e.into_inner()).get("agent") {
-                    Some(cap) => match cap.execute(req) {
-                        Ok(resp) => Self::print_json(&resp.output, json_mode),
-                        Err(e) => println!("错误: {} (code={})", e.message, e.code),
-                    },
-                    None => println!("能力 agent 未注册"),
-                }
-            }
-            "start" => {
-                let id: u64 = argv.get(2).and_then(|s| s.parse().ok()).unwrap_or(0);
-                let result = crate::agent::dispatch(&format!("agent/start {id}"));
-                match result {
-                    Ok(msg) => println!("{}", msg),
-                    Err(e) => println!("错误: {}", e),
-                }
-            }
-            "stop" => {
-                let id: u64 = argv.get(2).and_then(|s| s.parse().ok()).unwrap_or(0);
-                let result = crate::agent::stop(&id.to_string());
-                match result {
-                    Ok(msg) => println!("{}", msg),
-                    Err(e) => println!("错误: {}", e),
-                }
-            }
-            _ => println!("用法: agent list / inspect <id> / start <id> / stop <id> [--json]"),
+            Err(e) => sh_println!("错误: {}", e),
         }
     }
 
@@ -2804,12 +3114,12 @@ impl Shell {
                     },
                 };
                 let reg = crate::capability::capability_registry();
-                match reg.lock().unwrap_or_else(|e| e.into_inner()).get("task") {
+                match reg.read().unwrap_or_else(|e| e.into_inner()).get("task") {
                     Some(cap) => match cap.execute(req) {
                         Ok(resp) => Self::print_json(&resp.output, json_mode),
-                        Err(e) => println!("错误: {} (code={})", e.message, e.code),
+                        Err(e) => sh_println!("错误: {} (code={})", e.message, e.code),
                     },
-                    None => println!("能力 task 未注册"),
+                    None => sh_println!("能力 task 未注册"),
                 }
             }
             "list" => {
@@ -2833,12 +3143,12 @@ impl Shell {
                     },
                 };
                 let reg = crate::capability::capability_registry();
-                match reg.lock().unwrap_or_else(|e| e.into_inner()).get("task") {
+                match reg.read().unwrap_or_else(|e| e.into_inner()).get("task") {
                     Some(cap) => match cap.execute(req) {
                         Ok(resp) => Self::print_json(&resp.output, json_mode),
-                        Err(e) => println!("错误: {} (code={})", e.message, e.code),
+                        Err(e) => sh_println!("错误: {} (code={})", e.message, e.code),
                     },
-                    None => println!("能力 task 未注册"),
+                    None => sh_println!("能力 task 未注册"),
                 }
             }
             "inspect" => {
@@ -2863,12 +3173,12 @@ impl Shell {
                     },
                 };
                 let reg = crate::capability::capability_registry();
-                match reg.lock().unwrap_or_else(|e| e.into_inner()).get("task") {
+                match reg.read().unwrap_or_else(|e| e.into_inner()).get("task") {
                     Some(cap) => match cap.execute(req) {
                         Ok(resp) => Self::print_json(&resp.output, json_mode),
-                        Err(e) => println!("错误: {} (code={})", e.message, e.code),
+                        Err(e) => sh_println!("错误: {} (code={})", e.message, e.code),
                     },
-                    None => println!("能力 task 未注册"),
+                    None => sh_println!("能力 task 未注册"),
                 }
             }
             "cancel" => {
@@ -2893,12 +3203,12 @@ impl Shell {
                     },
                 };
                 let reg = crate::capability::capability_registry();
-                match reg.lock().unwrap_or_else(|e| e.into_inner()).get("task") {
+                match reg.read().unwrap_or_else(|e| e.into_inner()).get("task") {
                     Some(cap) => match cap.execute(req) {
                         Ok(resp) => Self::print_json(&resp.output, json_mode),
-                        Err(e) => println!("错误: {} (code={})", e.message, e.code),
+                        Err(e) => sh_println!("错误: {} (code={})", e.message, e.code),
                     },
-                    None => println!("能力 task 未注册"),
+                    None => sh_println!("能力 task 未注册"),
                 }
             }
             "pause" => {
@@ -2923,12 +3233,12 @@ impl Shell {
                     },
                 };
                 let reg = crate::capability::capability_registry();
-                match reg.lock().unwrap_or_else(|e| e.into_inner()).get("task") {
+                match reg.read().unwrap_or_else(|e| e.into_inner()).get("task") {
                     Some(cap) => match cap.execute(req) {
                         Ok(resp) => Self::print_json(&resp.output, json_mode),
-                        Err(e) => println!("错误: {} (code={})", e.message, e.code),
+                        Err(e) => sh_println!("错误: {} (code={})", e.message, e.code),
                     },
-                    None => println!("能力 task 未注册"),
+                    None => sh_println!("能力 task 未注册"),
                 }
             }
             "resume" => {
@@ -2953,15 +3263,15 @@ impl Shell {
                     },
                 };
                 let reg = crate::capability::capability_registry();
-                match reg.lock().unwrap_or_else(|e| e.into_inner()).get("task") {
+                match reg.read().unwrap_or_else(|e| e.into_inner()).get("task") {
                     Some(cap) => match cap.execute(req) {
                         Ok(resp) => Self::print_json(&resp.output, json_mode),
-                        Err(e) => println!("错误: {} (code={})", e.message, e.code),
+                        Err(e) => sh_println!("错误: {} (code={})", e.message, e.code),
                     },
-                    None => println!("能力 task 未注册"),
+                    None => sh_println!("能力 task 未注册"),
                 }
             }
-            _ => println!("用法: task create <描述> [--agent <id>] | list | inspect <id> | cancel <id> | pause <id> | resume <id> [--json]"),
+            _ => sh_println!("用法: task create <描述> [--agent <id>] | list | inspect <id> | cancel <id> | pause <id> | resume <id> [--json]"),
         }
     }
 
@@ -2972,17 +3282,17 @@ impl Shell {
         let reg = crate::capability::capability_registry();
         match sub {
             "list" => {
-                let meta = reg.lock().unwrap_or_else(|e| e.into_inner()).list_metadata();
+                let meta = reg.read().unwrap_or_else(|e| e.into_inner()).list_metadata();
                 if _json_mode {
                     let arr: Vec<serde_json::Value> = meta.iter().map(|m| serde_json::json!({
                         "id": m.id,
                         "description": m.description,
                         "required_permissions": m.required_permissions
                     })).collect();
-                    println!("{}", serde_json::to_string(&arr).unwrap());
+                    sh_println!("{}", serde_json::to_string(&arr).unwrap());
                 } else {
                     for m in meta {
-                        println!(
+                        sh_println!(
                             "  {:<20} {} (权限: {})",
                             m.id,
                             m.description,
@@ -2993,10 +3303,10 @@ impl Shell {
             }
             "inspect" => {
                 let id = argv.get(2).copied().unwrap_or("");
-                match reg.lock().unwrap_or_else(|e| e.into_inner()).get(id) {
+                match reg.read().unwrap_or_else(|e| e.into_inner()).get(id) {
                     Some(cap) => {
                         if _json_mode {
-                            println!("{}", serde_json::to_string(&serde_json::json!({
+                            sh_println!("{}", serde_json::to_string(&serde_json::json!({
                                 "id": cap.id(),
                                 "description": cap.description(),
                                 "input_schema": cap.input_schema(),
@@ -3005,17 +3315,17 @@ impl Shell {
                                 "required_permissions": cap.required_permissions()
                             })).unwrap());
                         } else {
-                            println!("能力: {}", cap.id());
-                            println!("说明: {}", cap.description());
-                            println!("输入 Schema: {}", serde_json::to_string_pretty(&cap.input_schema()).unwrap());
-                            println!("输出 Schema: {}", serde_json::to_string_pretty(&cap.output_schema()).unwrap());
-                            println!("权限要求: {:?}", cap.required_permissions());
+                            sh_println!("能力: {}", cap.id());
+                            sh_println!("说明: {}", cap.description());
+                            sh_println!("输入 Schema: {}", serde_json::to_string_pretty(&cap.input_schema()).unwrap());
+                            sh_println!("输出 Schema: {}", serde_json::to_string_pretty(&cap.output_schema()).unwrap());
+                            sh_println!("权限要求: {:?}", cap.required_permissions());
                         }
                     }
-                    None => println!("未找到能力: {}", id),
+                    None => sh_println!("未找到能力: {}", id),
                 }
             }
-            _ => println!("用法: capability list / inspect <id> [--json]"),
+            _ => sh_println!("用法: capability list / inspect <id> [--json]"),
         }
     }
 
@@ -3043,12 +3353,12 @@ impl Shell {
             },
         };
         let reg = crate::capability::capability_registry();
-        match reg.lock().unwrap_or_else(|e| e.into_inner()).get("system") {
+        match reg.read().unwrap_or_else(|e| e.into_inner()).get("system") {
             Some(cap) => match cap.execute(req) {
                 Ok(resp) => Self::print_json(&resp.output, json_mode),
-                Err(e) => println!("错误: {} (code={})", e.message, e.code),
+                Err(e) => sh_println!("错误: {} (code={})", e.message, e.code),
             },
-            None => println!("能力 system 未注册"),
+            None => sh_println!("能力 system 未注册"),
         }
     }
 
@@ -3057,274 +3367,42 @@ impl Shell {
         match sub {
             "list" => {
                 let apps = crate::gui::apps::AppKind::list();
-                println!("可用应用: {}", apps);
+                sh_println!("可用应用: {}", apps);
             }
             "launch" => {
                 let name = parts.get(2).copied().unwrap_or("");
                 match crate::gui::open_app(name) {
-                    Ok(id) => println!("已启动应用 {}, 窗口 id={}", name, id),
-                    Err(e) => println!("启动失败: {}", e),
+                    Ok(id) => sh_println!("已启动应用 {}, 窗口 id={}", name, id),
+                    Err(e) => sh_println!("启动失败: {}", e),
                 }
             }
             "stop" => {
                 let id: u64 = parts.get(2).and_then(|s| s.parse().ok()).unwrap_or(0);
                 let ok = crate::gui::close_window(id);
                 if ok {
-                    println!("已关闭窗口 {}", id);
+                    sh_println!("已关闭窗口 {}", id);
                 } else {
-                    println!("窗口 {} 不存在", id);
+                    sh_println!("窗口 {} 不存在", id);
                 }
             }
-            _ => println!("用法: app list / launch <名> / stop <id>"),
+            _ => sh_println!("用法: app list / launch <名> / stop <id>"),
         }
     }
 }
 
 // =====================================================================================
-// Shell Parser —— 真正的命令行解析（替代 split_whitespace）
+// Shell Parser —— 统一复用 kernel/shell_parser.rs
 //
-// 支持：单/双引号、反斜杠转义、管道 |、重定向 > < >>、命令链 && || ;
-// 词法分析后产生 Pipeline -> Command -> Args / Redirection 结构。
+// 之前这里还有一套重复的 Parser，和 shell_parser.rs 的行为不一致（后者不支持
+// 命令链、前者会把中文按字节拆成乱码）。现在全项目只有一个解析器：
+// 引号 / 转义 / UTF-8、|、>、>>、<、&&、||、;、& 都由它负责。
 // =====================================================================================
 
-/// 重定向类型。
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Redirection {
-    /// `>` 覆盖写入
-    Overwrite { fd: u8, path: String },
-    /// `>>` 追加写入
-    Append { fd: u8, path: String },
-    /// `<` 读取输入
-    Input { fd: u8, path: String },
-}
+pub use crate::shell_parser::{ChainSeparator as Separator, Command, Pipeline, Redirection};
 
-/// 解析后的单条命令。
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Command {
-    pub argv: Vec<String>,
-    pub stdin: Option<Redirection>,
-    pub stdout: Option<Redirection>,
-    pub stderr: Option<Redirection>,
-    pub background: bool,
-}
-
-/// 管道：多个命令通过 `|` 连接。
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Pipeline {
-    pub commands: Vec<Command>,
-    pub separator: Separator,
-}
-
-/// 命令之间的连接符。
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Separator {
-    /// 下一条不管前一条是否成功
-    Semicolon,
-    /// 前一条成功才执行下一条
-    And,
-    /// 前一条失败才执行下一条
-    Or,
-}
-
-/// Shell 词法分析器。
-pub struct Parser<'a> {
-    input: &'a str,
-    pos: usize,
-}
-
-impl<'a> Parser<'a> {
-    pub fn new(input: &'a str) -> Self {
-        Self { input, pos: 0 }
-    }
-
-    /// 解析整行，返回一条或多条 Pipeline。
-    pub fn parse_line(&mut self) -> Result<Vec<Pipeline>, String> {
-        let mut pipelines = Vec::new();
-        loop {
-            self.skip_whitespace();
-            if self.pos >= self.input.len() {
-                break;
-            }
-            let pipeline = self.parse_pipeline()?;
-            pipelines.push(pipeline);
-            self.skip_whitespace();
-            if self.pos >= self.input.len() {
-                break;
-            }
-            let sep = match self.input.as_bytes()[self.pos] {
-                b';' => {
-                    self.pos += 1;
-                    Separator::Semicolon
-                }
-                b'&' if self.peek() == Some('&') => {
-                    self.pos += 2;
-                    Separator::And
-                }
-                b'|' if self.peek() == Some('|') => {
-                    self.pos += 2;
-                    Separator::Or
-                }
-                _ => Separator::Semicolon,
-            };
-            // 将分隔符附加到上一条 pipeline（简化：只处理单条 pipeline 间的分隔）
-            let _ = sep;
-            if pipelines.len() == 1 {
-                pipelines[0].separator = sep;
-            }
-        }
-        Ok(pipelines)
-    }
-
-    fn parse_pipeline(&mut self) -> Result<Pipeline, String> {
-        let mut commands = Vec::new();
-        loop {
-            let cmd = self.parse_command()?;
-            commands.push(cmd);
-            self.skip_whitespace();
-            if self.pos < self.input.len() && self.input.as_bytes()[self.pos] == b'|' {
-                self.pos += 1;
-                continue;
-            }
-            break;
-        }
-        Ok(Pipeline { commands, separator: Separator::Semicolon })
-    }
-
-    fn parse_command(&mut self) -> Result<Command, String> {
-        let mut argv = Vec::new();
-        let mut stdin: Option<Redirection> = None;
-        let mut stdout: Option<Redirection> = None;
-        let mut stderr: Option<Redirection> = None;
-        let mut background = false;
-
-        loop {
-            self.skip_whitespace();
-            if self.pos >= self.input.len() {
-                break;
-            }
-            let ch = self.input.as_bytes()[self.pos];
-            match ch {
-                b'|' | b';' | b'&' => break,
-                b'>' => {
-                    self.pos += 1;
-                    let append = self.pos < self.input.len() && self.input.as_bytes()[self.pos] == b'>';
-                    if append {
-                        self.pos += 1;
-                    }
-                    self.skip_whitespace();
-                    let path = self.read_word()?;
-                    if append {
-                        stdout = Some(Redirection::Append { fd: 1, path });
-                    } else {
-                        stdout = Some(Redirection::Overwrite { fd: 1, path });
-                    }
-                }
-                b'<' => {
-                    self.pos += 1;
-                    self.skip_whitespace();
-                    let path = self.read_word()?;
-                    stdin = Some(Redirection::Input { fd: 0, path });
-                }
-                _ => {
-                    let word = self.read_word()?;
-                    // 检查是否紧跟重定向语法（如 `2>`）
-                    if word.ends_with('>') || word.ends_with('<') {
-                        // 简化：视为普通参数
-                        argv.push(word);
-                    } else {
-                        argv.push(word);
-                    }
-                }
-            }
-        }
-
-        // 检查后台符号 `&`
-        self.skip_whitespace();
-        if self.pos < self.input.len() && self.input.as_bytes()[self.pos] == b'&' {
-            background = true;
-            self.pos += 1;
-        }
-
-        if argv.is_empty() && stdin.is_none() && stdout.is_none() && stderr.is_none() {
-            return Err("空命令".to_string());
-        }
-
-        Ok(Command { argv, stdin, stdout, stderr, background })
-    }
-
-    fn skip_whitespace(&mut self) {
-        while self.pos < self.input.len() {
-            match self.input.as_bytes()[self.pos] {
-                b' ' | b'\t' | b'\r' | b'\n' => self.pos += 1,
-                _ => break,
-            }
-        }
-    }
-
-    fn peek(&self) -> Option<char> {
-        self.input[self.pos..].chars().next()
-    }
-
-    /// 读取一个词（支持单引号、双引号、反斜杠转义）。
-    fn read_word(&mut self) -> Result<String, String> {
-        let mut out = String::new();
-        let mut in_single = false;
-        let mut in_double = false;
-
-        while self.pos < self.input.len() {
-            let ch = self.input.as_bytes()[self.pos] as char;
-
-            match ch {
-                '\\' if in_double || !in_single => {
-                    self.pos += 1;
-                    if self.pos < self.input.len() {
-                        let next = self.input.as_bytes()[self.pos] as char;
-                        out.push(next);
-                        self.pos += 1;
-                    } else {
-                        return Err("未闭合的转义".to_string());
-                    }
-                }
-                '\'' if !in_double => {
-                    self.pos += 1;
-                    if in_single {
-                        in_single = false;
-                    } else {
-                        in_single = true;
-                    }
-                }
-                '"' if !in_single => {
-                    self.pos += 1;
-                    if in_double {
-                        in_double = false;
-                    } else {
-                        in_double = true;
-                    }
-                }
-                ' ' | '\t' | '\r' | '\n' | '|' | ';' | '&' | '>' | '<'
-                    if !in_single && !in_double =>
-                {
-                    break;
-                }
-                _ => {
-                    out.push(ch);
-                    self.pos += 1;
-                }
-            }
-        }
-
-        if in_single || in_double {
-            return Err("未闭合的引号".to_string());
-        }
-
-        Ok(out)
-    }
-}
-
-/// 将原始命令行拆分为 Pipeline（不执行，仅解析）。
+/// 将原始命令行拆分为多个 Pipeline（不执行，仅解析）。
 pub fn parse_command_line(line: &str) -> Result<Vec<Pipeline>, String> {
-    let mut parser = Parser::new(line);
-    parser.parse_line()
+    crate::shell_parser::parse_lines(line).map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
@@ -3335,79 +3413,55 @@ mod parser_tests {
     fn simple_command() {
         let pipes = parse_command_line("ls /etc").unwrap();
         assert_eq!(pipes.len(), 1);
-        assert_eq!(pipes[0].commands.len(), 1);
-        assert_eq!(pipes[0].commands[0].argv, vec!["ls".to_string(), "/etc".to_string()]);
+        assert_eq!(pipes[0].commands[0].argv, vec!["ls", "/etc"]);
     }
 
     #[test]
-    fn quoted_argument() {
+    fn quoted_and_escaped_arguments() {
         let pipes = parse_command_line("cat 'hello world.txt'").unwrap();
-        assert_eq!(pipes[0].commands[0].argv, vec!["cat".to_string(), "hello world.txt".to_string()]);
-    }
-
-    #[test]
-    fn escaped_character() {
+        assert_eq!(pipes[0].commands[0].argv, vec!["cat", "hello world.txt"]);
         let pipes = parse_command_line("cat hello\\ world.txt").unwrap();
-        assert_eq!(pipes[0].commands[0].argv, vec!["cat".to_string(), "hello world.txt".to_string()]);
+        assert_eq!(pipes[0].commands[0].argv, vec!["cat", "hello world.txt"]);
+        let pipes = parse_command_line("echo \"hello \\\"world\\\"\"").unwrap();
+        assert_eq!(pipes[0].commands[0].argv, vec!["echo", "hello \"world\""]);
     }
 
     #[test]
-    fn pipe() {
+    fn utf8_is_preserved() {
+        let pipes = parse_command_line("write /tmp/a.txt 你好 Hib OS").unwrap();
+        assert_eq!(pipes[0].commands[0].argv[2], "你好");
+    }
+
+    #[test]
+    fn pipe_and_redirections() {
         let pipes = parse_command_line("cat /etc/passwd | grep root").unwrap();
         assert_eq!(pipes[0].commands.len(), 2);
-        assert_eq!(pipes[0].commands[0].argv, vec!["cat".to_string(), "/etc/passwd".to_string()]);
-        assert_eq!(pipes[0].commands[1].argv, vec!["grep".to_string(), "root".to_string()]);
+        let out = parse_command_line("echo hi > /tmp/out.txt").unwrap();
+        assert_eq!(out[0].commands[0].stdout, Redirection::ToFile("/tmp/out.txt".to_string()));
+        let app = parse_command_line("echo hi >> /tmp/out.txt").unwrap();
+        assert_eq!(app[0].commands[0].stdout, Redirection::AppendFile("/tmp/out.txt".to_string()));
+        let input = parse_command_line("cat < /tmp/in.txt").unwrap();
+        assert_eq!(input[0].commands[0].stdin, Redirection::FromFile("/tmp/in.txt".to_string()));
     }
 
     #[test]
-    fn redirect_overwrite() {
-        let pipes = parse_command_line("echo hi > /tmp/out.txt").unwrap();
-        assert!(matches!(pipes[0].commands[0].stdout, Some(Redirection::Overwrite { ref path, .. }) if path == "/tmp/out.txt"));
+    fn command_chains_and_background() {
+        let and = parse_command_line("true && false").unwrap();
+        assert_eq!(and.len(), 2);
+        assert_eq!(and[0].separator, Separator::And);
+        let or = parse_command_line("true || false").unwrap();
+        assert_eq!(or[0].separator, Separator::Or);
+        assert_eq!(parse_command_line("a; b").unwrap().len(), 2);
+        assert!(parse_command_line("sleep 10 &").unwrap()[0].commands[0].background);
     }
 
     #[test]
-    fn redirect_append() {
-        let pipes = parse_command_line("echo hi >> /tmp/out.txt").unwrap();
-        assert!(matches!(pipes[0].commands[0].stdout, Some(Redirection::Append { ref path, .. }) if path == "/tmp/out.txt"));
-    }
-
-    #[test]
-    fn redirect_input() {
-        let pipes = parse_command_line("cat < /tmp/in.txt").unwrap();
-        assert!(matches!(pipes[0].commands[0].stdin, Some(Redirection::Input { ref path, .. }) if path == "/tmp/in.txt"));
-    }
-
-    #[test]
-    fn command_chain_and() {
-        let pipes = parse_command_line("true && false").unwrap();
-        assert_eq!(pipes.len(), 2);
-        assert_eq!(pipes[0].separator, Separator::And);
-    }
-
-    #[test]
-    fn command_chain_semicolon() {
-        let pipes = parse_command_line("a; b").unwrap();
-        assert_eq!(pipes.len(), 2);
-    }
-
-    #[test]
-    fn background_job() {
-        let pipes = parse_command_line("sleep 10 &").unwrap();
-        assert!(pipes[0].commands[0].background);
-    }
-
-    #[test]
-    fn unclosed_quote_errors() {
+    fn malformed_lines_are_rejected() {
         assert!(parse_command_line("cat 'hello").is_err());
-    }
-
-    #[test]
-    fn double_quoted_with_escape() {
-        let pipes = parse_command_line("echo \"hello \\\"world\\\"\"").unwrap();
-        assert_eq!(pipes[0].commands[0].argv, vec!["echo".to_string(), "hello \"world\"".to_string()]);
+        assert!(parse_command_line("cat |").is_err());
+        assert!(parse_command_line("cat >").is_err());
     }
 }
-
 impl Default for Shell {
     fn default() -> Self {
         Self::new()
@@ -3457,8 +3511,16 @@ pub fn usage_line(cmd: &str) -> Option<&'static str> {
         "agent" => "agent list / inspect <id> / start <id> / stop <id>",
         "task" => "task create <描述> [--agent <id>] | list | inspect <id> | cancel <id> | pause <id> | resume <id>",
         "capability" => "capability list / inspect <id>",
-        "system" => "system status / resources / logs",
-        "app" => "app list / launch <名> / stop <id>",
+        "system" => "system status / resources / logs [--json]",
+        "app" => "app list / launch <名> / stop <id> [--json]",
+        "echo" => "echo <文本...>          —— 常用于管道与重定向",
+        "true" | "false" => "true / false         —— 返回成功/失败退出码",
+        "sleep" => "sleep <毫秒>          —— 等待（上限 2000ms）",
+        "grep" => "grep <关键字>         —— 过滤 stdin 中包含关键字的行",
+        "wc" => "wc                    —— 统计 stdin 的行/词/字节",
+        "head" | "tail" => "head|tail [行数]     —— 取 stdin 前/后 N 行",
+        "sort" | "uniq" => "sort|uniq            —— 排序/去重 stdin 行",
+        "jobs" => "jobs                  —— 查看 `&` 后台作业状态",
         _ => return None,
     })
 }
@@ -3508,6 +3570,14 @@ pub fn describe(cmd: &str) -> Option<&'static str> {
         "capability" => "系统能力：列出/查看已注册能力",
         "system" => "系统信息：状态/资源/日志",
         "app" => "应用管理：列表/启动/停止 GUI 应用",
+        "echo" => "打印文本（管道/重定向的常用数据源）",
+        "true" | "false" => "返回成功 / 失败退出码，用于测试 && 与 ||",
+        "sleep" => "等待指定毫秒（最长 2000ms）",
+        "grep" => "从管道输入中筛选包含关键字的行",
+        "wc" => "统计管道输入的行数、词数、字节数",
+        "head" | "tail" => "取管道输入的前 / 后 N 行",
+        "sort" | "uniq" => "对管道输入排序 / 相邻去重",
+        "jobs" => "查看 `&` 启动的后台作业及其输出",
         _ => return None,
     })
 }

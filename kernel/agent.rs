@@ -226,6 +226,7 @@ pub fn spawn(name: &str, role: &str, priority: CpuPriority) -> Result<AgentId, S
     if let Some(a) = o.agents.get_mut(&id) {
         a.exec_id = exec_id;
     }
+    register_identity(id, name, role);
     Ok(id)
 }
 
@@ -293,6 +294,7 @@ pub fn spawn_in_domain(
     if let Some(a) = o.agents.get_mut(&id) {
         a.exec_id = exec_id;
     }
+    register_identity(id, name, role);
     Ok(id)
 }
 
@@ -555,7 +557,129 @@ pub fn stop(name_or_id: &str) -> Result<String, String> {
     if let Some(a) = o.agents.get_mut(&id) {
         a.state = AgentState::Stopped;
     }
+    drop(o);
+    sync_identity(id, AgentState::Stopped);
     Ok(format!("{} 已停止 (exit={:?})", name, code))
+}
+
+/// Agent 的结构化快照：Shell / GUI / 能力层共用同一份数据源。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AgentSnapshot {
+    pub id: AgentId,
+    pub name: String,
+    pub role: String,
+    pub state: AgentState,
+    pub exec_id: ExecId,
+}
+
+/// 列出全部 Agent 的结构化信息（不依赖文本解析）。
+pub fn snapshot() -> Vec<AgentSnapshot> {
+    orch()
+        .lock()
+        .unwrap()
+        .agents
+        .values()
+        .map(|a| AgentSnapshot {
+            id: a.id,
+            name: a.name.clone(),
+            role: a.role.clone(),
+            state: a.state,
+            exec_id: a.exec_id,
+        })
+        .collect()
+}
+
+/// 把编排器里的状态映射到权限模型使用的生命周期状态。
+fn to_lifecycle(state: AgentState) -> crate::permission::AgentLifecycleState {
+    use crate::permission::AgentLifecycleState as L;
+    match state {
+        AgentState::Created => L::Created,
+        AgentState::Initializing => L::Initializing,
+        AgentState::Idle => L::Idle,
+        AgentState::Running => L::Running,
+        AgentState::Waiting => L::Waiting,
+        AgentState::Blocked => L::Blocked,
+        AgentState::Paused => L::Paused,
+        AgentState::Completed => L::Completed,
+        AgentState::Failed => L::Failed,
+        AgentState::Stopped => L::Stopped,
+    }
+}
+
+/// 在权限模型里登记由编排器创建的 Agent（共用同一 ID）。
+fn register_identity(id: AgentId, name: &str, role: &str) {
+    crate::permission::permission_manager()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .register_external_agent(
+            id,
+            name,
+            role,
+            // 最小权限：新子体默认只能读，不能控制其它 Agent。
+            vec![
+                "agent:read".to_string(),
+                "task:read".to_string(),
+                "fs:read".to_string(),
+            ],
+            crate::permission::AgentLifecycleState::Idle,
+        );
+}
+
+/// 同步生命周期状态；权限模型里没有该 ID 时忽略（由 create_agent 单独管理）。
+fn sync_identity(id: AgentId, state: AgentState) {
+    let pm = crate::permission::permission_manager()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let _ = pm.set_state(id, to_lifecycle(state));
+}
+
+/// 启动一个已存在但处于终止态的 Agent：重新拉起它的真线程。
+///
+/// 这是 Shell / GUI / 能力层共同的「start」语义实现：
+/// 已经活着的 Agent 是幂等的（直接返回成功），停止过的 Agent 会复位
+/// 停止标志、清空遗留邮箱、重新 `exec::spawn`，状态回到 Idle。
+pub fn start(name_or_id: &str) -> Result<String, String> {
+    let id = resolve(name_or_id)?;
+    let (name, state, priority) = {
+        let o = orch().lock().unwrap();
+        let a = o
+            .agents
+            .get(&id)
+            .ok_or_else(|| format!("子智能体 {} 不存在", name_or_id))?;
+        (a.name.clone(), a.state, a.priority)
+    };
+
+    if !state.is_terminal() && state != AgentState::Created {
+        return Ok(format!(
+            "{} (agent={}) 已在运行 (state={})",
+            name,
+            id,
+            state.name()
+        ));
+    }
+
+    let mb = mailbox_key(id);
+    {
+        let mut o = orch().lock().unwrap();
+        let a = o
+            .agents
+            .get_mut(&id)
+            .ok_or_else(|| format!("子智能体 {} 不存在", name_or_id))?;
+        a.stop = false;
+        a.mailbox.clear();
+        a.state = AgentState::Idle;
+    }
+    let exec_id = exec::spawn(&format!("agent:{}", name), priority, move || {
+        agent_loop(id, &mb);
+    });
+    {
+        let mut o = orch().lock().unwrap();
+        if let Some(a) = o.agents.get_mut(&id) {
+            a.exec_id = exec_id;
+        }
+    }
+    sync_identity(id, AgentState::Idle);
+    Ok(format!("{} (agent={}) 已启动 (state=idle)", name, id))
 }
 
 fn resolve(name_or_id: &str) -> Result<AgentId, String> {
@@ -593,12 +717,15 @@ pub fn dispatch(payload: &str) -> Result<String, String> {
         }
         "broadcast" => broadcast(rest),
         "wait" => wait_idle(rest, Some(Duration::from_secs(5))),
-        "stop" => stop(rest),
+        // `start` / `agent/start` 是同一个动作，避免能力层与 act 通道写法不同
+        // 导致一个入口成功、另一个入口「未知指令」。
+        "start" | "agent/start" => start(rest),
+        "stop" | "agent/stop" => stop(rest),
         "results" => Ok(results()),
         "barriers" => Ok(barrier_list()),
         "list" | "" => Ok(list()),
         _ => Err(format!(
-            "未知指令 {}。可用: spawn/task/broadcast/wait/stop/results/barriers/list",
+            "未知指令 {}。可用: spawn/start/task/broadcast/wait/stop/results/barriers/list",
             verb
         )),
     }

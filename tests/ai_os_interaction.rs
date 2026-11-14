@@ -24,6 +24,11 @@ fn safe_lock<T>(m: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
+/// 能力注册表已改为 RwLock，只读查询用共享读锁。
+fn safe_read<T>(r: &std::sync::RwLock<T>) -> std::sync::RwLockReadGuard<'_, T> {
+    r.read().unwrap_or_else(|e| e.into_inner())
+}
+
 // ---------------------------------------------------------------------------
 // 辅助：创建一个测试 Shell。
 // ---------------------------------------------------------------------------
@@ -79,7 +84,7 @@ fn fs_capability_op(op: &str, path: &str, content: Option<&str>) -> Result<serde
     };
 
     let reg = hibos::capability::capability_registry();
-    match safe_lock(reg).get("filesystem") {
+    match safe_read(reg).get("filesystem") {
         Some(cap) => cap.execute(req).map(|r| r.output),
         None => Err(CapabilityError {
             code: ErrorCode::NotFound,
@@ -168,7 +173,7 @@ fn e2e_scenario_2_shell_create_task_observe_status() {
         },
     };
     let reg = hibos::capability::capability_registry();
-    match safe_lock(reg).get("task") {
+    match safe_read(reg).get("task") {
         Some(cap) => {
             let resp = cap.execute(req).unwrap();
             assert!(resp.output.is_array() || resp.output.is_object());
@@ -218,7 +223,7 @@ fn e2e_scenario_3_agent_delete_file_permission() {
     let result = fs_capability_op("delete", test_path, None);
     assert!(result.is_ok());
 
-    let vfs = hibos::vfs::global_vfs().lock().unwrap_or_else(|e| e.into_inner());
+    let vfs = hibos::vfs::global_vfs().read().unwrap_or_else(|e| e.into_inner());
     assert!(vfs.cat(test_path).is_err(), "文件应已删除");
     drop(vfs);
 
@@ -340,7 +345,7 @@ fn consistency_test_file_delete() {
 
     assert!(shell.dispatch(&format!("rm {}", test_path)));
 
-    let vfs = hibos::vfs::global_vfs().lock().unwrap_or_else(|e| e.into_inner());
+    let vfs = hibos::vfs::global_vfs().read().unwrap_or_else(|e| e.into_inner());
     assert!(vfs.cat(test_path).is_err(), "Shell rm 后文件应不存在");
     drop(vfs);
 
@@ -348,7 +353,7 @@ fn consistency_test_file_delete() {
     let result = fs_capability_op("delete", test_path, None);
     assert!(result.is_ok(), "Agent API delete 应成功");
 
-    let vfs = hibos::vfs::global_vfs().lock().unwrap_or_else(|e| e.into_inner());
+    let vfs = hibos::vfs::global_vfs().read().unwrap_or_else(|e| e.into_inner());
     assert!(vfs.cat(test_path).is_err(), "Agent API delete 后文件应不存在");
     let _ = shell.dispatch(&format!("rm {}", test_path));
 }
@@ -366,7 +371,7 @@ fn consistency_test_file_read() {
     let _ = shell.dispatch(&format!("rm {}", test_path));
     assert!(shell.dispatch(&format!("write {} {}", test_path, test_content)));
 
-    let vfs = hibos::vfs::global_vfs().lock().unwrap_or_else(|e| e.into_inner());
+    let vfs = hibos::vfs::global_vfs().read().unwrap_or_else(|e| e.into_inner());
     let shell_content = vfs.cat(test_path).unwrap();
     drop(vfs);
 
@@ -718,7 +723,7 @@ fn agent_lifecycle_state_test() {
 #[test]
 fn capability_registry_test() {
     let reg = hibos::capability::capability_registry();
-    let ids = safe_lock(reg).list_ids();
+    let ids = safe_read(reg).list_ids();
     assert!(ids.contains(&"filesystem".to_string()));
     assert!(ids.contains(&"task".to_string()));
     assert!(ids.contains(&"agent".to_string()));
@@ -732,7 +737,7 @@ fn capability_registry_test() {
 #[test]
 fn capability_metadata_test() {
     let reg = hibos::capability::capability_registry();
-    let meta = safe_lock(reg).list_metadata();
+    let meta = safe_read(reg).list_metadata();
     assert!(!meta.is_empty());
 
     let fs_meta = meta.iter().find(|m| m.id == "filesystem");

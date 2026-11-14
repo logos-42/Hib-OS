@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, MouseButton as WinitMouseButton, MouseScrollDelta, WindowEvent};
-use winit::event_loop::{ActiveEventLoop, EventLoop};
+use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::keyboard::{Key as WinitKey, NamedKey};
 use winit::window::{Window as WinitWindow, WindowId};
 
@@ -31,8 +31,6 @@ struct App {
     cursor_px: (f64, f64),
     size_px: (u32, u32),
     last_error: Option<String>,
-    /// 上次刷新实时视图的时间（节流，避免事件循环空转）。
-    last_live: Option<std::time::Instant>,
 }
 
 impl App {
@@ -44,7 +42,6 @@ impl App {
             cursor_px: (0.0, 0.0),
             size_px: (super::DEFAULT_WIDTH, super::DEFAULT_HEIGHT),
             last_error: None,
-            last_live: None,
         }
     }
 
@@ -249,20 +246,19 @@ impl ApplicationHandler for App {
         }
     }
 
-    fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
-        // 让实时视图（执行体/智能体/租约）每 400ms 刷新一次，避免空转烧 CPU。
-        let now = std::time::Instant::now();
-        let due = self
-            .last_live
-            .map(|t| now.duration_since(t).as_millis() >= 400)
-            .unwrap_or(true);
-        if due {
-            self.last_live = Some(now);
+    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        // 事件驱动刷新：只有 EventBus 上出现新事件（由能力层 / Agent 发布）
+        // 时才重画实时视图，不再每 400ms 无条件全量刷新。
+        if super::refresh_live_if_dirty() {
             if let Some(w) = &self.window {
-                super::refresh_live();
                 w.request_redraw();
             }
         }
+        // 心跳仅用于把事件循环从 Wait 中唤醒，好让其它线程发布的事件能被
+        // GUI 线程看到；它本身不读取状态、不重画，开销可忽略。
+        event_loop.set_control_flow(ControlFlow::WaitUntil(
+            std::time::Instant::now() + std::time::Duration::from_millis(120),
+        ));
     }
 }
 
