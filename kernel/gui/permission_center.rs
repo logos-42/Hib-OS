@@ -12,7 +12,7 @@ use crate::capability::{CapabilityRequest, ExecutionContext, now_ns, AuditInfo, 
 
 /// 渲染 Permission Center 的文本表示。
 pub fn render_permission_center() -> String {
-    let pm = permission_manager().lock().unwrap();
+    let pm = permission_manager().lock().unwrap_or_else(|e| e.into_inner());
     let agents = pm.list_agents();
 
     let mut out = String::new();
@@ -54,7 +54,7 @@ pub fn render_permission_center() -> String {
 
 /// 渲染单个 Agent 的权限详情。
 pub fn render_agent_permissions(agent_id: u64) -> String {
-    let pm = permission_manager().lock().unwrap();
+    let pm = permission_manager().lock().unwrap_or_else(|e| e.into_inner());
     let agents = pm.list_agents();
     let agent = agents.iter().find(|a| a.agent_id == agent_id);
 
@@ -120,7 +120,7 @@ pub fn grant_permission(agent_id: u64, permission: &str, mode: &str, granted_by:
         _ => return Err("无效的授权模式 (once/session/persistent)".to_string()),
     };
 
-    let pm = permission_manager().lock().unwrap();
+    let pm = permission_manager().lock().unwrap_or_else(|e| e.into_inner());
     let result = pm.grant_permission(
         agent_id,
         permission,
@@ -138,7 +138,7 @@ pub fn grant_permission(agent_id: u64, permission: &str, mode: &str, granted_by:
 
 /// 撤销权限。
 pub fn revoke_permission(agent_id: u64, permission: &str, revoked_by: &str) -> Result<String, String> {
-    let pm = permission_manager().lock().unwrap();
+    let pm = permission_manager().lock().unwrap_or_else(|e| e.into_inner());
     let result = pm.revoke_permission(agent_id, permission, revoked_by);
     drop(pm);
 
@@ -150,7 +150,7 @@ pub fn revoke_permission(agent_id: u64, permission: &str, revoked_by: &str) -> R
 
 /// 查询审计日志。
 pub fn render_audit_log(limit: Option<usize>) -> String {
-    let pm = permission_manager().lock().unwrap();
+    let pm = permission_manager().lock().unwrap_or_else(|e| e.into_inner());
     let entries = pm.query_audit(limit);
     drop(pm);
 

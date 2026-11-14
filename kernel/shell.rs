@@ -318,7 +318,22 @@ impl Shell {
         if line.is_empty() {
             return true;
         }
-        let parts: Vec<&str> = line.split_whitespace().collect();
+        // 使用真正的 Shell Parser（支持引号、转义、管道、重定向）。
+        let pipelines = match parse_command_line(line) {
+            Ok(p) => p,
+            Err(e) => {
+                println!("解析错误: {}", e);
+                return true;
+            }
+        };
+        // 仅执行第一条 pipeline 的第一条命令（后续 pipeline/重定向由 P1 阶段扩展）。
+        let Some(cmd) = pipelines.first().and_then(|p| p.commands.first()) else {
+            return true;
+        };
+        let parts: Vec<&str> = cmd.argv.iter().map(|s| s.as_str()).collect();
+        if parts.is_empty() {
+            return true;
+        }
         match parts[0] {
             "help" | "?" => self.cmd_help(parts.get(1).copied()),
             "channels" => self.cmd_channels(),
@@ -2412,7 +2427,7 @@ impl Shell {
                     },
                 };
                 let reg = crate::capability::capability_registry();
-                match reg.lock().unwrap().get("agent") {
+                match reg.lock().unwrap_or_else(|e| e.into_inner()).get("agent") {
                     Some(cap) => match cap.execute(req) {
                         Ok(resp) => Self::print_json(&resp.output, json_mode),
                         Err(e) => println!("错误: {} (code={})", e.message, e.code),
@@ -2472,7 +2487,7 @@ impl Shell {
                     },
                 };
                 let reg = crate::capability::capability_registry();
-                match reg.lock().unwrap().get("task") {
+                match reg.lock().unwrap_or_else(|e| e.into_inner()).get("task") {
                     Some(cap) => match cap.execute(req) {
                         Ok(resp) => Self::print_json(&resp.output, json_mode),
                         Err(e) => println!("错误: {} (code={})", e.message, e.code),
@@ -2501,7 +2516,7 @@ impl Shell {
                     },
                 };
                 let reg = crate::capability::capability_registry();
-                match reg.lock().unwrap().get("task") {
+                match reg.lock().unwrap_or_else(|e| e.into_inner()).get("task") {
                     Some(cap) => match cap.execute(req) {
                         Ok(resp) => Self::print_json(&resp.output, json_mode),
                         Err(e) => println!("错误: {} (code={})", e.message, e.code),
@@ -2531,7 +2546,7 @@ impl Shell {
                     },
                 };
                 let reg = crate::capability::capability_registry();
-                match reg.lock().unwrap().get("task") {
+                match reg.lock().unwrap_or_else(|e| e.into_inner()).get("task") {
                     Some(cap) => match cap.execute(req) {
                         Ok(resp) => Self::print_json(&resp.output, json_mode),
                         Err(e) => println!("错误: {} (code={})", e.message, e.code),
@@ -2561,7 +2576,7 @@ impl Shell {
                     },
                 };
                 let reg = crate::capability::capability_registry();
-                match reg.lock().unwrap().get("task") {
+                match reg.lock().unwrap_or_else(|e| e.into_inner()).get("task") {
                     Some(cap) => match cap.execute(req) {
                         Ok(resp) => Self::print_json(&resp.output, json_mode),
                         Err(e) => println!("错误: {} (code={})", e.message, e.code),
@@ -2591,7 +2606,7 @@ impl Shell {
                     },
                 };
                 let reg = crate::capability::capability_registry();
-                match reg.lock().unwrap().get("task") {
+                match reg.lock().unwrap_or_else(|e| e.into_inner()).get("task") {
                     Some(cap) => match cap.execute(req) {
                         Ok(resp) => Self::print_json(&resp.output, json_mode),
                         Err(e) => println!("错误: {} (code={})", e.message, e.code),
@@ -2621,7 +2636,7 @@ impl Shell {
                     },
                 };
                 let reg = crate::capability::capability_registry();
-                match reg.lock().unwrap().get("task") {
+                match reg.lock().unwrap_or_else(|e| e.into_inner()).get("task") {
                     Some(cap) => match cap.execute(req) {
                         Ok(resp) => Self::print_json(&resp.output, json_mode),
                         Err(e) => println!("错误: {} (code={})", e.message, e.code),
@@ -2640,7 +2655,7 @@ impl Shell {
         let reg = crate::capability::capability_registry();
         match sub {
             "list" => {
-                let meta = reg.lock().unwrap().list_metadata();
+                let meta = reg.lock().unwrap_or_else(|e| e.into_inner()).list_metadata();
                 if _json_mode {
                     let arr: Vec<serde_json::Value> = meta.iter().map(|m| serde_json::json!({
                         "id": m.id,
@@ -2661,7 +2676,7 @@ impl Shell {
             }
             "inspect" => {
                 let id = argv.get(2).copied().unwrap_or("");
-                match reg.lock().unwrap().get(id) {
+                match reg.lock().unwrap_or_else(|e| e.into_inner()).get(id) {
                     Some(cap) => {
                         if _json_mode {
                             println!("{}", serde_json::to_string(&serde_json::json!({
@@ -2711,7 +2726,7 @@ impl Shell {
             },
         };
         let reg = crate::capability::capability_registry();
-        match reg.lock().unwrap().get("system") {
+        match reg.lock().unwrap_or_else(|e| e.into_inner()).get("system") {
             Some(cap) => match cap.execute(req) {
                 Ok(resp) => Self::print_json(&resp.output, json_mode),
                 Err(e) => println!("错误: {} (code={})", e.message, e.code),
@@ -2745,6 +2760,334 @@ impl Shell {
             }
             _ => println!("用法: app list / launch <名> / stop <id>"),
         }
+    }
+}
+
+// =====================================================================================
+// Shell Parser —— 真正的命令行解析（替代 split_whitespace）
+//
+// 支持：单/双引号、反斜杠转义、管道 |、重定向 > < >>、命令链 && || ;
+// 词法分析后产生 Pipeline -> Command -> Args / Redirection 结构。
+// =====================================================================================
+
+/// 重定向类型。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Redirection {
+    /// `>` 覆盖写入
+    Overwrite { fd: u8, path: String },
+    /// `>>` 追加写入
+    Append { fd: u8, path: String },
+    /// `<` 读取输入
+    Input { fd: u8, path: String },
+}
+
+/// 解析后的单条命令。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Command {
+    pub argv: Vec<String>,
+    pub stdin: Option<Redirection>,
+    pub stdout: Option<Redirection>,
+    pub stderr: Option<Redirection>,
+    pub background: bool,
+}
+
+/// 管道：多个命令通过 `|` 连接。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Pipeline {
+    pub commands: Vec<Command>,
+    pub separator: Separator,
+}
+
+/// 命令之间的连接符。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Separator {
+    /// 下一条不管前一条是否成功
+    Semicolon,
+    /// 前一条成功才执行下一条
+    And,
+    /// 前一条失败才执行下一条
+    Or,
+}
+
+/// Shell 词法分析器。
+pub struct Parser<'a> {
+    input: &'a str,
+    pos: usize,
+}
+
+impl<'a> Parser<'a> {
+    pub fn new(input: &'a str) -> Self {
+        Self { input, pos: 0 }
+    }
+
+    /// 解析整行，返回一条或多条 Pipeline。
+    pub fn parse_line(&mut self) -> Result<Vec<Pipeline>, String> {
+        let mut pipelines = Vec::new();
+        loop {
+            self.skip_whitespace();
+            if self.pos >= self.input.len() {
+                break;
+            }
+            let pipeline = self.parse_pipeline()?;
+            pipelines.push(pipeline);
+            self.skip_whitespace();
+            if self.pos >= self.input.len() {
+                break;
+            }
+            let sep = match self.input.as_bytes()[self.pos] {
+                b';' => {
+                    self.pos += 1;
+                    Separator::Semicolon
+                }
+                b'&' if self.peek() == Some('&') => {
+                    self.pos += 2;
+                    Separator::And
+                }
+                b'|' if self.peek() == Some('|') => {
+                    self.pos += 2;
+                    Separator::Or
+                }
+                _ => Separator::Semicolon,
+            };
+            // 将分隔符附加到上一条 pipeline（简化：只处理单条 pipeline 间的分隔）
+            let _ = sep;
+            if pipelines.len() == 1 {
+                pipelines[0].separator = sep;
+            }
+        }
+        Ok(pipelines)
+    }
+
+    fn parse_pipeline(&mut self) -> Result<Pipeline, String> {
+        let mut commands = Vec::new();
+        loop {
+            let cmd = self.parse_command()?;
+            commands.push(cmd);
+            self.skip_whitespace();
+            if self.pos < self.input.len() && self.input.as_bytes()[self.pos] == b'|' {
+                self.pos += 1;
+                continue;
+            }
+            break;
+        }
+        Ok(Pipeline { commands, separator: Separator::Semicolon })
+    }
+
+    fn parse_command(&mut self) -> Result<Command, String> {
+        let mut argv = Vec::new();
+        let mut stdin: Option<Redirection> = None;
+        let mut stdout: Option<Redirection> = None;
+        let mut stderr: Option<Redirection> = None;
+        let mut background = false;
+
+        loop {
+            self.skip_whitespace();
+            if self.pos >= self.input.len() {
+                break;
+            }
+            let ch = self.input.as_bytes()[self.pos];
+            match ch {
+                b'|' | b';' | b'&' => break,
+                b'>' => {
+                    self.pos += 1;
+                    let append = self.pos < self.input.len() && self.input.as_bytes()[self.pos] == b'>';
+                    if append {
+                        self.pos += 1;
+                    }
+                    self.skip_whitespace();
+                    let path = self.read_word()?;
+                    if append {
+                        stdout = Some(Redirection::Append { fd: 1, path });
+                    } else {
+                        stdout = Some(Redirection::Overwrite { fd: 1, path });
+                    }
+                }
+                b'<' => {
+                    self.pos += 1;
+                    self.skip_whitespace();
+                    let path = self.read_word()?;
+                    stdin = Some(Redirection::Input { fd: 0, path });
+                }
+                _ => {
+                    let word = self.read_word()?;
+                    // 检查是否紧跟重定向语法（如 `2>`）
+                    if word.ends_with('>') || word.ends_with('<') {
+                        // 简化：视为普通参数
+                        argv.push(word);
+                    } else {
+                        argv.push(word);
+                    }
+                }
+            }
+        }
+
+        // 检查后台符号 `&`
+        self.skip_whitespace();
+        if self.pos < self.input.len() && self.input.as_bytes()[self.pos] == b'&' {
+            background = true;
+            self.pos += 1;
+        }
+
+        if argv.is_empty() && stdin.is_none() && stdout.is_none() && stderr.is_none() {
+            return Err("空命令".to_string());
+        }
+
+        Ok(Command { argv, stdin, stdout, stderr, background })
+    }
+
+    fn skip_whitespace(&mut self) {
+        while self.pos < self.input.len() {
+            match self.input.as_bytes()[self.pos] {
+                b' ' | b'\t' | b'\r' | b'\n' => self.pos += 1,
+                _ => break,
+            }
+        }
+    }
+
+    fn peek(&self) -> Option<char> {
+        self.input[self.pos..].chars().next()
+    }
+
+    /// 读取一个词（支持单引号、双引号、反斜杠转义）。
+    fn read_word(&mut self) -> Result<String, String> {
+        let mut out = String::new();
+        let mut in_single = false;
+        let mut in_double = false;
+
+        while self.pos < self.input.len() {
+            let ch = self.input.as_bytes()[self.pos] as char;
+
+            match ch {
+                '\\' if in_double || !in_single => {
+                    self.pos += 1;
+                    if self.pos < self.input.len() {
+                        let next = self.input.as_bytes()[self.pos] as char;
+                        out.push(next);
+                        self.pos += 1;
+                    } else {
+                        return Err("未闭合的转义".to_string());
+                    }
+                }
+                '\'' if !in_double => {
+                    self.pos += 1;
+                    if in_single {
+                        in_single = false;
+                    } else {
+                        in_single = true;
+                    }
+                }
+                '"' if !in_single => {
+                    self.pos += 1;
+                    if in_double {
+                        in_double = false;
+                    } else {
+                        in_double = true;
+                    }
+                }
+                ' ' | '\t' | '\r' | '\n' | '|' | ';' | '&' | '>' | '<'
+                    if !in_single && !in_double =>
+                {
+                    break;
+                }
+                _ => {
+                    out.push(ch);
+                    self.pos += 1;
+                }
+            }
+        }
+
+        if in_single || in_double {
+            return Err("未闭合的引号".to_string());
+        }
+
+        Ok(out)
+    }
+}
+
+/// 将原始命令行拆分为 Pipeline（不执行，仅解析）。
+pub fn parse_command_line(line: &str) -> Result<Vec<Pipeline>, String> {
+    let mut parser = Parser::new(line);
+    parser.parse_line()
+}
+
+#[cfg(test)]
+mod parser_tests {
+    use super::*;
+
+    #[test]
+    fn simple_command() {
+        let pipes = parse_command_line("ls /etc").unwrap();
+        assert_eq!(pipes.len(), 1);
+        assert_eq!(pipes[0].commands.len(), 1);
+        assert_eq!(pipes[0].commands[0].argv, vec!["ls".to_string(), "/etc".to_string()]);
+    }
+
+    #[test]
+    fn quoted_argument() {
+        let pipes = parse_command_line("cat 'hello world.txt'").unwrap();
+        assert_eq!(pipes[0].commands[0].argv, vec!["cat".to_string(), "hello world.txt".to_string()]);
+    }
+
+    #[test]
+    fn escaped_character() {
+        let pipes = parse_command_line("cat hello\\ world.txt").unwrap();
+        assert_eq!(pipes[0].commands[0].argv, vec!["cat".to_string(), "hello world.txt".to_string()]);
+    }
+
+    #[test]
+    fn pipe() {
+        let pipes = parse_command_line("cat /etc/passwd | grep root").unwrap();
+        assert_eq!(pipes[0].commands.len(), 2);
+        assert_eq!(pipes[0].commands[0].argv, vec!["cat".to_string(), "/etc/passwd".to_string()]);
+        assert_eq!(pipes[0].commands[1].argv, vec!["grep".to_string(), "root".to_string()]);
+    }
+
+    #[test]
+    fn redirect_overwrite() {
+        let pipes = parse_command_line("echo hi > /tmp/out.txt").unwrap();
+        assert!(matches!(pipes[0].commands[0].stdout, Some(Redirection::Overwrite { ref path, .. }) if path == "/tmp/out.txt"));
+    }
+
+    #[test]
+    fn redirect_append() {
+        let pipes = parse_command_line("echo hi >> /tmp/out.txt").unwrap();
+        assert!(matches!(pipes[0].commands[0].stdout, Some(Redirection::Append { ref path, .. }) if path == "/tmp/out.txt"));
+    }
+
+    #[test]
+    fn redirect_input() {
+        let pipes = parse_command_line("cat < /tmp/in.txt").unwrap();
+        assert!(matches!(pipes[0].commands[0].stdin, Some(Redirection::Input { ref path, .. }) if path == "/tmp/in.txt"));
+    }
+
+    #[test]
+    fn command_chain_and() {
+        let pipes = parse_command_line("true && false").unwrap();
+        assert_eq!(pipes.len(), 2);
+        assert_eq!(pipes[0].separator, Separator::And);
+    }
+
+    #[test]
+    fn command_chain_semicolon() {
+        let pipes = parse_command_line("a; b").unwrap();
+        assert_eq!(pipes.len(), 2);
+    }
+
+    #[test]
+    fn background_job() {
+        let pipes = parse_command_line("sleep 10 &").unwrap();
+        assert!(pipes[0].commands[0].background);
+    }
+
+    #[test]
+    fn unclosed_quote_errors() {
+        assert!(parse_command_line("cat 'hello").is_err());
+    }
+
+    #[test]
+    fn double_quoted_with_escape() {
+        let pipes = parse_command_line("echo \"hello \\\"world\\\"\"").unwrap();
+        assert_eq!(pipes[0].commands[0].argv, vec!["echo".to_string(), "hello \"world\"".to_string()]);
     }
 }
 

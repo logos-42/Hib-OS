@@ -4,10 +4,11 @@
 //! Shell、GUI、Agent 都通过 `CapabilityRegistry` 调用这些能力，保证三种入口行为一致。
 
 use super::{
-    CapabilityError, CapabilityEvent, CapabilityMetadata, CapabilityRequest, CapabilityResponse,
-    ErrorCode, EventType, ExecutionContext, ResourceQuota, SystemCapability,
+    AuditInfo, AuditResult, CapabilityError, CapabilityEvent, CapabilityMetadata,
+    CapabilityRequest, CapabilityResponse, ErrorCode, EventType, ExecutionContext, now_ns,
+    Permission, ResourceQuota, SystemCapability, capability_registry,
 };
-use crate::capability::capability_registry;
+use crate::event::{publish_from_capability, SystemEventType};
 use crate::monitor;
 use crate::process::{process_manager, spawn_process, ProcessId, ProcessManager, ProcessState};
 use crate::vfs::{global_vfs, NodeKind, VfsError};
@@ -221,6 +222,60 @@ fn ok_response(req: &CapabilityRequest, output: Value) -> CapabilityResponse {
     }
 }
 
+/// 在执行能力前强制检查所有所需权限。
+fn enforce_permissions(ctx: &ExecutionContext, required: &[Permission]) -> Result<(), CapabilityError> {
+    use crate::permission::PermissionChecker;
+    for perm in required {
+        PermissionChecker::check(ctx, perm)?;
+    }
+    Ok(())
+}
+
+/// 检查取消令牌；若已取消则返回 `CapabilityError::Cancelled`。
+fn check_cancellation(token: &Option<crate::capability::CancellationToken>) -> Result<(), CapabilityError> {
+    if let Some(t) = token {
+        if t.is_cancelled() {
+            return Err(CapabilityError {
+                code: ErrorCode::Cancelled,
+                message: "操作已被取消".to_string(),
+                source: Some("capability".to_string()),
+                retryable: false,
+                audit: AuditInfo {
+                    actor: "system".to_string(),
+                    action: "cancel".to_string(),
+                    timestamp: now_ns(),
+                    result: AuditResult::Cancelled,
+                    correlation_id: None,
+                },
+            });
+        }
+    }
+    Ok(())
+}
+
+/// 检查超时；若已超时则返回 `CapabilityError::Timeout`。
+fn check_timeout(start_ns: u64, timeout_ns: Option<u64>) -> Result<(), CapabilityError> {
+    if let Some(t) = timeout_ns {
+        let elapsed = now_ns().saturating_sub(start_ns);
+        if elapsed > t {
+            return Err(CapabilityError {
+                code: ErrorCode::Timeout,
+                message: format!("操作超时 ({}ns > {}ns)", elapsed, t),
+                source: Some("capability".to_string()),
+                retryable: true,
+                audit: AuditInfo {
+                    actor: "system".to_string(),
+                    action: "timeout".to_string(),
+                    timestamp: now_ns(),
+                    result: AuditResult::Failed,
+                    correlation_id: None,
+                },
+            });
+        }
+    }
+    Ok(())
+}
+
 // ============================================================================
 // Filesystem Capability
 // ============================================================================
@@ -267,6 +322,10 @@ impl SystemCapability for FilesystemCapability {
     }
 
     fn execute(&self, req: CapabilityRequest) -> Result<CapabilityResponse, CapabilityError> {
+        enforce_permissions(&req.context, &self.required_permissions())?;
+        check_cancellation(&req.cancellation_token)?;
+        let start_ns = now_ns();
+        check_timeout(start_ns, req.timeout_ns)?;
         let op = req.input.get("op").and_then(|v| v.as_str()).unwrap_or("");
         let path = req.input.get("path").and_then(|v| v.as_str()).unwrap_or("");
 
@@ -325,6 +384,11 @@ impl SystemCapability for FilesystemCapability {
                     retryable: false,
                     audit: req.audit.clone(),
                 })?;
+                publish_from_capability(
+                    &req.context,
+                    SystemEventType::FileChanged,
+                    json!({"path": path, "op": "write", "bytes": content.len()}),
+                );
                 json!({"path": path, "bytes_written": content.len()})
             }
             "mkdir" => {
@@ -335,6 +399,11 @@ impl SystemCapability for FilesystemCapability {
                     retryable: false,
                     audit: req.audit.clone(),
                 })?;
+                publish_from_capability(
+                    &req.context,
+                    SystemEventType::FileCreated,
+                    json!({"path": path, "op": "mkdir"}),
+                );
                 json!({"path": path, "created": true})
             }
             "touch" => {
@@ -345,6 +414,11 @@ impl SystemCapability for FilesystemCapability {
                     retryable: false,
                     audit: req.audit.clone(),
                 })?;
+                publish_from_capability(
+                    &req.context,
+                    SystemEventType::FileCreated,
+                    json!({"path": path, "op": "touch"}),
+                );
                 json!({"path": path, "created": true})
             }
             "rm" => {
@@ -355,6 +429,11 @@ impl SystemCapability for FilesystemCapability {
                     retryable: false,
                     audit: req.audit.clone(),
                 })?;
+                publish_from_capability(
+                    &req.context,
+                    SystemEventType::FileDeleted,
+                    json!({"path": path, "op": "rm"}),
+                );
                 json!({"path": path, "deleted": true})
             }
             "stat" => {
@@ -459,6 +538,10 @@ impl SystemCapability for ProcessCapability {
     }
 
     fn execute(&self, req: CapabilityRequest) -> Result<CapabilityResponse, CapabilityError> {
+        enforce_permissions(&req.context, &self.required_permissions())?;
+        check_cancellation(&req.cancellation_token)?;
+        let start_ns = now_ns();
+        check_timeout(start_ns, req.timeout_ns)?;
         let op = req.input.get("op").and_then(|v| v.as_str()).unwrap_or("");
 
         let result = match op {
@@ -534,6 +617,11 @@ impl SystemCapability for ProcessCapability {
                 let priority = req.input.get("priority").and_then(|v| v.as_u64()).unwrap_or(10) as u8;
                 let domain = req.input.get("domain").and_then(|v| v.as_str()).unwrap_or("governance");
                 let pid = spawn_process(name, priority, domain);
+                publish_from_capability(
+                    &req.context,
+                    SystemEventType::ProcessStarted,
+                    json!({"pid": pid.0, "name": name, "domain": domain}),
+                );
                 json!({"pid": pid.0, "created": true})
             }
             "stop" => {
@@ -559,6 +647,11 @@ impl SystemCapability for ProcessCapability {
                         audit: req.audit.clone(),
                     });
                 }
+                publish_from_capability(
+                    &req.context,
+                    SystemEventType::ProcessExited,
+                    json!({"pid": pid_val}),
+                );
                 json!({"pid": pid_val, "stopped": true})
             }
             _ => {
@@ -628,6 +721,10 @@ impl SystemCapability for WindowCapability {
     }
 
     fn execute(&self, req: CapabilityRequest) -> Result<CapabilityResponse, CapabilityError> {
+        enforce_permissions(&req.context, &self.required_permissions())?;
+        check_cancellation(&req.cancellation_token)?;
+        let start_ns = now_ns();
+        check_timeout(start_ns, req.timeout_ns)?;
         let op = req.input.get("op").and_then(|v| v.as_str()).unwrap_or("");
         let mut desktop = crate::gui::desktop().lock().unwrap();
 
@@ -847,6 +944,10 @@ impl SystemCapability for AgentCapability {
     }
 
     fn execute(&self, req: CapabilityRequest) -> Result<CapabilityResponse, CapabilityError> {
+        enforce_permissions(&req.context, &self.required_permissions())?;
+        check_cancellation(&req.cancellation_token)?;
+        let start_ns = now_ns();
+        check_timeout(start_ns, req.timeout_ns)?;
         let op = req.input.get("op").and_then(|v| v.as_str()).unwrap_or("");
 
         match op {
@@ -889,7 +990,14 @@ impl SystemCapability for AgentCapability {
                 let id = req.input.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
                 let result = crate::agent::dispatch(&format!("agent/start {id}"));
                 match result {
-                    Ok(msg) => Ok(ok_response(&req, json!({"op": "start", "id": id, "result": msg}))),
+                    Ok(msg) => {
+                        publish_from_capability(
+                            &req.context,
+                            SystemEventType::AgentStarted,
+                            json!({"id": id, "result": msg}),
+                        );
+                        Ok(ok_response(&req, json!({"op": "start", "id": id, "result": msg})))
+                    }
                     Err(e) => Err(CapabilityError {
                         code: ErrorCode::InternalError,
                         message: e,
@@ -903,7 +1011,14 @@ impl SystemCapability for AgentCapability {
                 let id = req.input.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
                 let result = crate::agent::stop(&id.to_string());
                 match result {
-                    Ok(msg) => Ok(ok_response(&req, json!({"op": "stop", "id": id, "result": msg}))),
+                    Ok(msg) => {
+                        publish_from_capability(
+                            &req.context,
+                            SystemEventType::AgentStopped,
+                            json!({"id": id, "result": msg}),
+                        );
+                        Ok(ok_response(&req, json!({"op": "stop", "id": id, "result": msg})))
+                    }
                     Err(e) => Err(CapabilityError {
                         code: ErrorCode::InternalError,
                         message: e,
@@ -975,6 +1090,10 @@ impl SystemCapability for TaskCapability {
     }
 
     fn execute(&self, req: CapabilityRequest) -> Result<CapabilityResponse, CapabilityError> {
+        enforce_permissions(&req.context, &self.required_permissions())?;
+        check_cancellation(&req.cancellation_token)?;
+        let start_ns = now_ns();
+        check_timeout(start_ns, req.timeout_ns)?;
         let op = req.input.get("op").and_then(|v| v.as_str()).unwrap_or("");
         let mut tm = task_mgr().lock().unwrap();
 
@@ -987,7 +1106,12 @@ impl SystemCapability for TaskCapability {
                     .unwrap_or("")
                     .to_string();
                 let agent_id = req.input.get("agent_id").and_then(|v| v.as_str()).map(|s| s.to_string());
-                let id = tm.create(description, agent_id);
+                let id = tm.create(description.clone(), agent_id.clone());
+                publish_from_capability(
+                    &req.context,
+                    SystemEventType::TaskCreated,
+                    json!({"id": id, "description": description, "agent_id": agent_id}),
+                );
                 json!({"id": id, "created": true})
             }
             "inspect" => {
@@ -1056,6 +1180,11 @@ impl SystemCapability for TaskCapability {
                         audit: req.audit.clone(),
                     });
                 }
+                publish_from_capability(
+                    &req.context,
+                    SystemEventType::TaskCancelled,
+                    json!({"id": id}),
+                );
                 json!({"id": id, "cancelled": true})
             }
             "pause" => {
@@ -1080,6 +1209,11 @@ impl SystemCapability for TaskCapability {
                         audit: req.audit.clone(),
                     });
                 }
+                publish_from_capability(
+                    &req.context,
+                    SystemEventType::TaskPaused,
+                    json!({"id": id}),
+                );
                 json!({"id": id, "paused": true})
             }
             "resume" => {
@@ -1104,6 +1238,11 @@ impl SystemCapability for TaskCapability {
                         audit: req.audit.clone(),
                     });
                 }
+                publish_from_capability(
+                    &req.context,
+                    SystemEventType::TaskResumed,
+                    json!({"id": id}),
+                );
                 json!({"id": id, "resumed": true})
             }
             "list" => {
@@ -1228,6 +1367,10 @@ impl SystemCapability for SystemCapabilityImpl {
     }
 
     fn execute(&self, req: CapabilityRequest) -> Result<CapabilityResponse, CapabilityError> {
+        enforce_permissions(&req.context, &self.required_permissions())?;
+        check_cancellation(&req.cancellation_token)?;
+        let start_ns = now_ns();
+        check_timeout(start_ns, req.timeout_ns)?;
         let op = req.input.get("op").and_then(|v| v.as_str()).unwrap_or("");
 
         let result = match op {
@@ -1335,6 +1478,10 @@ impl SystemCapability for SettingsCapability {
     }
 
     fn execute(&self, req: CapabilityRequest) -> Result<CapabilityResponse, CapabilityError> {
+        enforce_permissions(&req.context, &self.required_permissions())?;
+        check_cancellation(&req.cancellation_token)?;
+        let start_ns = now_ns();
+        check_timeout(start_ns, req.timeout_ns)?;
         let op = req.input.get("op").and_then(|v| v.as_str()).unwrap_or("");
         let key = req.input.get("key").and_then(|v| v.as_str()).unwrap_or("");
 

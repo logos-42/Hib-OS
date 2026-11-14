@@ -14,7 +14,7 @@ use serde_json::json;
 
 /// 渲染 Agent Workspace 的文本表示（供终端和 GUI 共用）。
 pub fn render_agent_workspace() -> String {
-    let pm = permission_manager().lock().unwrap();
+    let pm = permission_manager().lock().unwrap_or_else(|e| e.into_inner());
     let agents = pm.list_agents();
 
     let mut out = String::new();
@@ -68,7 +68,7 @@ pub fn render_agent_workspace() -> String {
 
 /// 渲染单个 Agent 的详细信息。
 pub fn render_agent_detail(agent_id: u64) -> String {
-    let pm = permission_manager().lock().unwrap();
+    let pm = permission_manager().lock().unwrap_or_else(|e| e.into_inner());
     let agents = pm.list_agents();
     let agent = agents.iter().find(|a| a.agent_id == agent_id);
 
@@ -115,7 +115,7 @@ pub fn start_agent(agent_id: u64) -> Result<String, String> {
         },
     };
     let reg = crate::capability::capability_registry();
-    match reg.lock().unwrap().get("agent") {
+    match reg.lock().unwrap_or_else(|e| e.into_inner()).get("agent") {
         Some(cap) => match cap.execute(req) {
             Ok(_resp) => Ok(format!("Agent #{} 已启动", agent_id)),
             Err(e) => Err(format!("启动失败: {} (code={})", e.message, e.code)),
@@ -146,7 +146,7 @@ pub fn stop_agent(agent_id: u64) -> Result<String, String> {
         },
     };
     let reg = crate::capability::capability_registry();
-    match reg.lock().unwrap().get("agent") {
+    match reg.lock().unwrap_or_else(|e| e.into_inner()).get("agent") {
         Some(cap) => match cap.execute(req) {
             Ok(_resp) => Ok(format!("Agent #{} 已停止", agent_id)),
             Err(e) => Err(format!("停止失败: {} (code={})", e.message, e.code)),
@@ -157,7 +157,7 @@ pub fn stop_agent(agent_id: u64) -> Result<String, String> {
 
 /// 检查 Agent 是否存在。
 pub fn agent_exists(agent_id: u64) -> bool {
-    let pm = permission_manager().lock().unwrap();
+    let pm = permission_manager().lock().unwrap_or_else(|e| e.into_inner());
     pm.get_state(agent_id).is_some()
 }
 

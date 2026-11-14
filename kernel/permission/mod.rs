@@ -234,7 +234,7 @@ impl PermissionManager {
 
     /// 检查 Agent 是否持有指定权限。
     pub fn check_permission(&self, agent_id: AgentId, permission: &str) -> bool {
-        let agents = self.agents.lock().unwrap();
+        let agents = self.agents.lock().unwrap_or_else(|e| e.into_inner());
         let agent = match agents.get(&agent_id) {
             Some(a) => a,
             None => return false,
@@ -243,13 +243,48 @@ impl PermissionManager {
         if agent.capabilities.contains(permission) {
             return true;
         }
-        // 前缀通配符匹配：fs:read:* 匹配 fs:read:/foo
-        if agent.capabilities.iter().any(|p| {
-            p.ends_with(":*") && permission.starts_with(&p[..p.len() - 1])
-        }) {
-            return true;
+        // 通配符匹配：fs:read:/once/* 匹配 fs:read:/once/foo
+        // fs:read:* 匹配 fs:read:/foo
+        for cap in &agent.capabilities {
+            if Self::glob_match(cap, permission) {
+                return true;
+            }
         }
         false
+    }
+
+    /// 简单的 glob 模式匹配：'*' 匹配任意字符序列。
+    pub(crate) fn glob_match(pattern: &str, text: &str) -> bool {
+        let mut pi = 0;
+        let mut ti = 0;
+        let mut star_idx: Option<usize> = None;
+        let mut match_idx = 0;
+
+        let pattern_chars: Vec<char> = pattern.chars().collect();
+        let text_chars: Vec<char> = text.chars().collect();
+
+        while ti < text_chars.len() {
+            if pi < pattern_chars.len() && (pattern_chars[pi] == text_chars[ti] || pattern_chars[pi] == '?') {
+                pi += 1;
+                ti += 1;
+            } else if pi < pattern_chars.len() && pattern_chars[pi] == '*' {
+                star_idx = Some(pi);
+                match_idx = ti;
+                pi += 1;
+            } else if let Some(si) = star_idx {
+                pi = si + 1;
+                match_idx += 1;
+                ti = match_idx;
+            } else {
+                return false;
+            }
+        }
+
+        while pi < pattern_chars.len() && pattern_chars[pi] == '*' {
+            pi += 1;
+        }
+
+        pi == pattern_chars.len()
     }
 
     /// 设置 Agent 状态。
@@ -406,7 +441,7 @@ impl PermissionChecker {
                         });
                     }
                 };
-                let pm = permission_manager().lock().unwrap();
+                let pm = permission_manager().lock().unwrap_or_else(|e| e.into_inner());
                 if pm.check_permission(agent_id, needed) {
                     pm.record_audit(
                         &ctx.caller_id,
@@ -442,10 +477,8 @@ impl PermissionChecker {
             super::capability::CallerType::Shell
             | super::capability::CallerType::Gui
             | super::capability::CallerType::System => {
-                if ctx.permissions.iter().any(|p| p == needed || p == "*:*:*") {
-                    Ok(())
-                } else if ctx.permissions.iter().any(|p| {
-                    p.ends_with(":*") && needed.starts_with(&p[..p.len() - 1])
+                if ctx.permissions.iter().any(|p| {
+                    p == needed || p == "*:*:*" || PermissionManager::glob_match(p, needed)
                 }) {
                     Ok(())
                 } else {
