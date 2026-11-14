@@ -422,13 +422,20 @@ impl Shell {
         }
         let usage = usage_line(cmd)?;
         let desc = describe(cmd).unwrap_or("");
-        Some(format!("{}   —   {}", usage, desc))
+        let params = complete_parameters(cmd);
+        if !params.is_empty() && params.len() <= 12 {
+            Some(format!("{}   —   {}   [{}]", usage, desc, params.join(" ")))
+        } else {
+            Some(format!("{}   —   {}", usage, desc))
+        }
     }
 
-    /// Tab 补全：首个 token 补命令名，其余补路径。
+    /// Tab 补全：首个 token 补命令名 + 路径；进入参数位后补子命令、选项、
+    /// 通道名和路径（UX-003）。
     pub fn complete(&self, input: &str) -> Vec<String> {
         let text = input.trim_start();
         if !text.contains(char::is_whitespace) {
+            // 还没输入空格：补命令名，也允许直接补一个路径。
             let mut out: Vec<String> = COMMANDS
                 .iter()
                 .filter(|c| c.starts_with(text))
@@ -441,15 +448,38 @@ impl Shell {
                     }
                 }
             }
-            out
-        } else {
-            let token = line_editor::last_token(input);
-            if token.is_empty() {
-                Vec::new()
-            } else {
-                self.vfs.complete_path(&token)
+            return out;
+        }
+
+        let token = line_editor::last_token(input);
+        let prefix = token.as_str();
+        let words: Vec<&str> = text.split_whitespace().collect();
+        let cmd = words.first().copied().unwrap_or("");
+        let mut out: Vec<String> = Vec::new();
+
+        // 1) 子命令 / 选项 / 枚举值
+        for candidate in complete_parameters(cmd) {
+            if candidate.starts_with(prefix) {
+                out.push((*candidate).to_string());
             }
         }
+        // 2) sense / act 的通道名
+        if matches!(cmd, "sense" | "act") {
+            for ch in self.channels.list() {
+                if ch.name.starts_with(prefix) && !out.contains(&ch.name) {
+                    out.push(ch.name.clone());
+                }
+            }
+        }
+        // 3) 看起来是路径时才补路径，避免淹没子命令候选
+        if prefix.starts_with('/') || prefix.starts_with('.') || prefix.contains('/') {
+            for p in self.vfs.complete_path(prefix) {
+                if !out.contains(&p) {
+                    out.push(p);
+                }
+            }
+        }
+        out
     }
 
     /// 处理一条命令行；返回 false 表示退出 shell。
@@ -3582,6 +3612,37 @@ pub fn describe(cmd: &str) -> Option<&'static str> {
     })
 }
 
+/// 命令的参数候选表（Tab 参数补全与提示行共用）。
+///
+/// 这是一张静态表，改命令时只需要同步这里、`usage_line` 和 `describe`。
+/// 返回 `COMMANDS` 时表示「所有命令名都是候选」（例如 `help <Tab>`）。
+pub fn complete_parameters(cmd: &str) -> &'static [&'static str] {
+    match cmd {
+        "agent" => &["list", "inspect", "start", "stop", "--json"],
+        "task" => &[
+            "create", "list", "inspect", "cancel", "pause", "resume", "--agent", "--json",
+        ],
+        "capability" => &["list", "inspect", "--json"],
+        "system" => &["status", "resources", "logs", "--json"],
+        "app" => &["list", "launch", "stop", "--json"],
+        "llm" | "deepseek" => &[
+            "status", "providers", "key", "chat", "loop", "list", "set", "del", "show",
+        ],
+        "gui" => &[
+            "desktop", "shot", "run", "wallpaper", "open", "close", "focus", "move",
+            "click", "key", "text",
+        ],
+        "wallpaper" => &[
+            "list", "set", "current", "load", "fit", "save", "preview", "default",
+            "hibos", "deepseek", "ai", "consciousness",
+        ],
+        "prio" => &["low", "medium", "high", "critical"],
+        "desktop" => &["--pixels"],
+        "help" | "?" => COMMANDS,
+        _ => &["--json"],
+    }
+}
+
 /// 返回当前时间的 HH:MM:SS 字符串（零依赖，基于 SystemTime）。
 fn chrono_now_hms() -> String {
     match SystemTime::now().duration_since(UNIX_EPOCH) {
@@ -3940,5 +4001,105 @@ mod tests {
     fn unknown_command_is_harmless() {
         let mut s = Shell::new();
         assert!(s.dispatch("frobnicate"));
+    }
+
+    /// 在外层再套一层捕获，就能像程序一样读到 shell 的最终输出。
+    fn dispatch_capture(s: &mut Shell, line: &str) -> (bool, String) {
+        with_output_capture(|| s.dispatch(line))
+    }
+
+    #[test]
+    fn pipeline_passes_real_output() {
+        let mut s = Shell::new();
+        let (_, out) = dispatch_capture(&mut s, "echo hello world | grep hello");
+        assert!(out.contains("hello world"), "管道应传递真实输出: {:?}", out);
+
+        let (_, missed) = dispatch_capture(&mut s, "echo hello | grep zzz");
+        assert!(!missed.contains("hello"), "grep 未命中不应放行");
+
+        let (_, counted) = dispatch_capture(&mut s, "echo a b c | wc");
+        assert!(counted.contains("1 3"), "wc 应统计上游输出: {:?}", counted);
+    }
+
+    #[test]
+    fn redirection_writes_and_appends() {
+        let mut s = Shell::new();
+        let _ = dispatch_capture(&mut s, "echo first > /tmp/ux001.txt");
+        assert_eq!(s.vfs.cat("/tmp/ux001.txt").unwrap().trim(), "first");
+        let _ = dispatch_capture(&mut s, "echo second >> /tmp/ux001.txt");
+        let content = s.vfs.cat("/tmp/ux001.txt").unwrap();
+        assert!(content.contains("first") && content.contains("second"));
+        let _ = s.vfs.rm("/tmp/ux001.txt");
+    }
+
+    #[test]
+    fn stdin_redirection_and_pipe_cat() {
+        let mut s = Shell::new();
+        let _ = dispatch_capture(&mut s, "echo 来自文件 > /tmp/ux001in.txt");
+        let (_, from_file) = dispatch_capture(&mut s, "cat < /tmp/ux001in.txt");
+        assert!(from_file.contains("来自文件"), "< 应能读中文内容: {:?}", from_file);
+        let (_, from_pipe) = dispatch_capture(&mut s, "echo 管道内容 | cat");
+        assert!(from_pipe.contains("管道内容"));
+        let _ = s.vfs.rm("/tmp/ux001in.txt");
+    }
+
+    #[test]
+    fn command_chains_respect_exit_status() {
+        let mut s = Shell::new();
+        let (_, and_ok) = dispatch_capture(&mut s, "true && echo yes || echo no");
+        assert!(and_ok.contains("yes") && !and_ok.contains("no"));
+
+        let (_, or_ok) = dispatch_capture(&mut s, "false || echo fallback");
+        assert!(or_ok.contains("fallback"));
+
+        let (_, semicolon) = dispatch_capture(&mut s, "false && echo skipped; echo done");
+        assert!(!semicolon.contains("skipped") && semicolon.contains("done"));
+    }
+
+    #[test]
+    fn background_job_is_recorded() {
+        let mut s = Shell::new();
+        let _ = dispatch_capture(&mut s, "sleep 5 &");
+        let mut done = false;
+        for _ in 0..80 {
+            if background_jobs()
+                .iter()
+                .any(|j| j.command.starts_with("sleep 5") && !j.running)
+            {
+                done = true;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(25));
+        }
+        assert!(done, "& 启动的后台作业应完成并登记到作业表");
+        let (_, listed) = dispatch_capture(&mut s, "jobs");
+        assert!(listed.contains("sleep 5"));
+    }
+
+    #[test]
+    fn json_envelope_for_any_command() {
+        let mut s = Shell::new();
+        let (_, out) = dispatch_capture(&mut s, "echo hi --json");
+        let v: serde_json::Value = serde_json::from_str(out.trim()).unwrap();
+        assert_eq!(v["command"], "echo");
+        assert_eq!(v["ok"], true);
+        assert!(v["output"].as_str().unwrap().contains("hi"));
+
+        let (_, structured) = dispatch_capture(&mut s, "capability list --json");
+        let parsed: serde_json::Value = serde_json::from_str(structured.trim()).unwrap();
+        assert!(parsed.is_array() || parsed.is_object());
+    }
+
+    #[test]
+    fn parameter_completion() {
+        let s = Shell::new();
+        assert!(s.complete("agent st").contains(&"start".to_string()));
+        assert!(s.complete("agent ").contains(&"list".to_string()));
+        assert!(s.complete("task cr").contains(&"create".to_string()));
+        assert!(s.complete("system --j").contains(&"--json".to_string()));
+        assert!(s.complete("help ").contains(&"pwd".to_string()));
+        assert!(s.complete("sense gpu").iter().any(|c| c.starts_with("gpu")));
+        assert!(s.complete("cd /et").contains(&"/etc/".to_string()));
+        assert!(s.completion("agent ").hint.unwrap().contains("list"));
     }
 }

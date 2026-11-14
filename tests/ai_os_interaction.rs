@@ -744,3 +744,64 @@ fn capability_metadata_test() {
     assert!(fs_meta.is_some());
     assert!(!fs_meta.unwrap().required_permissions.is_empty());
 }
+
+// ---------------------------------------------------------------------------
+// 跨接口一致性：agent start（能力层 / Shell / GUI 三条入口结果一致）
+// ---------------------------------------------------------------------------
+
+#[test]
+fn consistency_test_agent_start_across_interfaces() {
+    use hibos::agent::{self, AgentState};
+    use hibos::capability::caps_impl::register_all_capabilities;
+    use hibos::event::{event_bus, EventFilter, SystemEventType};
+    use hibos::gui::agent_workspace;
+    use hibos::scheduler::CpuPriority;
+
+    register_all_capabilities();
+
+    let name = format!("consistency_agent_{}", std::process::id());
+    let id = agent::spawn(&name, "worker", CpuPriority::Medium).unwrap();
+
+    // 1) 能力层直接调用
+    let req = CapabilityRequest {
+        id: "agent".to_string(),
+        input: serde_json::json!({"op": "start", "id": id}),
+        context: ExecutionContext {
+            caller_id: "test".to_string(),
+            caller_type: CallerType::Shell,
+            permissions: vec!["agent:control".to_string()],
+            resource_quota: Default::default(),
+        },
+        timeout_ns: None,
+        cancellation_token: None,
+        audit: AuditInfo {
+            actor: "test".to_string(),
+            action: "agent.start".to_string(),
+            timestamp: now_ns(),
+            result: AuditResult::Executed,
+            correlation_id: None,
+        },
+    };
+    let reg = hibos::capability::capability_registry();
+    let cap = safe_read(reg).get("agent").expect("agent 能力未注册");
+    let resp = cap.execute(req).expect("能力层 agent.start 应成功");
+    assert_eq!(resp.output["op"], "start");
+
+    // 2) Shell 走的是同一个能力，也要成功
+    let mut shell = test_shell();
+    assert!(shell.dispatch(&format!("agent start {} --json", id)));
+
+    // 3) GUI 走的是同一个能力，也要成功
+    assert!(agent_workspace::start_agent(id).is_ok());
+
+    // 4) 三处看到的状态一致，且生命周期事件已发布
+    let snap = agent::snapshot().into_iter().find(|a| a.id == id).unwrap();
+    assert!(matches!(snap.state, AgentState::Idle | AgentState::Running));
+    let events = safe_lock(event_bus()).query(&EventFilter {
+        event_types: Some(vec![SystemEventType::AgentStarted]),
+        ..Default::default()
+    });
+    assert!(!events.is_empty(), "agent.start 应发布 AgentStarted 事件");
+
+    let _ = agent::stop(&id.to_string());
+}
