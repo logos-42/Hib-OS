@@ -1,7 +1,7 @@
 # HibOS 系统架构文档
 
 **项目**: HibOS — Rust GPU-Centric 宏内核 AI OS  
-**版本**: 0.2.0 → 1.0 (Agent-Native)  
+**版本**: 0.2.1 → 1.0 (Agent-Native)  
 **类别**: A (Rust 自研内核，裸机 x86_64 no_std + 宿主 OS std 原型栈)
 
 ---

@@ -22,7 +22,7 @@
 //! 两份清单的版本号必须保持一致，否则同一套代码在宿主与裸机上会报出
 //! 不同的版本号；`tests/version_consistency.rs` 会守住这条约束。
 
-/// 完整版本号，例如 `"0.2.0"`。
+/// 完整版本号，例如 `"0.2.1"`。
 ///
 /// 取自当前 crate 的 `Cargo.toml` 中 `package.version`。
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -33,7 +33,7 @@ pub const VERSION_MAJOR: u32 = parse_u32(env!("CARGO_PKG_VERSION_MAJOR"));
 /// 次版本号（`2`）。
 pub const VERSION_MINOR: u32 = parse_u32(env!("CARGO_PKG_VERSION_MINOR"));
 
-/// 修订号（`0`）。
+/// 修订号（`1`）。
 pub const VERSION_PATCH: u32 = parse_u32(env!("CARGO_PKG_VERSION_PATCH"));
 
 /// 展开为编译期的版本号字面量。

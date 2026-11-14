@@ -1,6 +1,6 @@
 [package]
 name = "hibos-kernel"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 description = "Hib OS bare-metal kernel (no_std, x86_64-unknown-none)"
 
