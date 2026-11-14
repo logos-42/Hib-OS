@@ -5,8 +5,7 @@
 //! 授权模式：Once / Session / Persistent。
 
 use crate::permission::{
-    AgentLifecycleState, AgentSummary, Authorization, AuthorizationMode, Principal,
-    permission_manager,
+    AuthorizationMode, permission_manager,
 };
 use crate::capability::{CapabilityRequest, ExecutionContext, now_ns, AuditInfo, AuditResult,
     CallerType};

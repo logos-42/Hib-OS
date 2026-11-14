@@ -64,7 +64,19 @@ fn fs_capability_op(op: &str, path: &str, content: Option<&str>) -> Result<serde
     let reg = hibos::capability::capability_registry();
     match reg.lock().unwrap().get("filesystem") {
         Some(cap) => cap.execute(req).map(|r| r.output),
-        Err(e) => Err(e),
+        None => Err(CapabilityError {
+            code: ErrorCode::NotFound,
+            message: "能力 filesystem 未注册".to_string(),
+            source: Some("test".to_string()),
+            retryable: false,
+            audit: AuditInfo {
+                actor: "test-agent".to_string(),
+                action: "test".to_string(),
+                timestamp: now_ns(),
+                result: AuditResult::Failed,
+                correlation_id: None,
+            },
+        }),
     }
 }
 
@@ -544,10 +556,7 @@ fn shell_json_output_test() {
     let mut shell = test_shell();
 
     // capability list --json 应输出 JSON
-    let result = std::panic::catch_unwind(|| {
-        shell.dispatch("capability list --json");
-    });
-    assert!(result.is_ok(), "capability list --json 不应 panic");
+    shell.dispatch("capability list --json");
 }
 
 /// Shell agent 命令测试

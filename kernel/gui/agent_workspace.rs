@@ -6,9 +6,9 @@
 //! Completed / Failed / Stopped。
 
 use crate::permission::{
-    AgentLifecycleState, AgentSummary, permission_manager,
+    AgentLifecycleState, permission_manager,
 };
-use crate::capability::{CapabilityRequest, CapabilityResponse, ErrorCode, ExecutionContext,
+use crate::capability::{CapabilityRequest, ExecutionContext,
     now_ns, AuditInfo, AuditResult, CallerType};
 use serde_json::json;
 
