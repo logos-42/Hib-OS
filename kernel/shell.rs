@@ -2685,7 +2685,8 @@ impl Shell {
     // ---- Agent / 任务 / 能力 / 系统 / 应用 命令 (通过统一能力层) ----
 
     /// 检查命令参数中是否包含 --json 标志，并移除它。
-    fn json_flag(argv: &mut Vec<String>) -> bool {
+    /// 这四个命令的 argv 由 `&[&str]` 转换而来，因此元素类型是 `&str` 而非 `String`。
+    fn json_flag(argv: &mut Vec<&str>) -> bool {
         if argv.iter().any(|a| *a == "--json") {
             argv.retain(|a| *a != "--json");
             true
@@ -2706,7 +2707,7 @@ impl Shell {
     fn cmd_agent(&mut self, parts: &[&str]) {
         let mut argv = parts.to_vec();
         let json_mode = Self::json_flag(&mut argv);
-        let sub = argv.get(1).map(|s| s.as_str()).unwrap_or("list");
+        let sub = argv.get(1).copied().unwrap_or("list");
         match sub {
             "list" => {
                 let output = crate::agent::list();
@@ -2774,7 +2775,7 @@ impl Shell {
     fn cmd_task(&mut self, parts: &[&str]) {
         let mut argv = parts.to_vec();
         let json_mode = Self::json_flag(&mut argv);
-        let sub = argv.get(1).map(|s| s.as_str()).unwrap_or("list");
+        let sub = argv.get(1).copied().unwrap_or("list");
         match sub {
             "create" => {
                 let desc: String = argv.get(2).copied().unwrap_or("").to_string();
@@ -2967,7 +2968,7 @@ impl Shell {
     fn cmd_capability(&mut self, parts: &[&str]) {
         let mut argv = parts.to_vec();
         let _json_mode = Self::json_flag(&mut argv);
-        let sub = argv.get(1).map(|s| s.as_str()).unwrap_or("list");
+        let sub = argv.get(1).copied().unwrap_or("list");
         let reg = crate::capability::capability_registry();
         match sub {
             "list" => {
@@ -3021,7 +3022,7 @@ impl Shell {
     fn cmd_system(&mut self, parts: &[&str]) {
         let mut argv = parts.to_vec();
         let json_mode = Self::json_flag(&mut argv);
-        let sub = argv.get(1).map(|s| s.as_str()).unwrap_or("status");
+        let sub = argv.get(1).copied().unwrap_or("status");
         let req = crate::capability::CapabilityRequest {
             id: "system".to_string(),
             input: serde_json::json!({"op": sub}),
