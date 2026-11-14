@@ -127,3 +127,6 @@ cargo check --all-targets
 cargo check --all-targets --features gui
 cargo test
 ```
+
+- 0.2.1 已通过：两种 `cargo check --all-targets`（默认 / `--features gui`）、本次新增的 31 个解析器与执行器测试、`agent start` 跨接口一致性测试。
+- 已知历史遗留问题（非 0.2.1 引入）：部分集成测试没有先调用 `boot_subsystems()`，能力注册表为空导致断言失败；另有少量与本次无关的既有不稳定用例，完整 `cargo test` 会出现失败并偶发挂起。建议后续给测试加统一的初始化函数。
