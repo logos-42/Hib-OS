@@ -30,6 +30,7 @@ pub mod task_workspace;
 pub mod taskbar;
 pub mod terminal;
 pub mod theme;
+pub mod settings;
 pub mod surface;
 pub mod wallpaper;
 pub mod widget;

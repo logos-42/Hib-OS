@@ -199,6 +199,6 @@ mod tests {
     #[test]
     fn get_ai_resources_works() {
         let res = get_ai_resources();
-        assert!(res.total_tokens >= 0);
+        let _ = (res.total_tokens, res.active_agents);
     }
 }

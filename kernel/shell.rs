@@ -18,7 +18,7 @@ use crate::modules::{KernelModuleManager, ModuleEntry, ModuleProtocol, Version};
 use crate::scheduler::CpuPriority;
 use crate::syscall::AiSystemCall;
 use crate::syscall_handler::SyscallHandler;
-use crate::vfs::{NodeKind, Vfs};
+use crate::vfs::{NodeKind, Vfs, VfsError};
 
 /// 闭环实例序号：每个 AI 意识实例（loop）分配一个独立 worktree。
 static LOOP_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
@@ -142,6 +142,8 @@ pub struct Shell {
     pub gpu_reserved_bytes: u64,
     /// 当前桌面壁纸名称。
     pub wallpaper: String,
+    /// 最近一条命令的捕获输出（用于管道传递）。
+    pub last_command_output: Option<String>,
 }
 
 impl Shell {
@@ -174,6 +176,7 @@ impl Shell {
             editor: LineEditor::new(),
             gpu_reserved_bytes: 0,
             wallpaper: "default".to_string(),
+            last_command_output: None,
         }
     }
 
@@ -311,7 +314,8 @@ impl Shell {
         }
     }
 
-    /// 处理一条命令；返回 false 表示退出。
+    /// 处理一条命令行；返回 false 表示退出 shell。
+    /// 支持：管道 |、重定向 > >> <、命令链 && || ;、后台 &。
     pub fn dispatch(&mut self, line: &str) -> bool {
         // 兼容带 BOM / 前后空白的输入 (例如管道输入)。
         let line = line.trim_start_matches('\u{feff}').trim();
@@ -326,63 +330,342 @@ impl Shell {
                 return true;
             }
         };
-        // 仅执行第一条 pipeline 的第一条命令（后续 pipeline/重定向由 P1 阶段扩展）。
-        let Some(cmd) = pipelines.first().and_then(|p| p.commands.first()) else {
-            return true;
+
+        let mut last_success = true;
+
+        for pipeline in pipelines {
+            // 对管道内的每条命令依次执行；| 的左侧输出通过临时 VFS 文件传给右侧。
+            let mut pipe_input: Option<String> = None;
+
+            for cmd in &pipeline.commands {
+                let success = self.execute_pipeline_command(cmd, pipe_input.as_deref());
+                pipe_input = Some(self.last_command_output.take().unwrap_or_default());
+
+                match pipeline.separator {
+                    Separator::And => {
+                        if !success {
+                            last_success = false;
+                            break;
+                        }
+                    }
+                    Separator::Or => {
+                        if success {
+                            last_success = true;
+                            break;
+                        }
+                    }
+                    Separator::Semicolon => {}
+                }
+            }
+        }
+
+        true
+    }
+
+    /// 执行单条管道命令，支持重定向和管道输入。
+    /// 返回命令是否成功；将命令输出写入 self.last_command_output。
+    fn execute_pipeline_command(&mut self, cmd: &Command, pipe_stdin: Option<&str>) -> bool {
+        // 处理 stdin 重定向或管道输入：写入临时 VFS 文件，供后续命令读取。
+        let stdin_source = match &cmd.stdin {
+            Some(Redirection::Input { path, .. }) => {
+                // 从 VFS 读取作为 stdin
+                match self.vfs.cat(path) {
+                    Ok(content) => Some(content),
+                    Err(_) => {
+                        println!("无法打开输入文件: {}", path);
+                        return false;
+                    }
+                }
+            }
+            None => pipe_stdin.map(|s| s.to_string()),
+            _ => None,
         };
-        let parts: Vec<&str> = cmd.argv.iter().map(|s| s.as_str()).collect();
-        if parts.is_empty() {
+
+        // 如果命令不需要 stdin 但有管道输入，将管道输入作为首个参数（cat 等命令可读取）。
+        let mut argv: Vec<String> = cmd.argv.clone();
+        if let Some(stdin) = &stdin_source {
+            // 对于不带文件参数的 cat，将 stdin 作为内容处理
+            if argv.is_empty() || argv[0] == "cat" {
+                // 将管道输入写入临时文件，供 cat 读取
+                let tmp_path = format!("/tmp/.pipe_{}", std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos());
+                if self.vfs.write(&tmp_path, stdin).is_ok() {
+                    if argv.is_empty() {
+                        argv.push(tmp_path.clone());
+                    }
+                    // 标记稍后清理
+                    let _ = self.vfs.rm(&tmp_path);
+                }
+            }
+        }
+
+        if argv.is_empty() {
             return true;
         }
-        match parts[0] {
-            "help" | "?" => self.cmd_help(parts.get(1).copied()),
-            "channels" => self.cmd_channels(),
-            "sense" => self.cmd_sense(&parts),
-            "act" => self.cmd_act(&parts),
-            "concepts" => self.cmd_concepts(parts.get(1).copied()),
-            "policy" => self.cmd_policy(parts.get(1).copied()),
+
+        let parts: Vec<&str> = argv.iter().map(|s| s.as_str()).collect();
+
+        // 处理 stdout 重定向：捕获命令输出并写入 VFS 文件。
+        let mut captured_output = String::new();
+        let stdout_redirect = cmd.stdout.clone();
+
+        let success = match argv[0].as_str() {
+            "help" | "?" => {
+                self.cmd_help(argv.get(1).map(|s| s.as_str()));
+                captured_output = self.last_command_output.take().unwrap_or_default();
+                true
+            }
+            "channels" => {
+                self.cmd_channels();
+                captured_output = self.last_command_output.take().unwrap_or_default();
+                true
+            }
+            "sense" => {
+                self.cmd_sense(&parts);
+                captured_output = self.last_command_output.take().unwrap_or_default();
+                true
+            }
+            "act" => {
+                self.cmd_act(&parts);
+                captured_output = self.last_command_output.take().unwrap_or_default();
+                true
+            }
+            "concepts" => {
+                self.cmd_concepts(argv.get(1).map(|s| s.as_str()));
+                captured_output = self.last_command_output.take().unwrap_or_default();
+                true
+            }
+            "policy" => {
+                self.cmd_policy(argv.get(1).map(|s| s.as_str()));
+                captured_output = self.last_command_output.take().unwrap_or_default();
+                true
+            }
             "token" => {
                 self.cmd_token(&parts);
+                captured_output = self.last_command_output.take().unwrap_or_default();
+                true
             }
-            "query" => self.cmd_query(&parts),
-            "prio" => self.cmd_prio(&parts),
-            "proc" => self.cmd_proc(&parts),
-            "run" => self.cmd_run(),
-            "queue" => println!("就绪队列: {} 个任务", self.handler.scheduler.ready_count()),
-            "stats" => self.cmd_stats(),
-            "desktop" => self.cmd_desktop(&parts),
-            "gui" => self.cmd_gui(&parts),
-            "pwd" => println!("{}", self.vfs.cwd_path()),
-            "ls" => self.cmd_ls(parts.get(1).copied()),
-            "cd" => self.cmd_cd(parts.get(1).copied()),
-            "cat" => self.cmd_cat(parts.get(1).copied()),
-            "write" => self.cmd_write(&parts, false),
-            "append" => self.cmd_write(&parts, true),
-            "mkdir" => self.cmd_mkdir(parts.get(1).copied()),
-            "touch" => self.cmd_touch(parts.get(1).copied()),
-            "rm" => self.cmd_rm(parts.get(1).copied()),
-            "tree" => print!("{}", self.vfs.tree()),
-            "df" => self.cmd_df(),
-            "fbpreview" => self.cmd_fbpreview(&parts),
-            "save" => self.cmd_save(),
-            "load" => self.cmd_load(),
-            "resetfs" => self.cmd_resetfs(),
-            "wallpaper" => self.cmd_wallpaper(&parts),
-            "deepseek" => self.cmd_llm(&parts),
-            "llm" => self.cmd_llm(&parts),
-            "modules" => self.cmd_modules(),
-            "modload" => self.cmd_modload(&parts),
-            "modunload" => self.cmd_modunload(&parts),
-            "history" => self.cmd_history(),
+            "query" => {
+                self.cmd_query(&parts);
+                captured_output = self.last_command_output.take().unwrap_or_default();
+                true
+            }
+            "prio" => {
+                self.cmd_prio(&parts);
+                captured_output = self.last_command_output.take().unwrap_or_default();
+                true
+            }
+            "proc" => {
+                self.cmd_proc(&parts);
+                captured_output = self.last_command_output.take().unwrap_or_default();
+                true
+            }
+            "run" => {
+                self.cmd_run();
+                captured_output = self.last_command_output.take().unwrap_or_default();
+                true
+            }
+            "queue" => {
+                println!("就绪队列: {} 个任务", self.handler.scheduler.ready_count());
+                captured_output = self.last_command_output.take().unwrap_or_default();
+                true
+            }
+            "stats" => {
+                self.cmd_stats();
+                captured_output = self.last_command_output.take().unwrap_or_default();
+                true
+            }
+            "desktop" => {
+                self.cmd_desktop(&parts);
+                captured_output = self.last_command_output.take().unwrap_or_default();
+                true
+            }
+            "gui" => {
+                self.cmd_gui(&parts);
+                captured_output = self.last_command_output.take().unwrap_or_default();
+                true
+            }
+            "pwd" => {
+                let path = self.vfs.cwd_path();
+                println!("{}", path);
+                captured_output = path;
+                true
+            }
+            "ls" => {
+                self.cmd_ls(argv.get(1).map(|s| s.as_str()));
+                captured_output = self.last_command_output.take().unwrap_or_default();
+                true
+            }
+            "cd" => {
+                match self.cmd_cd_result(argv.get(1).map(|s| s.as_str())) {
+                    Ok(()) => { captured_output = self.vfs.cwd_path(); true }
+                    Err(e) => { println!("cd: {}", e); false }
+                }
+            }
+            "cat" => {
+                let target = argv.get(1).map(|s| s.as_str()).unwrap_or("");
+                match self.vfs.cat(target) {
+                    Ok(content) => {
+                        println!("{}", content);
+                        captured_output = content;
+                        true
+                    }
+                    Err(e) => {
+                        println!("cat: {}", e);
+                        false
+                    }
+                }
+            }
+            "write" => {
+                self.cmd_write(&parts, false);
+                captured_output = self.last_command_output.take().unwrap_or_default();
+                true
+            }
+            "append" => {
+                self.cmd_write(&parts, true);
+                captured_output = self.last_command_output.take().unwrap_or_default();
+                true
+            }
+            "mkdir" => {
+                match self.cmd_mkdir_result(argv.get(1).map(|s| s.as_str())) {
+                    Ok(()) => { captured_output = format!("mkdir: {}", argv.get(1).map(|s| s.as_str()).unwrap_or("")); true }
+                    Err(e) => { println!("mkdir: {}", e); false }
+                }
+            }
+            "touch" => {
+                match self.cmd_touch_result(argv.get(1).map(|s| s.as_str())) {
+                    Ok(()) => { captured_output = format!("touch: {}", argv.get(1).map(|s| s.as_str()).unwrap_or("")); true }
+                    Err(e) => { println!("touch: {}", e); false }
+                }
+            }
+            "rm" => {
+                match self.cmd_rm_result(argv.get(1).map(|s| s.as_str())) {
+                    Ok(()) => { captured_output = format!("rm: {}", argv.get(1).map(|s| s.as_str()).unwrap_or("")); true }
+                    Err(e) => { println!("rm: {}", e); false }
+                }
+            }
+            "tree" => {
+                print!("{}", self.vfs.tree());
+                captured_output = self.vfs.tree();
+                true
+            }
+            "df" => {
+                self.cmd_df();
+                captured_output = self.last_command_output.take().unwrap_or_default();
+                true
+            }
+            "fbpreview" => {
+                self.cmd_fbpreview(&parts);
+                captured_output = self.last_command_output.take().unwrap_or_default();
+                true
+            }
+            "save" => {
+                self.cmd_save();
+                captured_output = self.last_command_output.take().unwrap_or_default();
+                true
+            }
+            "load" => {
+                self.cmd_load();
+                captured_output = self.last_command_output.take().unwrap_or_default();
+                true
+            }
+            "resetfs" => {
+                self.cmd_resetfs();
+                captured_output = self.last_command_output.take().unwrap_or_default();
+                true
+            }
+            "wallpaper" => {
+                self.cmd_wallpaper(&parts);
+                captured_output = self.last_command_output.take().unwrap_or_default();
+                true
+            }
+            "deepseek" => {
+                self.cmd_llm(&parts);
+                captured_output = self.last_command_output.take().unwrap_or_default();
+                true
+            }
+            "llm" => {
+                self.cmd_llm(&parts);
+                captured_output = self.last_command_output.take().unwrap_or_default();
+                true
+            }
+            "modules" => {
+                self.cmd_modules();
+                captured_output = self.last_command_output.take().unwrap_or_default();
+                true
+            }
+            "modload" => {
+                self.cmd_modload(&parts);
+                captured_output = self.last_command_output.take().unwrap_or_default();
+                true
+            }
+            "modunload" => {
+                self.cmd_modunload(&parts);
+                captured_output = self.last_command_output.take().unwrap_or_default();
+                true
+            }
+            "history" => {
+                self.cmd_history();
+                captured_output = self.last_command_output.take().unwrap_or_default();
+                true
+            }
             "exit" | "quit" => return false,
-            "agent" => self.cmd_agent(&parts),
-            "task" => self.cmd_task(&parts),
-            "capability" => self.cmd_capability(&parts),
-            "system" => self.cmd_system(&parts),
-            "app" => self.cmd_app(&parts),
-            other => println!("未知命令: {} (试试 help)", other),
+            "agent" => {
+                self.cmd_agent(&parts);
+                captured_output = self.last_command_output.take().unwrap_or_default();
+                true
+            }
+            "task" => {
+                self.cmd_task(&parts);
+                captured_output = self.last_command_output.take().unwrap_or_default();
+                true
+            }
+            "capability" => {
+                self.cmd_capability(&parts);
+                captured_output = self.last_command_output.take().unwrap_or_default();
+                true
+            }
+            "system" => {
+                self.cmd_system(&parts);
+                captured_output = self.last_command_output.take().unwrap_or_default();
+                true
+            }
+            "app" => {
+                self.cmd_app(&parts);
+                captured_output = self.last_command_output.take().unwrap_or_default();
+                true
+            }
+            other => {
+                println!("未知命令: {} (试试 help)", other);
+                false
+            }
+        };
+
+        // 处理 stdout 重定向：将捕获的输出写入 VFS 文件。
+        if let Some(redirect) = &stdout_redirect {
+            let path = match redirect {
+                Redirection::Overwrite { path, .. } => path,
+                Redirection::Append { path, .. } => path,
+                Redirection::Input { .. } => unreachable!(),
+            };
+            let content = if matches!(redirect, Redirection::Append { .. }) {
+                // 追加模式：先读取现有内容
+                match self.vfs.cat(path) {
+                    Ok(existing) => format!("{}{}", existing, captured_output),
+                    Err(_) => captured_output.clone(),
+                }
+            } else {
+                captured_output.clone()
+            };
+            if let Err(e) = self.vfs.write(path, &content) {
+                println!("重定向失败: {}", e);
+            }
         }
-        true
+
+        self.last_command_output = Some(captured_output);
+        success
     }
 
     // ------------------------------------------------------------------
@@ -1521,6 +1804,15 @@ impl Shell {
         }
     }
 
+    fn cmd_cd_result(&mut self, path: Option<&str>) -> Result<(), VfsError> {
+        self.refresh_virtual_mounts();
+        let target = match path {
+            Some(p) => crate::worktree::resolve_path(p),
+            None => "/".to_string(),
+        };
+        self.vfs.cd(&target)
+    }
+
     fn cmd_cat(&mut self, path: Option<&str>) {
         let Some(path) = path else {
             println!("用法: cat <路径>");
@@ -1579,6 +1871,14 @@ impl Shell {
         }
     }
 
+    fn cmd_mkdir_result(&mut self, path: Option<&str>) -> Result<(), VfsError> {
+        let Some(path) = path else {
+            return Err(VfsError::InvalidPath);
+        };
+        let path = crate::worktree::resolve_path(path);
+        self.vfs.mkdir(&path)
+    }
+
     fn cmd_touch(&mut self, path: Option<&str>) {
         let Some(path) = path else {
             println!("用法: touch <路径>");
@@ -1591,6 +1891,14 @@ impl Shell {
         }
     }
 
+    fn cmd_touch_result(&mut self, path: Option<&str>) -> Result<(), VfsError> {
+        let Some(path) = path else {
+            return Err(VfsError::InvalidPath);
+        };
+        let path = crate::worktree::resolve_path(path);
+        self.vfs.touch(&path)
+    }
+
     fn cmd_rm(&mut self, path: Option<&str>) {
         let Some(path) = path else {
             println!("用法: rm <路径>");
@@ -1601,6 +1909,14 @@ impl Shell {
             Ok(()) => println!("已删除 {}", path),
             Err(e) => println!("rm 失败: {}", e),
         }
+    }
+
+    fn cmd_rm_result(&mut self, path: Option<&str>) -> Result<(), VfsError> {
+        let Some(path) = path else {
+            return Err(VfsError::InvalidPath);
+        };
+        let path = crate::worktree::resolve_path(path);
+        self.vfs.rm(&path)
     }
 
     fn cmd_df(&self) {
@@ -2369,7 +2685,7 @@ impl Shell {
     // ---- Agent / 任务 / 能力 / 系统 / 应用 命令 (通过统一能力层) ----
 
     /// 检查命令参数中是否包含 --json 标志，并移除它。
-    fn json_flag(argv: &mut Vec<&str>) -> bool {
+    fn json_flag(argv: &mut Vec<String>) -> bool {
         if argv.iter().any(|a| *a == "--json") {
             argv.retain(|a| *a != "--json");
             true
@@ -2390,7 +2706,7 @@ impl Shell {
     fn cmd_agent(&mut self, parts: &[&str]) {
         let mut argv = parts.to_vec();
         let json_mode = Self::json_flag(&mut argv);
-        let sub = argv.get(1).copied().unwrap_or("list");
+        let sub = argv.get(1).map(|s| s.as_str()).unwrap_or("list");
         match sub {
             "list" => {
                 let output = crate::agent::list();
@@ -2458,7 +2774,7 @@ impl Shell {
     fn cmd_task(&mut self, parts: &[&str]) {
         let mut argv = parts.to_vec();
         let json_mode = Self::json_flag(&mut argv);
-        let sub = argv.get(1).copied().unwrap_or("list");
+        let sub = argv.get(1).map(|s| s.as_str()).unwrap_or("list");
         match sub {
             "create" => {
                 let desc: String = argv.get(2).copied().unwrap_or("").to_string();
@@ -2651,7 +2967,7 @@ impl Shell {
     fn cmd_capability(&mut self, parts: &[&str]) {
         let mut argv = parts.to_vec();
         let _json_mode = Self::json_flag(&mut argv);
-        let sub = argv.get(1).copied().unwrap_or("list");
+        let sub = argv.get(1).map(|s| s.as_str()).unwrap_or("list");
         let reg = crate::capability::capability_registry();
         match sub {
             "list" => {
@@ -2705,7 +3021,7 @@ impl Shell {
     fn cmd_system(&mut self, parts: &[&str]) {
         let mut argv = parts.to_vec();
         let json_mode = Self::json_flag(&mut argv);
-        let sub = argv.get(1).copied().unwrap_or("status");
+        let sub = argv.get(1).map(|s| s.as_str()).unwrap_or("status");
         let req = crate::capability::CapabilityRequest {
             id: "system".to_string(),
             input: serde_json::json!({"op": sub}),

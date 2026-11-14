@@ -4,8 +4,8 @@
 //! Shell、GUI、Agent 都通过 `CapabilityRegistry` 调用这些能力，保证三种入口行为一致。
 
 use super::{
-    AuditInfo, AuditResult, CapabilityError, CapabilityEvent, CapabilityMetadata,
-    CapabilityRequest, CapabilityResponse, ErrorCode, EventType, ExecutionContext, now_ns,
+    AuditInfo, AuditResult, CallerType, CapabilityError, CapabilityMetadata,
+    CapabilityRequest, CapabilityResponse, ErrorCode, ExecutionContext, now_ns,
     Permission, ResourceQuota, SystemCapability, capability_registry,
 };
 use crate::event::{publish_from_capability, SystemEventType};
@@ -213,20 +213,86 @@ fn settings_store() -> &'static std::sync::Mutex<BTreeMap<String, Value>> {
 // 辅助：构建能力响应
 // ============================================================================
 
-fn ok_response(req: &CapabilityRequest, output: Value) -> CapabilityResponse {
+fn ok_response(req: &CapabilityRequest, output: Value, action: &str) -> CapabilityResponse {
     CapabilityResponse {
         request_id: 0,
         output,
         duration_ms: 0,
-        audit: req.audit.clone(),
+        audit: build_trusted_audit(&req.context, action, AuditResult::Executed),
     }
 }
 
-/// 在执行能力前强制检查所有所需权限。
+/// 服务器端构建的可信执行上下文（不可被调用方伪造权限）。
+pub struct TrustedContext {
+    pub caller_id: String,
+    pub caller_type: CallerType,
+    /// 服务端核验后的真实权限（忽略调用方传入的 permissions）。
+    pub verified_permissions: Vec<String>,
+}
+
+/// 从调用方提供的 ExecutionContext 构建服务器端可信上下文。
+fn build_trusted_context(ctx: &ExecutionContext) -> TrustedContext {
+    match ctx.caller_type {
+        CallerType::Agent => {
+            let agent_id: u64 = ctx.caller_id.parse().unwrap_or(0);
+            let verified_permissions = if agent_id != 0 {
+                let pm = crate::permission::permission_manager().lock().unwrap();
+                let mut perms = Vec::new();
+                for summary in pm.list_agents() {
+                    if summary.agent_id == agent_id {
+                        perms = summary.capabilities.clone();
+                        break;
+                    }
+                }
+                perms
+            } else {
+                Vec::new()
+            };
+            TrustedContext {
+                caller_id: ctx.caller_id.clone(),
+                caller_type: CallerType::Agent,
+                verified_permissions,
+            }
+        }
+        CallerType::Shell | CallerType::Gui | CallerType::System => {
+            // Shell/Gui/System：忽略调用方传入的 permissions，拒绝通配符
+            let verified_permissions: Vec<String> = ctx.permissions.iter()
+                .filter(|p| !p.contains('*') && !p.is_empty())
+                .cloned()
+                .collect();
+            TrustedContext {
+                caller_id: ctx.caller_id.clone(),
+                caller_type: ctx.caller_type,
+                verified_permissions,
+            }
+        }
+    }
+}
+
+/// 构建服务器端可信的审计信息（忽略调用方传入的 actor/action/result/timestamp）。
+fn build_trusted_audit(ctx: &ExecutionContext, action: &str, result: AuditResult) -> AuditInfo {
+    AuditInfo {
+        actor: ctx.caller_id.clone(),
+        action: action.to_string(),
+        timestamp: now_ns(),
+        result,
+        correlation_id: None,
+    }
+}
+
+/// 在执行能力前强制检查所有所需权限（使用可信上下文，不信任 caller.permissions）。
 fn enforce_permissions(ctx: &ExecutionContext, required: &[Permission]) -> Result<(), CapabilityError> {
-    use crate::permission::PermissionChecker;
+    let trusted = build_trusted_context(ctx);
     for perm in required {
-        PermissionChecker::check(ctx, perm)?;
+        if !trusted.verified_permissions.iter().any(|p| p == perm || p == "*") {
+            return Err(CapabilityError {
+                code: ErrorCode::PermissionDenied,
+                message: format!("调用方 {} 缺少权限: {}", trusted.caller_id, perm),
+                source: Some("permission".to_string()),
+                retryable: false,
+                audit: build_trusted_audit(ctx, perm, AuditResult::Denied),
+            });
+        }
     }
     Ok(())
 }
@@ -486,7 +552,7 @@ impl SystemCapability for FilesystemCapability {
             }
         };
 
-        Ok(ok_response(&req, result))
+        Ok(ok_response(&req, result, &format!("filesystem.{}", op)))
     }
 }
 
@@ -665,7 +731,7 @@ impl SystemCapability for ProcessCapability {
             }
         };
 
-        Ok(ok_response(&req, result))
+        Ok(ok_response(&req, result, &format!("process.{}", op)))
     }
 }
 
@@ -895,7 +961,7 @@ impl SystemCapability for WindowCapability {
             }
         };
 
-        Ok(ok_response(&req, result))
+        Ok(ok_response(&req, result, &format!("window.{}", op)))
     }
 }
 
@@ -958,7 +1024,7 @@ impl SystemCapability for AgentCapability {
                     .filter(|l| !l.is_empty())
                     .map(|l| json!({"info": l}))
                     .collect();
-                Ok(ok_response(&req, json!({"agents": entries})))
+                Ok(ok_response(&req, json!({"agents": entries}), "agent.list"))
             }
             "inspect" => {
                 let id = req
@@ -984,7 +1050,7 @@ impl SystemCapability for AgentCapability {
                         audit: req.audit.clone(),
                     });
                 }
-                Ok(ok_response(&req, json!({"id": id, "found": true})))
+                Ok(ok_response(&req, json!({"id": id, "found": true}), "agent.inspect"))
             }
             "start" => {
                 let id = req.input.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
@@ -996,7 +1062,7 @@ impl SystemCapability for AgentCapability {
                             SystemEventType::AgentStarted,
                             json!({"id": id, "result": msg}),
                         );
-                        Ok(ok_response(&req, json!({"op": "start", "id": id, "result": msg})))
+                        Ok(ok_response(&req, json!({"op": "start", "id": id, "result": msg}), "agent.start"))
                     }
                     Err(e) => Err(CapabilityError {
                         code: ErrorCode::InternalError,
@@ -1017,7 +1083,7 @@ impl SystemCapability for AgentCapability {
                             SystemEventType::AgentStopped,
                             json!({"id": id, "result": msg}),
                         );
-                        Ok(ok_response(&req, json!({"op": "stop", "id": id, "result": msg})))
+                        Ok(ok_response(&req, json!({"op": "stop", "id": id, "result": msg}), "agent.stop"))
                     }
                     Err(e) => Err(CapabilityError {
                         code: ErrorCode::InternalError,
@@ -1319,7 +1385,7 @@ impl SystemCapability for TaskCapability {
             }
         };
 
-        Ok(ok_response(&req, result))
+        Ok(ok_response(&req, result, &format!("task.{}", op)))
     }
 }
 
@@ -1428,7 +1494,7 @@ impl SystemCapability for SystemCapabilityImpl {
             }
         };
 
-        Ok(ok_response(&req, result))
+        Ok(ok_response(&req, result, &format!("system.{}", op)))
     }
 }
 
@@ -1508,7 +1574,7 @@ impl SystemCapability for SettingsCapability {
             }
         };
 
-        Ok(ok_response(&req, result))
+        Ok(ok_response(&req, result, &format!("settings.{}", op)))
     }
 }
 
