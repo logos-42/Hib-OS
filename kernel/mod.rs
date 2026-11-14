@@ -162,6 +162,7 @@ pub fn boot_subsystems() {
     scheduler::init();
     syscall::init();
     verification::init();
+    capability::caps_impl::register_all_capabilities();
 }
 
 /// 内核入口: 初始化各子系统并运行一次演示调度。

@@ -453,3 +453,287 @@ fn full_ai_os_integration() {
     let _ = gui_ai::GUAI::new();
     // 所有子系统实例化成功，说明集成无阻碍
 }
+
+// ============================================================================
+// 跨接口一致性测试 (Cross-Interface Consistency Tests)
+// ============================================================================
+
+/// 验证通过统一能力层执行的文件系统操作结果一致。
+/// Shell、GUI、Agent 都通过相同的 FilesystemCapability 实现。
+#[test]
+fn cross_interface_filesystem_consistency() {
+    use hibos::capability::{
+        capability_registry, CapabilityError, ErrorCode, ExecutionContext, ResourceQuota,
+    };
+    use serde_json::json;
+
+    let ctx = ExecutionContext {
+        caller_id: "test".to_string(),
+        caller_type: hibos::capability::CallerType::Shell,
+        permissions: vec!["fs:read".to_string(), "fs:write".to_string()],
+        resource_quota: ResourceQuota::default(),
+    };
+
+    let reg = capability_registry();
+    let fs_cap = reg.lock().unwrap().get("filesystem").expect("filesystem capability 未注册");
+
+    // 写入
+    let write_req = hibos::capability::CapabilityRequest {
+        id: "filesystem".to_string(),
+        input: json!({"op": "write", "path": "/consistency_test.txt", "content": "hello world"}),
+        context: ctx.clone(),
+        timeout_ns: None,
+        cancellation_token: None,
+        audit: hibos::capability::AuditInfo {
+            actor: "test".to_string(),
+            action: "filesystem.write".to_string(),
+            timestamp: hibos::capability::now_ns(),
+            result: hibos::capability::AuditResult::Executed,
+            correlation_id: None,
+        },
+    };
+    let write_resp = fs_cap.execute(write_req).expect("写入应成功");
+    assert_eq!(write_resp.output["bytes_written"], 11);
+
+    // 读取（通过同一能力实现，模拟 Shell、GUI、Agent 三种入口）
+    for caller in ["shell", "gui", "agent"] {
+        let caller_type = match caller {
+            "shell" => hibos::capability::CallerType::Shell,
+            "gui" => hibos::capability::CallerType::Gui,
+            "agent" => hibos::capability::CallerType::Agent,
+            _ => unreachable!(),
+        };
+        let read_req = hibos::capability::CapabilityRequest {
+            id: "filesystem".to_string(),
+            input: json!({"op": "read", "path": "/consistency_test.txt"}),
+            context: ExecutionContext {
+                caller_id: caller.to_string(),
+                caller_type,
+                permissions: vec!["fs:read".to_string()],
+                resource_quota: ResourceQuota::default(),
+            },
+            timeout_ns: None,
+            cancellation_token: None,
+            audit: hibos::capability::AuditInfo {
+                actor: caller.to_string(),
+                action: "filesystem.read".to_string(),
+                timestamp: hibos::capability::now_ns(),
+                result: hibos::capability::AuditResult::Executed,
+                correlation_id: None,
+            },
+        };
+        let read_resp = fs_cap.execute(read_req).expect("读取应成功");
+        assert_eq!(
+            read_resp.output["content"], "hello world",
+            "{} 入口读取结果不一致",
+            caller
+        );
+    }
+
+    // 删除
+    let rm_req = hibos::capability::CapabilityRequest {
+        id: "filesystem".to_string(),
+        input: json!({"op": "rm", "path": "/consistency_test.txt"}),
+        context: ctx.clone(),
+        timeout_ns: None,
+        cancellation_token: None,
+        audit: hibos::capability::AuditInfo {
+            actor: "test".to_string(),
+            action: "filesystem.rm".to_string(),
+            timestamp: hibos::capability::now_ns(),
+            result: hibos::capability::AuditResult::Executed,
+            correlation_id: None,
+        },
+    };
+    fs_cap.execute(rm_req).expect("删除应成功");
+
+    // 再次读取应失败
+    let read_req = hibos::capability::CapabilityRequest {
+        id: "filesystem".to_string(),
+        input: json!({"op": "read", "path": "/consistency_test.txt"}),
+        context: ctx.clone(),
+        timeout_ns: None,
+        cancellation_token: None,
+        audit: hibos::capability::AuditInfo {
+            actor: "test".to_string(),
+            action: "filesystem.read".to_string(),
+            timestamp: hibos::capability::now_ns(),
+            result: hibos::capability::AuditResult::Executed,
+            correlation_id: None,
+        },
+    };
+    let err = fs_cap.execute(read_req).unwrap_err();
+    assert_eq!(err.code, ErrorCode::NotFound);
+}
+
+/// 验证任务操作通过统一能力层一致执行。
+#[test]
+fn cross_interface_task_consistency() {
+    use hibos::capability::{
+        capability_registry, CapabilityError, ExecutionContext, ResourceQuota,
+    };
+    use serde_json::json;
+
+    let ctx = ExecutionContext {
+        caller_id: "test".to_string(),
+        caller_type: hibos::capability::CallerType::Shell,
+        permissions: vec!["task:create".to_string(), "task:read".to_string(), "task:control".to_string()],
+        resource_quota: ResourceQuota::default(),
+    };
+
+    let reg = capability_registry();
+    let task_cap = reg.lock().unwrap().get("task").expect("task capability 未注册");
+
+    // 创建任务
+    let create_req = hibos::capability::CapabilityRequest {
+        id: "task".to_string(),
+        input: json!({"op": "create", "description": "一致性测试任务", "agent_id": null}),
+        context: ctx.clone(),
+        timeout_ns: None,
+        cancellation_token: None,
+        audit: hibos::capability::AuditInfo {
+            actor: "test".to_string(),
+            action: "task.create".to_string(),
+            timestamp: hibos::capability::now_ns(),
+            result: hibos::capability::AuditResult::Executed,
+            correlation_id: None,
+        },
+    };
+    let create_resp = task_cap.execute(create_req).expect("创建任务应成功");
+    let task_id = create_resp.output["id"].as_u64().expect("任务 ID 应存在");
+
+    // 通过不同 caller 类型查看任务（模拟 Shell/GUI/Agent）
+    for caller in ["shell", "gui", "agent"] {
+        let caller_type = match caller {
+            "shell" => hibos::capability::CallerType::Shell,
+            "gui" => hibos::capability::CallerType::Gui,
+            "agent" => hibos::capability::CallerType::Agent,
+            _ => unreachable!(),
+        };
+        let inspect_req = hibos::capability::CapabilityRequest {
+            id: "task".to_string(),
+            input: json!({"op": "inspect", "id": task_id}),
+            context: ExecutionContext {
+                caller_id: caller.to_string(),
+                caller_type,
+                permissions: vec!["task:read".to_string()],
+                resource_quota: ResourceQuota::default(),
+            },
+            timeout_ns: None,
+            cancellation_token: None,
+            audit: hibos::capability::AuditInfo {
+                actor: caller.to_string(),
+                action: "task.inspect".to_string(),
+                timestamp: hibos::capability::now_ns(),
+                result: hibos::capability::AuditResult::Executed,
+                correlation_id: None,
+            },
+        };
+        let inspect_resp = task_cap.execute(inspect_req).expect("查看任务应成功");
+        assert_eq!(
+            inspect_resp.output["state"], "created",
+            "{} 入口任务状态不一致",
+            caller
+        );
+    }
+
+    // 取消任务
+    let cancel_req = hibos::capability::CapabilityRequest {
+        id: "task".to_string(),
+        input: json!({"op": "cancel", "id": task_id}),
+        context: ctx.clone(),
+        timeout_ns: None,
+        cancellation_token: None,
+        audit: hibos::capability::AuditInfo {
+            actor: "test".to_string(),
+            action: "task.cancel".to_string(),
+            timestamp: hibos::capability::now_ns(),
+            result: hibos::capability::AuditResult::Executed,
+            correlation_id: None,
+        },
+    };
+    task_cap.execute(cancel_req).expect("取消任务应成功");
+
+    // 验证状态已变更
+    let inspect_req = hibos::capability::CapabilityRequest {
+        id: "task".to_string(),
+        input: json!({"op": "inspect", "id": task_id}),
+        context: ctx.clone(),
+        timeout_ns: None,
+        cancellation_token: None,
+        audit: hibos::capability::AuditInfo {
+            actor: "test".to_string(),
+            action: "task.inspect".to_string(),
+            timestamp: hibos::capability::now_ns(),
+            result: hibos::capability::AuditResult::Executed,
+            correlation_id: None,
+        },
+    };
+    let inspect_resp = task_cap.execute(inspect_req).expect("查看任务应成功");
+    assert_eq!(inspect_resp.output["state"], "cancelled");
+}
+
+/// 验证能力注册表包含所有预期能力。
+#[test]
+fn capability_registry_has_expected_capabilities() {
+    use hibos::capability::capability_registry;
+
+    let reg = capability_registry();
+    let ids = reg.lock().unwrap().list_ids();
+    let expected = ["filesystem", "process", "agent", "task", "system", "settings"];
+    for id in expected {
+        assert!(
+            ids.iter().any(|x| x == id),
+            "能力 {id} 未注册",
+        );
+    }
+}
+
+/// 验证系统状态能力返回一致结果。
+#[test]
+fn system_status_consistency() {
+    use hibos::capability::{
+        capability_registry, ExecutionContext, ResourceQuota,
+    };
+    use serde_json::json;
+
+    let ctx = ExecutionContext {
+        caller_id: "test".to_string(),
+        caller_type: hibos::capability::CallerType::Shell,
+        permissions: vec!["sys:read".to_string()],
+        resource_quota: ResourceQuota::default(),
+    };
+
+    let reg = capability_registry();
+    let sys_cap = reg.lock().unwrap().get("system").expect("system capability 未注册");
+
+    for caller in ["shell", "gui", "agent"] {
+        let caller_type = match caller {
+            "shell" => hibos::capability::CallerType::Shell,
+            "gui" => hibos::capability::CallerType::Gui,
+            "agent" => hibos::capability::CallerType::Agent,
+            _ => unreachable!(),
+        };
+        let req = hibos::capability::CapabilityRequest {
+            id: "system".to_string(),
+            input: json!({"op": "status"}),
+            context: ExecutionContext {
+                caller_id: caller.to_string(),
+                caller_type,
+                permissions: vec!["sys:read".to_string()],
+                resource_quota: ResourceQuota::default(),
+            },
+            timeout_ns: None,
+            cancellation_token: None,
+            audit: hibos::capability::AuditInfo {
+                actor: caller.to_string(),
+                action: "system.status".to_string(),
+                timestamp: hibos::capability::now_ns(),
+                result: hibos::capability::AuditResult::Executed,
+                correlation_id: None,
+            },
+        };
+        let resp = sys_cap.execute(req).expect("系统状态查询应成功");
+        assert!(resp.output["uptime_ns"].is_number(), "{} 入口系统状态不一致", caller);
+    }
+}

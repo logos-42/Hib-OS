@@ -154,7 +154,224 @@ pub fn build_demo(comp: &mut Compositor) {
         paint_lines(w, &lease_lines());
     }
 
+    // 5. Agent Workspace
+    build_agent_workspace(comp, 48, 48, 400, 220);
+
+    // 6. Task Workspace
+    build_task_workspace(comp, 460, 48, 460, 200);
+
+    // 7. Permission Center
+    build_permission_center(comp, 48, 280, 400, 180);
+
     comp.focus(console);
+}
+
+/// 构建 Agent Workspace 窗口：列出全部智能体及其状态。
+pub fn build_agent_workspace(comp: &mut Compositor, x: i32, y: i32, w: u32, h: u32) {
+    let id = comp.open("AGENT WORKSPACE", w, h, palette::MAUVE);
+    if let Some(win) = comp.window_mut(id) {
+        win.move_to(x, y);
+        let mut lines = vec![
+            "=== Agent Workspace ===".to_string(),
+            String::new(),
+        ];
+        lines.push(crate::agent::status());
+        lines.push(String::new());
+        for line in crate::agent::list().lines() {
+            if !line.is_empty() {
+                lines.push(line.to_string());
+            }
+        }
+        lines.push(String::new());
+        lines.push("操作: shell 输入 `agent list / inspect <id> / start <id> / stop <id>`".to_string());
+        paint_lines(win, &lines);
+    }
+}
+
+/// 构建 Task Workspace 窗口：列出全部任务及其状态。
+pub fn build_task_workspace(comp: &mut Compositor, x: i32, y: i32, w: u32, h: u32) {
+    let id = comp.open("TASK WORKSPACE", w, h, palette::TEAL);
+    if let Some(win) = comp.window_mut(id) {
+        win.move_to(x, y);
+        let mut lines = vec![
+            "=== Task Workspace ===".to_string(),
+            String::new(),
+        ];
+        // 通过统一能力层查询任务
+        let req = crate::capability::CapabilityRequest {
+            id: "task".to_string(),
+            input: serde_json::json!({"op": "list"}),
+            context: crate::capability::ExecutionContext {
+                caller_id: "gui".to_string(),
+                caller_type: crate::capability::CallerType::Gui,
+                permissions: vec!["task:read".to_string()],
+                resource_quota: crate::capability::ResourceQuota::default(),
+            },
+            timeout_ns: None,
+            cancellation_token: None,
+            audit: crate::capability::AuditInfo {
+                actor: "gui".to_string(),
+                action: "task.list".to_string(),
+                timestamp: crate::capability::now_ns(),
+                result: crate::capability::AuditResult::Executed,
+                correlation_id: None,
+            },
+        };
+        let reg = crate::capability::capability_registry();
+        if let Some(cap) = reg.lock().unwrap().get("task") {
+            match cap.execute(req) {
+                Ok(resp) => {
+                    if let Some(tasks) = resp.output.get("tasks").and_then(|v| v.as_array()) {
+                        for t in tasks {
+                            let id = t.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
+                            let desc = t.get("description").and_then(|v| v.as_str()).unwrap_or("");
+                            let state = t.get("state").and_then(|v| v.as_str()).unwrap_or("?");
+                            lines.push(format!("  [{}] {} ({})", id, desc, state));
+                        }
+                    }
+                }
+                Err(e) => lines.push(format!("错误: {}", e.message)),
+            }
+        } else {
+            lines.push("能力 task 未注册".to_string());
+        }
+        lines.push(String::new());
+        lines.push("操作: shell 输入 `task create <描述> / cancel <id> / pause <id> / resume <id>`".to_string());
+        paint_lines(win, &lines);
+    }
+}
+
+/// 构建 Permission Center 窗口：列出权限与审计日志。
+pub fn build_permission_center(comp: &mut Compositor, x: i32, y: i32, w: u32, h: u32) {
+    let id = comp.open("PERMISSION CENTER", w, h, palette::PEACH);
+    if let Some(win) = comp.window_mut(id) {
+        win.move_to(x, y);
+        let mut lines = vec![
+            "=== Permission Center ===".to_string(),
+            String::new(),
+        ];
+        // 列出全部智能体及其权限
+        for summary in crate::permission::permission_manager().lock().unwrap().list_agents() {
+            lines.push(format!(
+                "Agent {}: {} [{}] state={} caps={}",
+                summary.agent_id, summary.name, summary.role,
+                summary.state.name(),
+                summary.capabilities.join(", ")
+            ));
+        }
+        lines.push(String::new());
+        lines.push("--- 最近审计 ---".to_string());
+        for entry in crate::permission::permission_manager().lock().unwrap().query_audit(Some(10)) {
+            lines.push(format!(
+                "  {} {} {} -> {:?}",
+                entry.timestamp, entry.actor, entry.action, entry.result
+            ));
+        }
+        lines.push(String::new());
+        lines.push("操作: shell 输入 `system logs` 查看更多审计".to_string());
+        paint_lines(win, &lines);
+    }
+}
+
+/// 刷新工作区窗口的实时内容。
+pub fn refresh_workspaces(comp: &mut Compositor) {
+    // 先收集需要刷新的窗口 ID，避免借用冲突
+    let refresh_ids: Vec<u64> = comp
+        .windows()
+        .iter()
+        .filter(|w| {
+            matches!(
+                w.title.as_str(),
+                "AGENT WORKSPACE" | "TASK WORKSPACE" | "PERMISSION CENTER"
+            )
+        })
+        .map(|w| w.id)
+        .collect();
+
+    for id in refresh_ids {
+        let title = comp.window(id).map(|w| w.title.clone()).unwrap_or_default();
+        match title.as_str() {
+            "AGENT WORKSPACE" => {
+                if let Some(win) = comp.window_mut(id) {
+                    let mut lines = vec!["=== Agent Workspace ===".to_string(), String::new()];
+                    lines.push(crate::agent::status());
+                    lines.push(String::new());
+                    for line in crate::agent::list().lines() {
+                        if !line.is_empty() {
+                            lines.push(line.to_string());
+                        }
+                    }
+                    paint_lines(win, &lines);
+                }
+            }
+            "TASK WORKSPACE" => {
+                if let Some(win) = comp.window_mut(id) {
+                    let mut lines = vec!["=== Task Workspace ===".to_string(), String::new()];
+                    let req = crate::capability::CapabilityRequest {
+                        id: "task".to_string(),
+                        input: serde_json::json!({"op": "list"}),
+                        context: crate::capability::ExecutionContext {
+                            caller_id: "gui".to_string(),
+                            caller_type: crate::capability::CallerType::Gui,
+                            permissions: vec!["task:read".to_string()],
+                            resource_quota: crate::capability::ResourceQuota::default(),
+                        },
+                        timeout_ns: None,
+                        cancellation_token: None,
+                        audit: crate::capability::AuditInfo {
+                            actor: "gui".to_string(),
+                            action: "task.list".to_string(),
+                            timestamp: crate::capability::now_ns(),
+                            result: crate::capability::AuditResult::Executed,
+                            correlation_id: None,
+                        },
+                    };
+                    let reg = crate::capability::capability_registry();
+                    if let Some(cap) = reg.lock().unwrap().get("task") {
+                        if let Ok(resp) = cap.execute(req) {
+                            if let Some(tasks) = resp.output.get("tasks").and_then(|v| v.as_array())
+                            {
+                                for t in tasks {
+                                    let id = t.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
+                                    let desc = t.get("description").and_then(|v| v.as_str()).unwrap_or("");
+                                    let state = t.get("state").and_then(|v| v.as_str()).unwrap_or("?");
+                                    lines.push(format!("  [{}] {} ({})", id, desc, state));
+                                }
+                            }
+                        }
+                    }
+                    lines.push(String::new());
+                    lines.push("操作: shell 输入 `task ...` 管理任务".to_string());
+                    paint_lines(win, &lines);
+                }
+            }
+            "PERMISSION CENTER" => {
+                if let Some(win) = comp.window_mut(id) {
+                    let mut lines = vec!["=== Permission Center ===".to_string(), String::new()];
+                    for summary in crate::permission::permission_manager().lock().unwrap().list_agents()
+                    {
+                        lines.push(format!(
+                            "Agent {}: {} [{}] state={} caps={}",
+                            summary.agent_id, summary.name, summary.role,
+                            summary.state.name(),
+                            summary.capabilities.join(", ")
+                        ));
+                    }
+                    lines.push(String::new());
+                    lines.push("--- 最近审计 ---".to_string());
+                    for entry in crate::permission::permission_manager().lock().unwrap().query_audit(Some(10))
+                    {
+                        lines.push(format!(
+                            "  {} {} {} -> {:?}",
+                            entry.timestamp, entry.actor, entry.action, entry.result
+                        ));
+                    }
+                    paint_lines(win, &lines);
+                }
+            }
+            _ => {}
+        }
+    }
 }
 
 fn exec_lines() -> Vec<String> {

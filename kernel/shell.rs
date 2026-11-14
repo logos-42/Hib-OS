@@ -124,6 +124,11 @@ pub const COMMANDS: &[&str] = &[
     "history",
     "exit",
     "quit",
+    "agent",
+    "task",
+    "capability",
+    "system",
+    "app",
 ];
 
 /// 交互式内核外壳。
@@ -355,6 +360,11 @@ impl Shell {
             "modunload" => self.cmd_modunload(&parts),
             "history" => self.cmd_history(),
             "exit" | "quit" => return false,
+            "agent" => self.cmd_agent(&parts),
+            "task" => self.cmd_task(&parts),
+            "capability" => self.cmd_capability(&parts),
+            "system" => self.cmd_system(&parts),
+            "app" => self.cmd_app(&parts),
             other => println!("未知命令: {} (试试 help)", other),
         }
         true
@@ -403,6 +413,12 @@ impl Shell {
         println!("  save / load / resetfs    持久化 (JSON) 保存 / 载入 / 重置");
         println!("模块:");
         println!("  modules / modload <名称> / modunload <名称>");
+        println!("Agent / 任务 / 能力 / 系统:");
+        println!("  agent list / inspect <id> / start <id> / stop <id>");
+        println!("  task create <描述> [--agent <id>] / list / inspect <id> / cancel <id> / pause <id> / resume <id>");
+        println!("  capability list / inspect <id>");
+        println!("  system status / resources / logs");
+        println!("  app list / launch <名> / stop <id>");
         println!("其他:");
         println!("  history                  查看命令历史");
         println!("  exit                     退出");
@@ -2334,6 +2350,346 @@ impl Shell {
             println!("  {:>3}  {}", i + 1, cmd);
         }
     }
+
+    // ---- Agent / 任务 / 能力 / 系统 / 应用 命令 (通过统一能力层) ----
+
+    fn cmd_agent(&self, parts: &[&str]) {
+        let sub = parts.get(1).copied().unwrap_or("list");
+        match sub {
+            "list" => {
+                let output = crate::agent::list();
+                println!("{}", output);
+            }
+            "inspect" => {
+                let id: u64 = parts.get(2).and_then(|s| s.parse().ok()).unwrap_or(0);
+                let req = crate::capability::CapabilityRequest {
+                    id: "agent".to_string(),
+                    input: serde_json::json!({"op": "inspect", "id": id}),
+                    context: crate::capability::ExecutionContext {
+                        caller_id: "shell".to_string(),
+                        caller_type: crate::capability::CallerType::Shell,
+                        permissions: vec!["agent:read".to_string()],
+                        resource_quota: crate::capability::ResourceQuota::default(),
+                    },
+                    timeout_ns: None,
+                    cancellation_token: None,
+                    audit: crate::capability::AuditInfo {
+                        actor: "shell".to_string(),
+                        action: "agent.inspect".to_string(),
+                        timestamp: crate::capability::now_ns(),
+                        result: crate::capability::AuditResult::Executed,
+                        correlation_id: None,
+                    },
+                };
+                let reg = crate::capability::capability_registry();
+                match reg.lock().unwrap().get("agent") {
+                    Some(cap) => match cap.execute(req) {
+                        Ok(resp) => println!("{}", serde_json::to_string_pretty(&resp.output).unwrap()),
+                        Err(e) => println!("错误: {} (code={})", e.message, e.code),
+                    },
+                    None => println!("能力 agent 未注册"),
+                }
+            }
+            "start" => {
+                let id: u64 = parts.get(2).and_then(|s| s.parse().ok()).unwrap_or(0);
+                let result = crate::agent::dispatch(&format!("agent/start {id}"));
+                match result {
+                    Ok(msg) => println!("{}", msg),
+                    Err(e) => println!("错误: {}", e),
+                }
+            }
+            "stop" => {
+                let id: u64 = parts.get(2).and_then(|s| s.parse().ok()).unwrap_or(0);
+                let result = crate::agent::stop(&id.to_string());
+                match result {
+                    Ok(msg) => println!("{}", msg),
+                    Err(e) => println!("错误: {}", e),
+                }
+            }
+            _ => println!("用法: agent list / inspect <id> / start <id> / stop <id>"),
+        }
+    }
+
+    fn cmd_task(&self, parts: &[&str]) {
+        let sub = parts.get(1).copied().unwrap_or("list");
+        match sub {
+            "create" => {
+                let desc: String = parts.get(2).copied().unwrap_or("").to_string();
+                let agent_id = parts
+                    .iter()
+                    .position(|p| *p == "--agent")
+                    .and_then(|i| parts.get(i + 1))
+                    .map(|s| s.to_string());
+                let req = crate::capability::CapabilityRequest {
+                    id: "task".to_string(),
+                    input: serde_json::json!({"op": "create", "description": desc, "agent_id": agent_id}),
+                    context: crate::capability::ExecutionContext {
+                        caller_id: "shell".to_string(),
+                        caller_type: crate::capability::CallerType::Shell,
+                        permissions: vec!["task:create".to_string()],
+                        resource_quota: crate::capability::ResourceQuota::default(),
+                    },
+                    timeout_ns: None,
+                    cancellation_token: None,
+                    audit: crate::capability::AuditInfo {
+                        actor: "shell".to_string(),
+                        action: "task.create".to_string(),
+                        timestamp: crate::capability::now_ns(),
+                        result: crate::capability::AuditResult::Executed,
+                        correlation_id: None,
+                    },
+                };
+                let reg = crate::capability::capability_registry();
+                match reg.lock().unwrap().get("task") {
+                    Some(cap) => match cap.execute(req) {
+                        Ok(resp) => println!("{}", serde_json::to_string_pretty(&resp.output).unwrap()),
+                        Err(e) => println!("错误: {} (code={})", e.message, e.code),
+                    },
+                    None => println!("能力 task 未注册"),
+                }
+            }
+            "list" => {
+                let req = crate::capability::CapabilityRequest {
+                    id: "task".to_string(),
+                    input: serde_json::json!({"op": "list"}),
+                    context: crate::capability::ExecutionContext {
+                        caller_id: "shell".to_string(),
+                        caller_type: crate::capability::CallerType::Shell,
+                        permissions: vec!["task:read".to_string()],
+                        resource_quota: crate::capability::ResourceQuota::default(),
+                    },
+                    timeout_ns: None,
+                    cancellation_token: None,
+                    audit: crate::capability::AuditInfo {
+                        actor: "shell".to_string(),
+                        action: "task.list".to_string(),
+                        timestamp: crate::capability::now_ns(),
+                        result: crate::capability::AuditResult::Executed,
+                        correlation_id: None,
+                    },
+                };
+                let reg = crate::capability::capability_registry();
+                match reg.lock().unwrap().get("task") {
+                    Some(cap) => match cap.execute(req) {
+                        Ok(resp) => println!("{}", serde_json::to_string_pretty(&resp.output).unwrap()),
+                        Err(e) => println!("错误: {} (code={})", e.message, e.code),
+                    },
+                    None => println!("能力 task 未注册"),
+                }
+            }
+            "inspect" => {
+                let id: u64 = parts.get(2).and_then(|s| s.parse().ok()).unwrap_or(0);
+                let req = crate::capability::CapabilityRequest {
+                    id: "task".to_string(),
+                    input: serde_json::json!({"op": "inspect", "id": id}),
+                    context: crate::capability::ExecutionContext {
+                        caller_id: "shell".to_string(),
+                        caller_type: crate::capability::CallerType::Shell,
+                        permissions: vec!["task:read".to_string()],
+                        resource_quota: crate::capability::ResourceQuota::default(),
+                    },
+                    timeout_ns: None,
+                    cancellation_token: None,
+                    audit: crate::capability::AuditInfo {
+                        actor: "shell".to_string(),
+                        action: "task.inspect".to_string(),
+                        timestamp: crate::capability::now_ns(),
+                        result: crate::capability::AuditResult::Executed,
+                        correlation_id: None,
+                    },
+                };
+                let reg = crate::capability::capability_registry();
+                match reg.lock().unwrap().get("task") {
+                    Some(cap) => match cap.execute(req) {
+                        Ok(resp) => println!("{}", serde_json::to_string_pretty(&resp.output).unwrap()),
+                        Err(e) => println!("错误: {} (code={})", e.message, e.code),
+                    },
+                    None => println!("能力 task 未注册"),
+                }
+            }
+            "cancel" => {
+                let id: u64 = parts.get(2).and_then(|s| s.parse().ok()).unwrap_or(0);
+                let req = crate::capability::CapabilityRequest {
+                    id: "task".to_string(),
+                    input: serde_json::json!({"op": "cancel", "id": id}),
+                    context: crate::capability::ExecutionContext {
+                        caller_id: "shell".to_string(),
+                        caller_type: crate::capability::CallerType::Shell,
+                        permissions: vec!["task:control".to_string()],
+                        resource_quota: crate::capability::ResourceQuota::default(),
+                    },
+                    timeout_ns: None,
+                    cancellation_token: None,
+                    audit: crate::capability::AuditInfo {
+                        actor: "shell".to_string(),
+                        action: "task.cancel".to_string(),
+                        timestamp: crate::capability::now_ns(),
+                        result: crate::capability::AuditResult::Executed,
+                        correlation_id: None,
+                    },
+                };
+                let reg = crate::capability::capability_registry();
+                match reg.lock().unwrap().get("task") {
+                    Some(cap) => match cap.execute(req) {
+                        Ok(resp) => println!("{}", serde_json::to_string_pretty(&resp.output).unwrap()),
+                        Err(e) => println!("错误: {} (code={})", e.message, e.code),
+                    },
+                    None => println!("能力 task 未注册"),
+                }
+            }
+            "pause" => {
+                let id: u64 = parts.get(2).and_then(|s| s.parse().ok()).unwrap_or(0);
+                let req = crate::capability::CapabilityRequest {
+                    id: "task".to_string(),
+                    input: serde_json::json!({"op": "pause", "id": id}),
+                    context: crate::capability::ExecutionContext {
+                        caller_id: "shell".to_string(),
+                        caller_type: crate::capability::CallerType::Shell,
+                        permissions: vec!["task:control".to_string()],
+                        resource_quota: crate::capability::ResourceQuota::default(),
+                    },
+                    timeout_ns: None,
+                    cancellation_token: None,
+                    audit: crate::capability::AuditInfo {
+                        actor: "shell".to_string(),
+                        action: "task.pause".to_string(),
+                        timestamp: crate::capability::now_ns(),
+                        result: crate::capability::AuditResult::Executed,
+                        correlation_id: None,
+                    },
+                };
+                let reg = crate::capability::capability_registry();
+                match reg.lock().unwrap().get("task") {
+                    Some(cap) => match cap.execute(req) {
+                        Ok(resp) => println!("{}", serde_json::to_string_pretty(&resp.output).unwrap()),
+                        Err(e) => println!("错误: {} (code={})", e.message, e.code),
+                    },
+                    None => println!("能力 task 未注册"),
+                }
+            }
+            "resume" => {
+                let id: u64 = parts.get(2).and_then(|s| s.parse().ok()).unwrap_or(0);
+                let req = crate::capability::CapabilityRequest {
+                    id: "task".to_string(),
+                    input: serde_json::json!({"op": "resume", "id": id}),
+                    context: crate::capability::ExecutionContext {
+                        caller_id: "shell".to_string(),
+                        caller_type: crate::capability::CallerType::Shell,
+                        permissions: vec!["task:control".to_string()],
+                        resource_quota: crate::capability::ResourceQuota::default(),
+                    },
+                    timeout_ns: None,
+                    cancellation_token: None,
+                    audit: crate::capability::AuditInfo {
+                        actor: "shell".to_string(),
+                        action: "task.resume".to_string(),
+                        timestamp: crate::capability::now_ns(),
+                        result: crate::capability::AuditResult::Executed,
+                        correlation_id: None,
+                    },
+                };
+                let reg = crate::capability::capability_registry();
+                match reg.lock().unwrap().get("task") {
+                    Some(cap) => match cap.execute(req) {
+                        Ok(resp) => println!("{}", serde_json::to_string_pretty(&resp.output).unwrap()),
+                        Err(e) => println!("错误: {} (code={})", e.message, e.code),
+                    },
+                    None => println!("能力 task 未注册"),
+                }
+            }
+            _ => println!("用法: task create <描述> [--agent <id>] | list | inspect <id> | cancel <id> | pause <id> | resume <id>"),
+        }
+    }
+
+    fn cmd_capability(&self, parts: &[&str]) {
+        let sub = parts.get(1).copied().unwrap_or("list");
+        let reg = crate::capability::capability_registry();
+        match sub {
+            "list" => {
+                let meta = reg.lock().unwrap().list_metadata();
+                for m in meta {
+                    println!(
+                        "  {:<20} {} (权限: {})",
+                        m.id,
+                        m.description,
+                        m.required_permissions.join(", ")
+                    );
+                }
+            }
+            "inspect" => {
+                let id = parts.get(2).copied().unwrap_or("");
+                match reg.lock().unwrap().get(id) {
+                    Some(cap) => {
+                        println!("能力: {}", cap.id());
+                        println!("说明: {}", cap.description());
+                        println!("输入 Schema: {}", serde_json::to_string_pretty(&cap.input_schema()).unwrap());
+                        println!("输出 Schema: {}", serde_json::to_string_pretty(&cap.output_schema()).unwrap());
+                        println!("权限要求: {:?}", cap.required_permissions());
+                    }
+                    None => println!("未找到能力: {}", id),
+                }
+            }
+            _ => println!("用法: capability list / inspect <id>"),
+        }
+    }
+
+    fn cmd_system(&self, parts: &[&str]) {
+        let sub = parts.get(1).copied().unwrap_or("status");
+        let req = crate::capability::CapabilityRequest {
+            id: "system".to_string(),
+            input: serde_json::json!({"op": sub}),
+            context: crate::capability::ExecutionContext {
+                caller_id: "shell".to_string(),
+                caller_type: crate::capability::CallerType::Shell,
+                permissions: vec!["sys:read".to_string()],
+                resource_quota: crate::capability::ResourceQuota::default(),
+            },
+            timeout_ns: None,
+            cancellation_token: None,
+            audit: crate::capability::AuditInfo {
+                actor: "shell".to_string(),
+                action: format!("system.{sub}"),
+                timestamp: crate::capability::now_ns(),
+                result: crate::capability::AuditResult::Executed,
+                correlation_id: None,
+            },
+        };
+        let reg = crate::capability::capability_registry();
+        match reg.lock().unwrap().get("system") {
+            Some(cap) => match cap.execute(req) {
+                Ok(resp) => println!("{}", serde_json::to_string_pretty(&resp.output).unwrap()),
+                Err(e) => println!("错误: {} (code={})", e.message, e.code),
+            },
+            None => println!("能力 system 未注册"),
+        }
+    }
+
+    fn cmd_app(&self, parts: &[&str]) {
+        let sub = parts.get(1).copied().unwrap_or("list");
+        match sub {
+            "list" => {
+                let apps = crate::gui::apps::AppKind::list();
+                println!("可用应用: {}", apps);
+            }
+            "launch" => {
+                let name = parts.get(2).copied().unwrap_or("");
+                match crate::gui::open_app(name) {
+                    Ok(id) => println!("已启动应用 {}, 窗口 id={}", name, id),
+                    Err(e) => println!("启动失败: {}", e),
+                }
+            }
+            "stop" => {
+                let id: u64 = parts.get(2).and_then(|s| s.parse().ok()).unwrap_or(0);
+                let ok = crate::gui::close_window(id);
+                if ok {
+                    println!("已关闭窗口 {}", id);
+                } else {
+                    println!("窗口 {} 不存在", id);
+                }
+            }
+            _ => println!("用法: app list / launch <名> / stop <id>"),
+        }
+    }
 }
 
 impl Default for Shell {
@@ -2382,6 +2738,11 @@ pub fn usage_line(cmd: &str) -> Option<&'static str> {
         "modunload" => "modunload <名称>",
         "history" => "history",
         "exit" | "quit" => "exit",
+        "agent" => "agent list / inspect <id> / start <id> / stop <id>",
+        "task" => "task create <描述> [--agent <id>] | list | inspect <id> | cancel <id> | pause <id> | resume <id>",
+        "capability" => "capability list / inspect <id>",
+        "system" => "system status / resources / logs",
+        "app" => "app list / launch <名> / stop <id>",
         _ => return None,
     })
 }
@@ -2426,6 +2787,11 @@ pub fn describe(cmd: &str) -> Option<&'static str> {
         "modunload" => "卸载内核模块",
         "history" => "查看命令历史",
         "exit" | "quit" => "退出 shell",
+        "agent" => "智能体管理：列表/查看/启动/停止智能体",
+        "task" => "任务管理：创建/列表/查看/取消/暂停/恢复任务",
+        "capability" => "系统能力：列出/查看已注册能力",
+        "system" => "系统信息：状态/资源/日志",
+        "app" => "应用管理：列表/启动/停止 GUI 应用",
         _ => return None,
     })
 }

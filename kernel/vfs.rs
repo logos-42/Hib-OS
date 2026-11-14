@@ -926,6 +926,15 @@ impl Vfs {
     }
 }
 
+/// 全局 VFS 单例（供统一系统能力层使用）。
+static GLOBAL_VFS: std::sync::OnceLock<std::sync::Mutex<Vfs>> =
+    std::sync::OnceLock::new();
+
+/// 获取全局 VFS。
+pub fn global_vfs() -> &'static std::sync::Mutex<Vfs> {
+    GLOBAL_VFS.get_or_init(|| std::sync::Mutex::new(Vfs::new()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

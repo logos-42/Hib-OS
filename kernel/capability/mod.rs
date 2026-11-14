@@ -12,6 +12,8 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+pub mod caps_impl;
+
 /// 能力 ID，全局唯一，格式为 `domain.action`，例如 `filesystem.read`。
 pub type CapabilityId = String;
 
