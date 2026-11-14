@@ -219,7 +219,7 @@ pub fn wants_json(argv: &[String]) -> bool {
     argv.iter().any(|a| a == "--json")
 }
 
-/// 从 argv 中移除 --json 标志，返回剩余参数。
+/// 从 argv 中移除 --json 标志。
 pub fn strip_json_flag(argv: &mut Vec<String>) {
     argv.retain(|a| a != "--json");
 }
@@ -294,7 +294,7 @@ mod tests {
     #[test]
     fn strip_json_flag() {
         let mut argv = vec!["agent".to_string(), "list".to_string(), "--json".to_string()];
-        strip_json_flag(&mut argv);
+        super::strip_json_flag(&mut argv);
         assert_eq!(argv, vec!["agent".to_string(), "list".to_string()]);
     }
 }

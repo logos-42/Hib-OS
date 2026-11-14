@@ -4,7 +4,7 @@
 //! 执行时间线、日志、结果、错误、资源消耗。
 //! 进度来自实际执行事件，不使用虚假递增百分比。
 
-use crate::kernel::capability::{CapabilityRequest, CapabilityResponse, ErrorCode, ExecutionContext,
+use crate::capability::{CapabilityRequest, ExecutionContext,
     now_ns, AuditInfo, AuditResult, CallerType};
 use serde_json::json;
 

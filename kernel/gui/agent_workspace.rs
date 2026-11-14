@@ -5,10 +5,10 @@
 //! 状态区分：Created / Initializing / Idle / Running / Waiting / Blocked / Paused /
 //! Completed / Failed / Stopped。
 
-use crate::kernel::permission::{
+use crate::permission::{
     AgentLifecycleState, AgentSummary, permission_manager,
 };
-use crate::kernel::capability::{CapabilityRequest, CapabilityResponse, ErrorCode, ExecutionContext,
+use crate::capability::{CapabilityRequest, CapabilityResponse, ErrorCode, ExecutionContext,
     now_ns, AuditInfo, AuditResult, CallerType};
 use serde_json::json;
 

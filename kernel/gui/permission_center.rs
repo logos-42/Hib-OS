@@ -4,13 +4,12 @@
 //! 执行历史、风险等级。
 //! 授权模式：Once / Session / Persistent。
 
-use crate::kernel::permission::{
+use crate::permission::{
     AgentLifecycleState, AgentSummary, Authorization, AuthorizationMode, Principal,
     permission_manager,
 };
-use crate::kernel::capability::{CapabilityRequest, ExecutionContext, now_ns, AuditInfo, AuditResult,
+use crate::capability::{CapabilityRequest, ExecutionContext, now_ns, AuditInfo, AuditResult,
     CallerType};
-use serde_json::json;
 
 /// 渲染 Permission Center 的文本表示。
 pub fn render_permission_center() -> String {

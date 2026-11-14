@@ -383,7 +383,6 @@ impl SystemCapability for ProcessCapability {
     fn execute(&self, req: CapabilityRequest) -> Result<CapabilityResponse, CapabilityError> {
         let op = req.input.get("op").and_then(|v| v.as_str()).unwrap_or("");
 
-        let pm = process_manager();
         let result = match op {
             "list" => {
                 let processes = process_manager().lock().unwrap();
