@@ -14,14 +14,17 @@
 //!    以及 `gui run` 打开的真实窗口，用的是同一份像素。
 
 pub mod apps;
+pub mod agent_workspace;
 pub mod bmp;
 pub mod compositor;
 pub mod compositor_ext;
 pub mod file_manager;
 pub mod gesture;
 pub mod input;
+pub mod permission_center;
 pub mod png;
 pub mod shell;
+pub mod task_workspace;
 pub mod taskbar;
 pub mod terminal;
 pub mod theme;

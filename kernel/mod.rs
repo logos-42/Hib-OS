@@ -86,6 +86,7 @@ pub mod channel_ext;
 pub mod capability;
 pub mod event;
 pub mod permission;
+pub mod shell_parser;
 pub mod buddy_alloc;
 pub mod slab_alloc;
 pub mod page_cache;

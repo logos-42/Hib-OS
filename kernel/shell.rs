@@ -2353,15 +2353,45 @@ impl Shell {
 
     // ---- Agent / 任务 / 能力 / 系统 / 应用 命令 (通过统一能力层) ----
 
-    fn cmd_agent(&self, parts: &[&str]) {
-        let sub = parts.get(1).copied().unwrap_or("list");
+    /// 检查命令参数中是否包含 --json 标志，并移除它。
+    fn json_flag(argv: &mut Vec<&str>) -> bool {
+        if argv.iter().any(|a| *a == "--json") {
+            argv.retain(|a| *a != "--json");
+            true
+        } else {
+            false
+        }
+    }
+
+    /// 输出 JSON 值：--json 时紧凑，否则 pretty print。
+    fn print_json(value: &serde_json::Value, json_mode: bool) {
+        if json_mode {
+            println!("{}", serde_json::to_string(value).unwrap());
+        } else {
+            println!("{}", serde_json::to_string_pretty(value).unwrap());
+        }
+    }
+
+    fn cmd_agent(&mut self, parts: &[&str]) {
+        let mut argv = parts.to_vec();
+        let json_mode = Self::json_flag(&mut argv);
+        let sub = argv.get(1).copied().unwrap_or("list");
         match sub {
             "list" => {
                 let output = crate::agent::list();
-                println!("{}", output);
+                if json_mode {
+                    let agents: Vec<serde_json::Value> = output
+                        .lines()
+                        .filter(|l| !l.is_empty())
+                        .map(|l| serde_json::json!({"line": l}))
+                        .collect();
+                    println!("{}", serde_json::to_string(&agents).unwrap());
+                } else {
+                    println!("{}", output);
+                }
             }
             "inspect" => {
-                let id: u64 = parts.get(2).and_then(|s| s.parse().ok()).unwrap_or(0);
+                let id: u64 = argv.get(2).and_then(|s| s.parse().ok()).unwrap_or(0);
                 let req = crate::capability::CapabilityRequest {
                     id: "agent".to_string(),
                     input: serde_json::json!({"op": "inspect", "id": id}),
@@ -2384,14 +2414,14 @@ impl Shell {
                 let reg = crate::capability::capability_registry();
                 match reg.lock().unwrap().get("agent") {
                     Some(cap) => match cap.execute(req) {
-                        Ok(resp) => println!("{}", serde_json::to_string_pretty(&resp.output).unwrap()),
+                        Ok(resp) => Self::print_json(&resp.output, json_mode),
                         Err(e) => println!("错误: {} (code={})", e.message, e.code),
                     },
                     None => println!("能力 agent 未注册"),
                 }
             }
             "start" => {
-                let id: u64 = parts.get(2).and_then(|s| s.parse().ok()).unwrap_or(0);
+                let id: u64 = argv.get(2).and_then(|s| s.parse().ok()).unwrap_or(0);
                 let result = crate::agent::dispatch(&format!("agent/start {id}"));
                 match result {
                     Ok(msg) => println!("{}", msg),
@@ -2399,26 +2429,28 @@ impl Shell {
                 }
             }
             "stop" => {
-                let id: u64 = parts.get(2).and_then(|s| s.parse().ok()).unwrap_or(0);
+                let id: u64 = argv.get(2).and_then(|s| s.parse().ok()).unwrap_or(0);
                 let result = crate::agent::stop(&id.to_string());
                 match result {
                     Ok(msg) => println!("{}", msg),
                     Err(e) => println!("错误: {}", e),
                 }
             }
-            _ => println!("用法: agent list / inspect <id> / start <id> / stop <id>"),
+            _ => println!("用法: agent list / inspect <id> / start <id> / stop <id> [--json]"),
         }
     }
 
-    fn cmd_task(&self, parts: &[&str]) {
-        let sub = parts.get(1).copied().unwrap_or("list");
+    fn cmd_task(&mut self, parts: &[&str]) {
+        let mut argv = parts.to_vec();
+        let json_mode = Self::json_flag(&mut argv);
+        let sub = argv.get(1).copied().unwrap_or("list");
         match sub {
             "create" => {
-                let desc: String = parts.get(2).copied().unwrap_or("").to_string();
-                let agent_id = parts
+                let desc: String = argv.get(2).copied().unwrap_or("").to_string();
+                let agent_id = argv
                     .iter()
                     .position(|p| *p == "--agent")
-                    .and_then(|i| parts.get(i + 1))
+                    .and_then(|i| argv.get(i + 1))
                     .map(|s| s.to_string());
                 let req = crate::capability::CapabilityRequest {
                     id: "task".to_string(),
@@ -2442,7 +2474,7 @@ impl Shell {
                 let reg = crate::capability::capability_registry();
                 match reg.lock().unwrap().get("task") {
                     Some(cap) => match cap.execute(req) {
-                        Ok(resp) => println!("{}", serde_json::to_string_pretty(&resp.output).unwrap()),
+                        Ok(resp) => Self::print_json(&resp.output, json_mode),
                         Err(e) => println!("错误: {} (code={})", e.message, e.code),
                     },
                     None => println!("能力 task 未注册"),
@@ -2471,14 +2503,14 @@ impl Shell {
                 let reg = crate::capability::capability_registry();
                 match reg.lock().unwrap().get("task") {
                     Some(cap) => match cap.execute(req) {
-                        Ok(resp) => println!("{}", serde_json::to_string_pretty(&resp.output).unwrap()),
+                        Ok(resp) => Self::print_json(&resp.output, json_mode),
                         Err(e) => println!("错误: {} (code={})", e.message, e.code),
                     },
                     None => println!("能力 task 未注册"),
                 }
             }
             "inspect" => {
-                let id: u64 = parts.get(2).and_then(|s| s.parse().ok()).unwrap_or(0);
+                let id: u64 = argv.get(2).and_then(|s| s.parse().ok()).unwrap_or(0);
                 let req = crate::capability::CapabilityRequest {
                     id: "task".to_string(),
                     input: serde_json::json!({"op": "inspect", "id": id}),
@@ -2501,14 +2533,14 @@ impl Shell {
                 let reg = crate::capability::capability_registry();
                 match reg.lock().unwrap().get("task") {
                     Some(cap) => match cap.execute(req) {
-                        Ok(resp) => println!("{}", serde_json::to_string_pretty(&resp.output).unwrap()),
+                        Ok(resp) => Self::print_json(&resp.output, json_mode),
                         Err(e) => println!("错误: {} (code={})", e.message, e.code),
                     },
                     None => println!("能力 task 未注册"),
                 }
             }
             "cancel" => {
-                let id: u64 = parts.get(2).and_then(|s| s.parse().ok()).unwrap_or(0);
+                let id: u64 = argv.get(2).and_then(|s| s.parse().ok()).unwrap_or(0);
                 let req = crate::capability::CapabilityRequest {
                     id: "task".to_string(),
                     input: serde_json::json!({"op": "cancel", "id": id}),
@@ -2531,14 +2563,14 @@ impl Shell {
                 let reg = crate::capability::capability_registry();
                 match reg.lock().unwrap().get("task") {
                     Some(cap) => match cap.execute(req) {
-                        Ok(resp) => println!("{}", serde_json::to_string_pretty(&resp.output).unwrap()),
+                        Ok(resp) => Self::print_json(&resp.output, json_mode),
                         Err(e) => println!("错误: {} (code={})", e.message, e.code),
                     },
                     None => println!("能力 task 未注册"),
                 }
             }
             "pause" => {
-                let id: u64 = parts.get(2).and_then(|s| s.parse().ok()).unwrap_or(0);
+                let id: u64 = argv.get(2).and_then(|s| s.parse().ok()).unwrap_or(0);
                 let req = crate::capability::CapabilityRequest {
                     id: "task".to_string(),
                     input: serde_json::json!({"op": "pause", "id": id}),
@@ -2561,14 +2593,14 @@ impl Shell {
                 let reg = crate::capability::capability_registry();
                 match reg.lock().unwrap().get("task") {
                     Some(cap) => match cap.execute(req) {
-                        Ok(resp) => println!("{}", serde_json::to_string_pretty(&resp.output).unwrap()),
+                        Ok(resp) => Self::print_json(&resp.output, json_mode),
                         Err(e) => println!("错误: {} (code={})", e.message, e.code),
                     },
                     None => println!("能力 task 未注册"),
                 }
             }
             "resume" => {
-                let id: u64 = parts.get(2).and_then(|s| s.parse().ok()).unwrap_or(0);
+                let id: u64 = argv.get(2).and_then(|s| s.parse().ok()).unwrap_or(0);
                 let req = crate::capability::CapabilityRequest {
                     id: "task".to_string(),
                     input: serde_json::json!({"op": "resume", "id": id}),
@@ -2591,50 +2623,74 @@ impl Shell {
                 let reg = crate::capability::capability_registry();
                 match reg.lock().unwrap().get("task") {
                     Some(cap) => match cap.execute(req) {
-                        Ok(resp) => println!("{}", serde_json::to_string_pretty(&resp.output).unwrap()),
+                        Ok(resp) => Self::print_json(&resp.output, json_mode),
                         Err(e) => println!("错误: {} (code={})", e.message, e.code),
                     },
                     None => println!("能力 task 未注册"),
                 }
             }
-            _ => println!("用法: task create <描述> [--agent <id>] | list | inspect <id> | cancel <id> | pause <id> | resume <id>"),
+            _ => println!("用法: task create <描述> [--agent <id>] | list | inspect <id> | cancel <id> | pause <id> | resume <id> [--json]"),
         }
     }
 
-    fn cmd_capability(&self, parts: &[&str]) {
-        let sub = parts.get(1).copied().unwrap_or("list");
+    fn cmd_capability(&mut self, parts: &[&str]) {
+        let mut argv = parts.to_vec();
+        let _json_mode = Self::json_flag(&mut argv);
+        let sub = argv.get(1).copied().unwrap_or("list");
         let reg = crate::capability::capability_registry();
         match sub {
             "list" => {
                 let meta = reg.lock().unwrap().list_metadata();
-                for m in meta {
-                    println!(
-                        "  {:<20} {} (权限: {})",
-                        m.id,
-                        m.description,
-                        m.required_permissions.join(", ")
-                    );
+                if _json_mode {
+                    let arr: Vec<serde_json::Value> = meta.iter().map(|m| serde_json::json!({
+                        "id": m.id,
+                        "description": m.description,
+                        "required_permissions": m.required_permissions
+                    })).collect();
+                    println!("{}", serde_json::to_string(&arr).unwrap());
+                } else {
+                    for m in meta {
+                        println!(
+                            "  {:<20} {} (权限: {})",
+                            m.id,
+                            m.description,
+                            m.required_permissions.join(", ")
+                        );
+                    }
                 }
             }
             "inspect" => {
-                let id = parts.get(2).copied().unwrap_or("");
+                let id = argv.get(2).copied().unwrap_or("");
                 match reg.lock().unwrap().get(id) {
                     Some(cap) => {
-                        println!("能力: {}", cap.id());
-                        println!("说明: {}", cap.description());
-                        println!("输入 Schema: {}", serde_json::to_string_pretty(&cap.input_schema()).unwrap());
-                        println!("输出 Schema: {}", serde_json::to_string_pretty(&cap.output_schema()).unwrap());
-                        println!("权限要求: {:?}", cap.required_permissions());
+                        if _json_mode {
+                            println!("{}", serde_json::to_string(&serde_json::json!({
+                                "id": cap.id(),
+                                "description": cap.description(),
+                                "input_schema": cap.input_schema(),
+                                "output_schema": cap.output_schema(),
+                                "error_schema": cap.error_schema(),
+                                "required_permissions": cap.required_permissions()
+                            })).unwrap());
+                        } else {
+                            println!("能力: {}", cap.id());
+                            println!("说明: {}", cap.description());
+                            println!("输入 Schema: {}", serde_json::to_string_pretty(&cap.input_schema()).unwrap());
+                            println!("输出 Schema: {}", serde_json::to_string_pretty(&cap.output_schema()).unwrap());
+                            println!("权限要求: {:?}", cap.required_permissions());
+                        }
                     }
                     None => println!("未找到能力: {}", id),
                 }
             }
-            _ => println!("用法: capability list / inspect <id>"),
+            _ => println!("用法: capability list / inspect <id> [--json]"),
         }
     }
 
-    fn cmd_system(&self, parts: &[&str]) {
-        let sub = parts.get(1).copied().unwrap_or("status");
+    fn cmd_system(&mut self, parts: &[&str]) {
+        let mut argv = parts.to_vec();
+        let json_mode = Self::json_flag(&mut argv);
+        let sub = argv.get(1).copied().unwrap_or("status");
         let req = crate::capability::CapabilityRequest {
             id: "system".to_string(),
             input: serde_json::json!({"op": sub}),
@@ -2657,7 +2713,7 @@ impl Shell {
         let reg = crate::capability::capability_registry();
         match reg.lock().unwrap().get("system") {
             Some(cap) => match cap.execute(req) {
-                Ok(resp) => println!("{}", serde_json::to_string_pretty(&resp.output).unwrap()),
+                Ok(resp) => Self::print_json(&resp.output, json_mode),
                 Err(e) => println!("错误: {} (code={})", e.message, e.code),
             },
             None => println!("能力 system 未注册"),
