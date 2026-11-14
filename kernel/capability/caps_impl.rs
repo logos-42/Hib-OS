@@ -39,6 +39,17 @@ pub struct TaskEntry {
     pub completed_ns: Option<u64>,
     pub result: Option<String>,
     pub error: Option<String>,
+    pub progress: u8,
+    pub cpu_ns: u64,
+    pub memory_bytes: u64,
+    pub timeline: Vec<TimelineEvent>,
+}
+
+/// 任务时间线事件。
+#[derive(Clone, Debug)]
+pub struct TimelineEvent {
+    pub timestamp: u64,
+    pub message: String,
 }
 
 struct TaskManager {
@@ -57,6 +68,7 @@ impl TaskManager {
     fn create(&mut self, description: String, agent_id: Option<String>) -> u64 {
         let id = self.next_id;
         self.next_id += 1;
+        let now = crate::monitor::get_time_ns();
         self.tasks.insert(
             id,
             TaskEntry {
@@ -64,10 +76,17 @@ impl TaskManager {
                 description,
                 state: TaskState::Created,
                 agent_id,
-                created_ns: crate::monitor::get_time_ns(),
+                created_ns: now,
                 completed_ns: None,
                 result: None,
                 error: None,
+                progress: 0,
+                cpu_ns: 0,
+                memory_bytes: 0,
+                timeline: vec![TimelineEvent {
+                    timestamp: now,
+                    message: "任务已创建".to_string(),
+                }],
             },
         );
         id
@@ -109,6 +128,65 @@ impl TaskManager {
 
     fn list(&self) -> Vec<TaskEntry> {
         self.tasks.values().cloned().collect()
+    }
+
+    /// 更新任务进度和资源消耗（用于 Agent 执行过程中的实时上报）。
+    fn update_progress(
+        &mut self,
+        id: u64,
+        progress: u8,
+        cpu_ns: u64,
+        memory_bytes: u64,
+        message: &str,
+    ) -> bool {
+        match self.tasks.get_mut(&id) {
+            Some(t) => {
+                t.progress = progress.min(100);
+                t.cpu_ns = cpu_ns;
+                t.memory_bytes = memory_bytes;
+                t.timeline.push(TimelineEvent {
+                    timestamp: crate::monitor::get_time_ns(),
+                    message: message.to_string(),
+                });
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// 标记任务完成。
+    fn complete(&mut self, id: u64, result: String) -> bool {
+        match self.tasks.get_mut(&id) {
+            Some(t) => {
+                t.state = TaskState::Completed;
+                t.progress = 100;
+                t.completed_ns = Some(crate::monitor::get_time_ns());
+                t.result = Some(result);
+                t.timeline.push(TimelineEvent {
+                    timestamp: crate::monitor::get_time_ns(),
+                    message: "任务已完成".to_string(),
+                });
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// 标记任务失败。
+    fn fail(&mut self, id: u64, error: String) -> bool {
+        match self.tasks.get_mut(&id) {
+            Some(t) => {
+                t.state = TaskState::Failed;
+                t.completed_ns = Some(crate::monitor::get_time_ns());
+                t.error = Some(error.clone());
+                t.timeline.push(TimelineEvent {
+                    timestamp: crate::monitor::get_time_ns(),
+                    message: format!("任务失败: {error}"),
+                });
+                true
+            }
+            None => false,
+        }
     }
 }
 
@@ -871,10 +949,14 @@ impl SystemCapability for TaskCapability {
         json!({
             "type": "object",
             "properties": {
-                "op": {"type": "string", "enum": ["create", "inspect", "cancel", "pause", "resume", "list"]},
+                "op": {"type": "string", "enum": ["create", "inspect", "cancel", "pause", "resume", "list", "progress"]},
                 "id": {"type": "integer"},
                 "description": {"type": "string"},
-                "agent_id": {"type": "string"}
+                "agent_id": {"type": "string"},
+                "progress": {"type": "integer", "minimum": 0, "maximum": 100},
+                "cpu_ns": {"type": "integer"},
+                "memory_bytes": {"type": "integer"},
+                "message": {"type": "string"}
             },
             "required": ["op"]
         })
@@ -939,6 +1021,17 @@ impl SystemCapability for TaskCapability {
                         TaskState::Cancelled => "cancelled",
                     },
                     "agent_id": task.agent_id,
+                    "progress": task.progress,
+                    "cpu_ns": task.cpu_ns,
+                    "memory_bytes": task.memory_bytes,
+                    "created_ns": task.created_ns,
+                    "completed_ns": task.completed_ns,
+                    "result": task.result,
+                    "error": task.error,
+                    "timeline": task.timeline.iter().map(|e| json!({
+                        "timestamp": e.timestamp,
+                        "message": e.message,
+                    })).collect::<Vec<_>>()
                 })
             }
             "cancel" => {
@@ -1034,6 +1127,47 @@ impl SystemCapability for TaskCapability {
                     })
                     .collect();
                 json!({"tasks": tasks})
+            }
+            "progress" => {
+                let id = req
+                    .input
+                    .get("id")
+                    .and_then(|v| v.as_u64())
+                    .ok_or_else(|| CapabilityError {
+                        code: ErrorCode::InvalidInput,
+                        message: "缺少 id 参数".to_string(),
+                        source: Some("task".to_string()),
+                        retryable: false,
+                        audit: req.audit.clone(),
+                    })?;
+                let progress = req
+                    .input
+                    .get("progress")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0) as u8;
+                let cpu_ns = req.input.get("cpu_ns").and_then(|v| v.as_u64()).unwrap_or(0);
+                let memory_bytes = req
+                    .input
+                    .get("memory_bytes")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+                let message = req
+                    .input
+                    .get("message")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("进度更新")
+                    .to_string();
+                let ok = tm.update_progress(id, progress, cpu_ns, memory_bytes, &message);
+                if !ok {
+                    return Err(CapabilityError {
+                        code: ErrorCode::NotFound,
+                        message: format!("任务 {id} 不存在"),
+                        source: Some("task".to_string()),
+                        retryable: false,
+                        audit: req.audit.clone(),
+                    });
+                }
+                json!({"id": id, "progress": progress, "updated": true})
             }
             _ => {
                 return Err(CapabilityError {

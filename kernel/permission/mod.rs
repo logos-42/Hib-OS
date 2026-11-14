@@ -66,6 +66,14 @@ impl AgentLifecycleState {
             AgentLifecycleState::Stopped => "stopped",
         }
     }
+
+    /// 是否为终止态。
+    pub fn is_terminal(self) -> bool {
+        matches!(
+            self,
+            AgentLifecycleState::Completed | AgentLifecycleState::Failed | AgentLifecycleState::Stopped
+        )
+    }
 }
 
 /// 授权模式。

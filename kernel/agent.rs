@@ -28,10 +28,24 @@ pub type AgentId = u64;
 /// 子智能体状态。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AgentState {
-    /// 空闲，等邮箱。
+    /// 已创建，未初始化。
+    Created,
+    /// 正在初始化（加载模型、上下文、工具）。
+    Initializing,
+    /// 空闲，等待任务。
     Idle,
     /// 正在执行任务。
-    Working,
+    Running,
+    /// 等待外部事件（用户输入、权限批准、其他 Agent）。
+    Waiting,
+    /// 被阻塞（权限缺失、资源不足、依赖未完成）。
+    Blocked,
+    /// 已暂停。
+    Paused,
+    /// 任务成功完成。
+    Completed,
+    /// 任务失败。
+    Failed,
     /// 已停止（线程退出）。
     Stopped,
 }
@@ -39,10 +53,30 @@ pub enum AgentState {
 impl AgentState {
     pub fn name(self) -> &'static str {
         match self {
+            AgentState::Created => "created",
+            AgentState::Initializing => "initializing",
             AgentState::Idle => "idle",
-            AgentState::Working => "working",
+            AgentState::Running => "running",
+            AgentState::Waiting => "waiting",
+            AgentState::Blocked => "blocked",
+            AgentState::Paused => "paused",
+            AgentState::Completed => "completed",
+            AgentState::Failed => "failed",
             AgentState::Stopped => "stopped",
         }
+    }
+
+    /// 是否为终止态。
+    pub fn is_terminal(self) -> bool {
+        matches!(
+            self,
+            AgentState::Completed | AgentState::Failed | AgentState::Stopped
+        )
+    }
+
+    /// 是否可接收新任务。
+    pub fn is_runnable(self) -> bool {
+        matches!(self, AgentState::Idle | AgentState::Running)
     }
 }
 
@@ -277,7 +311,7 @@ fn agent_loop(id: AgentId, mailbox: &str) {
             } else {
                 match a.mailbox.pop_front() {
                     Some(t) => {
-                        a.state = AgentState::Working;
+                        a.state = AgentState::Running;
                         (Some(t), false)
                     }
                     None => {
@@ -480,7 +514,7 @@ pub fn wait_idle(name_or_id: &str, timeout: Option<Duration>) -> Result<String, 
         {
             let o = orch().lock().unwrap();
             match o.agents.get(&id) {
-                Some(a) if a.state != AgentState::Working && a.mailbox.is_empty() => {
+                Some(a) if a.state != AgentState::Running && a.mailbox.is_empty() => {
                     return Ok(format!(
                         "{} 已空闲 state={} done={} failed={} last={:?}",
                         a.name,
@@ -573,25 +607,44 @@ pub fn dispatch(payload: &str) -> Result<String, String> {
 /// 汇总状态。
 pub fn status() -> String {
     let o = orch().lock().unwrap();
+    let mut created = 0;
+    let mut initializing = 0;
     let mut idle = 0;
-    let mut working = 0;
+    let mut running = 0;
+    let mut waiting = 0;
+    let mut blocked = 0;
+    let mut paused = 0;
+    let mut completed = 0;
+    let mut failed = 0;
     let mut stopped = 0;
     for a in o.agents.values() {
         match a.state {
+            AgentState::Created => created += 1,
+            AgentState::Initializing => initializing += 1,
             AgentState::Idle => idle += 1,
-            AgentState::Working => working += 1,
+            AgentState::Running => running += 1,
+            AgentState::Waiting => waiting += 1,
+            AgentState::Blocked => blocked += 1,
+            AgentState::Paused => paused += 1,
+            AgentState::Completed => completed += 1,
+            AgentState::Failed => failed += 1,
             AgentState::Stopped => stopped += 1,
         }
     }
     format!(
-        "agents={} idle={} working={} stopped={} spawned={} completed={} failed={} barriers={} results={}",
+        "agents={} created={} initializing={} idle={} running={} waiting={} blocked={} paused={} completed={} failed={} stopped={} spawned={} barriers={} results={}",
         o.agents.len(),
+        created,
+        initializing,
         idle,
-        working,
+        running,
+        waiting,
+        blocked,
+        paused,
+        completed,
+        failed,
         stopped,
         o.spawned,
-        o.completed,
-        o.failed,
         o.barriers.len(),
         o.results.len()
     )
