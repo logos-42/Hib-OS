@@ -30,13 +30,17 @@ pub type Permission = String;
 pub type Timestamp = u64;
 
 /// 全局请求 ID 生成器。
+#[allow(dead_code)]
 static REQ_ID_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+#[allow(dead_code)]
 static EVT_ID_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
+#[allow(dead_code)]
 fn next_request_id() -> RequestId {
     REQ_ID_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
 
+#[allow(dead_code)]
 fn next_event_id() -> EventId {
     EVT_ID_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }

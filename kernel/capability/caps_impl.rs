@@ -6,7 +6,7 @@
 use super::{
     AuditInfo, AuditResult, CallerType, CapabilityError, CapabilityMetadata,
     CapabilityRequest, CapabilityResponse, ErrorCode, ExecutionContext, now_ns,
-    Permission, ResourceQuota, SystemCapability, capability_registry,
+    Permission, SystemCapability, capability_registry,
 };
 use crate::event::{publish_from_capability, SystemEventType};
 use crate::monitor;
@@ -156,6 +156,7 @@ impl TaskManager {
     }
 
     /// 标记任务完成。
+    #[allow(dead_code)]
     fn complete(&mut self, id: u64, result: String) -> bool {
         match self.tasks.get_mut(&id) {
             Some(t) => {
@@ -174,6 +175,7 @@ impl TaskManager {
     }
 
     /// 标记任务失败。
+    #[allow(dead_code)]
     fn fail(&mut self, id: u64, error: String) -> bool {
         match self.tasks.get_mut(&id) {
             Some(t) => {

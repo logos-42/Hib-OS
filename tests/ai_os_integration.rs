@@ -697,7 +697,7 @@ fn system_status_consistency() {
     };
     use serde_json::json;
 
-    let ctx = ExecutionContext {
+    let _ctx = ExecutionContext {
         caller_id: "test".to_string(),
         caller_type: hibos::capability::CallerType::Shell,
         permissions: vec!["sys:read".to_string()],

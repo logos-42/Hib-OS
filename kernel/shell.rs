@@ -2113,6 +2113,7 @@ impl Shell {
         }
     }
 
+    #[allow(dead_code)]
     fn cmd_cd(&mut self, path: Option<&str>) {
         self.refresh_virtual_mounts();
         let target = match path {
@@ -2134,6 +2135,7 @@ impl Shell {
         self.vfs.cd(&target)
     }
 
+    #[allow(dead_code)]
     fn cmd_cat(&mut self, path: Option<&str>) {
         let Some(path) = path else {
             sh_println!("用法: cat <路径>");
@@ -2180,6 +2182,7 @@ impl Shell {
         }
     }
 
+    #[allow(dead_code)]
     fn cmd_mkdir(&mut self, path: Option<&str>) {
         let Some(path) = path else {
             sh_println!("用法: mkdir <路径>");
@@ -2200,6 +2203,7 @@ impl Shell {
         self.vfs.mkdir(&path)
     }
 
+    #[allow(dead_code)]
     fn cmd_touch(&mut self, path: Option<&str>) {
         let Some(path) = path else {
             sh_println!("用法: touch <路径>");
@@ -2220,6 +2224,7 @@ impl Shell {
         self.vfs.touch(&path)
     }
 
+    #[allow(dead_code)]
     fn cmd_rm(&mut self, path: Option<&str>) {
         let Some(path) = path else {
             sh_println!("用法: rm <路径>");

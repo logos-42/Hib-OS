@@ -8,7 +8,7 @@
 
 use crate::monitor::get_stats;
 use crate::permission::permission_manager;
-use serde_json::json;
+
 
 /// 系统资源快照（非 AI 资源）。
 #[derive(Clone, Debug)]

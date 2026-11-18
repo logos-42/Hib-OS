@@ -7,8 +7,7 @@
 use crate::permission::{
     AuthorizationMode, permission_manager,
 };
-use crate::capability::{CapabilityRequest, ExecutionContext, now_ns, AuditInfo, AuditResult,
-    CallerType};
+use crate::capability::AuditResult;
 
 /// 渲染 Permission Center 的文本表示。
 pub fn render_permission_center() -> String {

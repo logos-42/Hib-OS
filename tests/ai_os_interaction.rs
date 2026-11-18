@@ -408,7 +408,7 @@ fn consistency_test_error_structure() {
 #[test]
 fn consistency_test_permission_judgment() {
     let pm = safe_lock(permission_manager());
-    let agent_id = pm.create_agent(
+    let _agent_id = pm.create_agent(
         Principal::User { user_id: "eve".to_string() },
         "e2e-perm-test",
         "tester",

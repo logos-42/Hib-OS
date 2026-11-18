@@ -260,6 +260,7 @@ pub fn resume_task(task_id: u64) -> Result<String, String> {
 /// 任务详情。
 #[derive(Clone, Debug)]
 struct TaskDetail {
+    #[allow(dead_code)]
     id: u64,
     description: String,
     status: String,

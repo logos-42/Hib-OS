@@ -4,10 +4,9 @@
 //! 每个 Agent 有：Agent ID / Owner / Principal / 能力集 / 权限作用域 /
 //! 执行上下文 / 资源配额 / 生命周期状态 / 审计轨迹。
 
-use super::capability::{now_ns, AuditInfo, AuditResult, CapabilityError, ExecutionContext, Permission};
-use serde_json::Value;
+use super::capability::{now_ns, AuditInfo, AuditResult, CapabilityError, ExecutionContext};
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 
 /// Agent ID。
 pub type AgentId = u64;
