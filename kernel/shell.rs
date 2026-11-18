@@ -10,7 +10,7 @@ use std::io::IsTerminal;
 use std::io::Write as _;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::{ansi_bold, ansi_bold_green, ansi_bold_yellow, ansi_grey, ansi_green, ansi_red, ansi_yellow, ansi_bold_blue};
+use crate::{ansi_bold_green, ansi_bold_yellow, ansi_green, ansi_red, ansi_yellow, ansi_bold_blue};
 use crate::theme::{current_user_name, current_host_name};
 
 // ---------------------------------------------------------------------------
@@ -904,9 +904,55 @@ impl Shell {
                 }
                 true
             }
-            other => {
-                sh_println!("{}", ansi_red!(format!("未知命令: {} (试试 help)", other)));
-                false
+            _ => {
+                // 非内置命令：若有可用 LLM，则把整句当作自然语言对话交给 AI；
+                // 否则给出可操作的提示，而不是冷冰冰的「未知命令」。
+                let question = argv.join(" ");
+                let providers = self.configured_providers();
+                let mut replied = false;
+                for provider in providers.iter() {
+                    let Some(key) = self.handler.consciousness.api_key(provider) else {
+                        continue;
+                    };
+                    match crate::llm::chat(provider, key, &question) {
+                        Ok(reply) => {
+                            sh_println!("{}", reply.trim_end());
+                            replied = true;
+                        }
+                        Err(e) => {
+                            sh_println!(
+                                "{}",
+                                ansi_red!(format!("AI 调用失败 ({}): {}", provider, e))
+                            );
+                        }
+                    }
+                    break;
+                }
+                if !replied {
+                    // 无 LLM 时，对常见中文对话给出基础回复，避免冷冰冰的「未知命令」。
+                    let q = question.trim();
+                    let basic = match q {
+                        "你好" | "您好" | "hello" | "hi" => Some("你好！我是 HibOS 的交互式 shell。输入 help 查看可用命令，或直接和我对话（设置 LLM API Key 后可获得更智能的回复）。"),
+                        "你是谁" | "你叫什么" => Some("我是 HibOS 内核的 shell，基于 DID 身份与去中心化 QUIC 通道构建。输入 help 查看命令列表。"),
+                        "help" | "帮助" => Some("输入 help 查看完整命令列表，或尝试：sense user/db | act user/db whoami | quic/listen 127.0.0.1:9000"),
+                        "再见" | "bye" | "goodbye" => Some("再见！输入 exit 退出 shell。"),
+                        _ => None,
+                    };
+                    if let Some(reply) = basic {
+                        sh_println!("{}", reply);
+                        replied = true;
+                    }
+                    if !replied {
+                        sh_println!(
+                            "{}",
+                            ansi_red!(format!(
+                                "未知命令: {}（试试 help；设置 DEEPSEEK_API_KEY 或 HIBOS_LLM_<PROVIDER>_KEY 可启用 AI 对话）",
+                                question
+                            ))
+                        );
+                    }
+                }
+                replied
             }
         };
 
