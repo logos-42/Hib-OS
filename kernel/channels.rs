@@ -51,6 +51,8 @@ pub enum ChannelKind {
     Trace,
     /// 网络接口
     Net,
+    /// 去中心化 QUIC 通道（以 DID 为身份锚点）
+    Quic,
     /// 进程
     Process,
     /// 用户 / 身份
@@ -131,6 +133,7 @@ impl ChannelKind {
             ChannelKind::Driver => "driver",
             ChannelKind::Plugin => "plugin",
             ChannelKind::Net => "net",
+            ChannelKind::Quic => "quic",
             ChannelKind::Agent => "agent",
             ChannelKind::Desktop => "desktop",
             ChannelKind::Path => "path",
@@ -416,6 +419,13 @@ pub fn bootstrap() -> ChannelRegistry {
         (ChannelKind::User, "user/db", Access::ReadWrite),
         (ChannelKind::Net, "socket/tcp", Access::ReadWrite),
         (ChannelKind::Net, "net/dns", Access::ReadWrite),
+        // —— 去中心化 QUIC 通道（对端以 DID 身份确认） ——
+        (ChannelKind::Quic, "quic/peers", Access::Read),
+        (ChannelKind::Quic, "quic/sessions", Access::Read),
+        (ChannelKind::Quic, "quic/listen", Access::Write),
+        (ChannelKind::Quic, "quic/connect", Access::Write),
+        (ChannelKind::Quic, "quic/send", Access::Write),
+        (ChannelKind::Quic, "quic/close", Access::Write),
         // —— 其余核心缺口：IPC / 安全 / 设备树 / init / 时间 / 包管理 / 作业控制 ——
         (ChannelKind::Io, "ipc/pipe", Access::ReadWrite),
         (ChannelKind::Memory, "ipc/shm", Access::ReadWrite),
@@ -648,8 +658,9 @@ mod tests {
     #[test]
     fn bootstrap_opens_all_channels() {
         let reg = bootstrap();
-        assert_eq!(reg.len(), 248);
+        assert_eq!(reg.len(), 254);
         assert_eq!(reg.of_kind(ChannelKind::Net).count(), 5);
+        assert_eq!(reg.of_kind(ChannelKind::Quic).count(), 6);
         assert_eq!(reg.of_kind(ChannelKind::Will).count(), 4);
         assert_eq!(reg.of_kind(ChannelKind::Context).count(), 2);
         assert_eq!(reg.of_kind(ChannelKind::Action).count(), 23);
@@ -717,6 +728,12 @@ mod tests {
         assert!(reg.find("vfs_ai/semantic-search").is_some());
         assert!(reg.find("net_ai/send").is_some());
         assert!(reg.find("net_ai/route-intent").is_some());
+        assert!(reg.find("quic/peers").is_some());
+        assert!(reg.find("quic/sessions").is_some());
+        assert!(reg.find("quic/listen").is_some());
+        assert!(reg.find("quic/connect").is_some());
+        assert!(reg.find("quic/send").is_some());
+        assert!(reg.find("quic/close").is_some());
         assert!(reg.find("driver_ai/register-device").is_some());
         assert!(reg.find("driver_ai/hotplug-poll").is_some());
         assert!(reg.find("shell_ai/parse").is_some());

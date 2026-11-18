@@ -10,6 +10,128 @@ use std::io::IsTerminal;
 use std::io::Write as _;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+// ==================== ANSI 颜色宏（crate 根级别，theme 与 shell 均可使用）====================
+
+/// 绿色（仅真实终端生效，否则原样）。
+#[macro_export]
+macro_rules! ansi_green {
+    ($s:expr) => {{
+        if std::io::stdout().is_terminal() {
+            format!("\x1b[32m{}\x1b[0m", $s)
+        } else {
+            format!("{}", $s)
+        }
+    }};
+}
+
+/// 红色（仅真实终端生效，否则原样）。
+#[macro_export]
+macro_rules! ansi_red {
+    ($s:expr) => {{
+        if std::io::stdout().is_terminal() {
+            format!("\x1b[31m{}\x1b[0m", $s)
+        } else {
+            format!("{}", $s)
+        }
+    }};
+}
+
+/// 黄色（仅真实终端生效，否则原样）。
+#[macro_export]
+macro_rules! ansi_yellow {
+    ($s:expr) => {{
+        if std::io::stdout().is_terminal() {
+            format!("\x1b[33m{}\x1b[0m", $s)
+        } else {
+            format!("{}", $s)
+        }
+    }};
+}
+
+/// 蓝色（仅真实终端生效，否则原样）。
+#[macro_export]
+macro_rules! ansi_blue {
+    ($s:expr) => {{
+        if std::io::stdout().is_terminal() {
+            format!("\x1b[34m{}\x1b[0m", $s)
+        } else {
+            format!("{}", $s)
+        }
+    }};
+}
+
+/// 青色（仅真实终端生效，否则原样）。
+#[macro_export]
+macro_rules! ansi_cyan {
+    ($s:expr) => {{
+        if std::io::stdout().is_terminal() {
+            format!("\x1b[36m{}\x1b[0m", $s)
+        } else {
+            format!("{}", $s)
+        }
+    }};
+}
+
+/// 加粗（仅真实终端生效，否则原样）。
+#[macro_export]
+macro_rules! ansi_bold {
+    ($s:expr) => {{
+        if std::io::stdout().is_terminal() {
+            format!("\x1b[1m{}\x1b[0m", $s)
+        } else {
+            format!("{}", $s)
+        }
+    }};
+}
+
+/// 加粗 + 绿色（重点显示）。
+#[macro_export]
+macro_rules! ansi_bold_green {
+    ($s:expr) => {{
+        if std::io::stdout().is_terminal() {
+            format!("\x1b[1m\x1b[32m{}\x1b[0m", $s)
+        } else {
+            format!("{}", $s)
+        }
+    }};
+}
+
+/// 加粗 + 红色（重点显示）。
+#[macro_export]
+macro_rules! ansi_bold_red {
+    ($s:expr) => {{
+        if std::io::stdout().is_terminal() {
+            format!("\x1b[1m\x1b[31m{}\x1b[0m", $s)
+        } else {
+            format!("{}", $s)
+        }
+    }};
+}
+
+/// 加粗 + 黄色（重点显示）。
+#[macro_export]
+macro_rules! ansi_bold_yellow {
+    ($s:expr) => {{
+        if std::io::stdout().is_terminal() {
+            format!("\x1b[1m\x1b[33m{}\x1b[0m", $s)
+        } else {
+            format!("{}", $s)
+        }
+    }};
+}
+
+/// 加粗 + 蓝色（重点显示）。
+#[macro_export]
+macro_rules! ansi_bold_blue {
+    ($s:expr) => {{
+        if std::io::stdout().is_terminal() {
+            format!("\x1b[1m\x1b[34m{}\x1b[0m", $s)
+        } else {
+            format!("{}", $s)
+        }
+    }};
+}
+
 /// 用户名与主机名（可自定义，默认 root@hibos）。
 static USER_NAME: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 static HOST_NAME: std::sync::OnceLock<String> = std::sync::OnceLock::new();
@@ -222,8 +344,8 @@ mod theme {
 
     /// 经典 Linux 风 prompt：`root@hibos:<path># `（绿主机 + 蓝路径，加粗重点）。
     pub fn prompt(cwd: &str) -> String {
-        let host = theme::ansi_bold_green!("root@hibos");
-        let path = theme::ansi_bold_blue!(if cwd.is_empty() || cwd == "/" { "~" } else { cwd });
+        let host = ansi_bold_green!("root@hibos");
+        let path = ansi_bold_blue!(if cwd.is_empty() || cwd == "/" { "~" } else { cwd });
         format!("{}:{}# ", host, path)
     }
 

@@ -64,6 +64,7 @@ use crate::sync;
 use crate::time::get_time_ns;
 use crate::tty::tty;
 use crate::user::userdb;
+use crate::quic::quic;
 use crate::ai_token::TokenId;
 use crate::scheduler::CpuPriority;
 use exec::ExecId;
@@ -254,6 +255,30 @@ pub fn probe(name: &str) -> Option<String> {
         "mount/table" => Some(mounts().lock().unwrap().list()),
         "proc/sysinfo" => Some(procfs().lock().unwrap().snapshot()),
         "net/interfaces" => Some(ifaces().lock().list()),
+        // —— 去中心化 QUIC 通道（对端以 DID 身份确认） ——
+        "quic/peers" => {
+            let q = quic().lock().unwrap();
+            let peers: Vec<String> = q.peers();
+            Some(format!("peers=[{}]", peers.join(",")))
+        }
+        "quic/sessions" => {
+            let q = quic().lock().unwrap();
+            let sessions: Vec<String> = q
+                .sessions()
+                .iter()
+                .map(|s| {
+                    format!(
+                        "id={} local_did={} peer_did={:?} addr={} state={:?}",
+                        s.id,
+                        s.local_did,
+                        s.peer_did,
+                        s.local_addr,
+                        s.state
+                    )
+                })
+                .collect();
+            Some(format!("sessions=[{}]", sessions.join(";")))
+        }
         "dev/bus" => Some(bus().lock().unwrap().list()),
         // —— 意志层：动机 / 信念 / 判断力 ——
         "motive/self" => Some(motives().lock().unwrap().status()),
@@ -824,6 +849,11 @@ fn act_raw(name: &str, payload: &str) -> Option<Result<String, String>> {
         "mount/table" => Some(act_mount(payload)),
         "proc/sysinfo" => Some(act_procfs(payload)),
         "net/interfaces" => Some(act_netif(payload)),
+        // —— 去中心化 QUIC 通道（对端以 DID 身份确认） ——
+        "quic/listen" => Some(act_quic_listen(payload)),
+        "quic/connect" => Some(act_quic_connect(payload)),
+        "quic/send" => Some(act_quic_send(payload)),
+        "quic/close" => Some(act_quic_close(payload)),
         "dev/bus" => Some(act_bus(payload)),
         // —— 外部世界出口 ——
         "gateway/net" => Some(act_gateway(payload)),
@@ -1391,6 +1421,44 @@ fn act_user(payload: &str) -> Result<String, String> {
         Some("whoami") | Some("") | None => Ok(userdb().lock().unwrap().whoami()),
         _ => Err("用法: act user/db adduser <名> | su <名|did> | sudo | whoami".to_string()),
     }
+}
+
+/// 去中心化 QUIC：监听本地地址，绑定当前 DID。
+fn act_quic_listen(payload: &str) -> Result<String, String> {
+    let mut it = payload.split_whitespace();
+    let addr = it.next().ok_or("用法: quic/listen <地址>")?;
+    let id = quic().lock().unwrap().listen(addr)?;
+    Ok(format!("已监听 quic 会话 id={} 地址={} did={}", id, addr, userdb().lock().unwrap().current_did))
+}
+
+/// 去中心化 QUIC：向对端 DID 发起连接。
+fn act_quic_connect(payload: &str) -> Result<String, String> {
+    let mut it = payload.split_whitespace();
+    let peer_did = it.next().ok_or("用法: quic/connect <对端 did> <地址>")?;
+    let addr = it.next().ok_or("用法: quic/connect <对端 did> <地址>")?;
+    let id = quic().lock().unwrap().connect(peer_did, addr)?;
+    Ok(format!("quic 会话 id={} 已与 {} ({}) 建立", id, peer_did, addr))
+}
+
+/// 去中心化 QUIC：向会话发送数据。
+fn act_quic_send(payload: &str) -> Result<String, String> {
+    let mut it = payload.splitn(3, ' ');
+    let id: u64 = it.next().ok_or("用法: quic/send <会话 id> <数据>")?
+        .parse()
+        .map_err(|_| "无效会话 id".to_string())?;
+    let data = it.next().ok_or("用法: quic/send <会话 id> <数据>")?;
+    let n = quic().lock().unwrap().send(id, data)?;
+    Ok(format!("quic 会话 {} 已发送 {} 字节", id, n))
+}
+
+/// 去中心化 QUIC：关闭会话。
+fn act_quic_close(payload: &str) -> Result<String, String> {
+    let mut it = payload.split_whitespace();
+    let id: u64 = it.next().ok_or("用法: quic/close <会话 id>")?
+        .parse()
+        .map_err(|_| "无效会话 id".to_string())?;
+    quic().lock().unwrap().close(id)?;
+    Ok(format!("quic 会话 {} 已关闭", id))
 }
 
 fn act_socket(payload: &str) -> Result<String, String> {

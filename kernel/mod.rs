@@ -50,6 +50,7 @@ pub mod pkg;
 pub mod plugin;
 pub mod power;
 pub mod proc;
+pub mod quic;
 pub mod proc2;
 pub mod procfs;
 pub mod protection;
