@@ -13,7 +13,7 @@ pub struct ProcInfo {
     pub ppid: u32,
     pub name: String,
     pub state: String,
-    pub uid: u32,
+    pub did: String,
     pub started_ns: u128,
     pub child: Option<Child>,
 }
@@ -31,7 +31,7 @@ impl ProcTable {
             ppid: 0,
             name: "hibos-kernel".to_string(),
             state: "running".to_string(),
-            uid: 0,
+            did: crate::user::ROOT_DID.to_string(),
             started_ns: 0,
             child: None,
         });
@@ -58,13 +58,13 @@ impl ProcTable {
         match cmd.spawn() {
             Ok(child) => {
                 let name = cmdline.split_whitespace().next().unwrap_or("proc").to_string();
-                let uid = crate::user::userdb().lock().unwrap().current_uid;
+                let did = crate::user::userdb().lock().unwrap().current_did.clone();
                 self.procs.push(ProcInfo {
                     pid,
                     ppid: 1,
                     name,
                     state: "running".to_string(),
-                    uid,
+                    did,
                     started_ns: get_time_ns() as u128,
                     child: Some(child),
                 });
@@ -103,17 +103,20 @@ impl ProcTable {
     /// 进程树文本。
     pub fn tree(&mut self) -> String {
         self.refresh();
-        let mut out = String::from("hibos-kernel (1) [running] uid=0\n");
+        let mut out = format!(
+            "hibos-kernel (1) [running] did={}\n",
+            crate::user::ROOT_DID
+        );
         fn walk(t: &ProcTable, pid: u32, depth: usize, out: &mut String) {
             for p in t.procs.iter().filter(|p| p.ppid == pid) {
-                out.push_str(&format!(
-                    "{}{} ({}) [{}] uid={}\n",
-                    "  ".repeat(depth),
-                    p.name,
-                    p.pid,
-                    p.state,
-                    p.uid
-                ));
+            out.push_str(&format!(
+                "{}{} ({}) [{}] did={}\n",
+                "  ".repeat(depth),
+                p.name,
+                p.pid,
+                p.state,
+                p.did
+            ));
                 walk(t, p.pid, depth + 1, out);
             }
         }
@@ -133,8 +136,8 @@ impl ProcTable {
         let mut out = String::new();
         for p in &self.procs {
             out.push_str(&format!(
-                "pid={:<4} ppid={:<4} {:<16} {:<16} uid={}\n",
-                p.pid, p.ppid, p.name, p.state, p.uid
+                "pid={:<4} ppid={:<4} {:<16} {:<16} did={}\n",
+                p.pid, p.ppid, p.name, p.state, p.did
             ));
         }
         out.trim_end().to_string()

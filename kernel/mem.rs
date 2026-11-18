@@ -10,7 +10,7 @@ pub struct Region {
     pub addr: u64,
     pub len: u64,
     pub perms: String,
-    pub uid: u32,
+    pub did: String,
 }
 
 pub struct MemManager {
@@ -70,11 +70,16 @@ impl MemManager {
         ))
     }
 
-    pub fn mmap(&mut self, len: u64, perms: &str, uid: u32) -> Result<String, String> {
+    pub fn mmap(&mut self, len: u64, perms: &str, did: &str) -> Result<String, String> {
         let addr = self.next_addr;
         self.next_addr += (len + 0xfff) & !0xfff;
-        self.regions.push(Region { addr, len, perms: perms.to_string(), uid });
-        Ok(format!("mmap 0x{:x} len={}B perms={} uid={}", addr, len, perms, uid))
+        self.regions.push(Region {
+            addr,
+            len,
+            perms: perms.to_string(),
+            did: did.to_string(),
+        });
+        Ok(format!("mmap 0x{:x} len={}B perms={} did={}", addr, len, perms, did))
     }
 
     pub fn munmap(&mut self, addr: u64) -> Result<String, String> {
@@ -93,7 +98,7 @@ impl MemManager {
         }
         self.regions
             .iter()
-            .map(|r| format!("0x{:x} len={}B perms={} uid={}", r.addr, r.len, r.perms, r.uid))
+            .map(|r| format!("0x{:x} len={}B perms={} did={}", r.addr, r.len, r.perms, r.did))
             .collect::<Vec<_>>()
             .join("\n")
     }

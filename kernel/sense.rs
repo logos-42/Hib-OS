@@ -1332,8 +1332,8 @@ fn act_mmap(payload: &str) -> Result<String, String> {
         Some("mmap") => {
             let bytes = parse_mib(it.next().unwrap_or("0"))?;
             let perms = it.next().unwrap_or("rw");
-            let uid = userdb().lock().unwrap().current_uid;
-            mem().lock().unwrap().mmap(bytes, perms, uid)
+            let did = userdb().lock().unwrap().current_did.clone();
+            mem().lock().unwrap().mmap(bytes, perms, &did)
         }
         Some("munmap") => {
             let a = it.next().unwrap_or("0");
@@ -1380,16 +1380,16 @@ fn act_user(payload: &str) -> Result<String, String> {
     match it.next() {
         Some("adduser") | Some("useradd") => {
             let name = it.next().ok_or("用法: adduser <名称>")?;
-            let uid = userdb().lock().unwrap().adduser(name)?;
-            Ok(format!("已创建用户 {} uid={}", name, uid))
+            let did = userdb().lock().unwrap().adduser(name)?;
+            Ok(format!("已创建用户 {} did={}", name, did))
         }
         Some("su") => {
-            let who = it.next().ok_or("用法: su <名称|uid>")?;
+            let who = it.next().ok_or("用法: su <名称|did>")?;
             userdb().lock().unwrap().su(who)
         }
         Some("sudo") => Ok(userdb().lock().unwrap().sudo()),
         Some("whoami") | Some("") | None => Ok(userdb().lock().unwrap().whoami()),
-        _ => Err("用法: act user/db adduser <名> | su <名|uid> | sudo | whoami".to_string()),
+        _ => Err("用法: act user/db adduser <名> | su <名|did> | sudo | whoami".to_string()),
     }
 }
 

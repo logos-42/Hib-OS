@@ -10,6 +10,28 @@ use std::io::IsTerminal;
 use std::io::Write as _;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+/// 用户名与主机名（可自定义，默认 root@hibos）。
+static USER_NAME: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+static HOST_NAME: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+/// 设置用户名（shell 启动前调用）。
+pub fn set_user_name(name: &str) {
+    let _ = USER_NAME.set(name.to_string());
+}
+
+/// 设置主机名（shell 启动前调用）。
+pub fn set_host_name(host: &str) {
+    let _ = HOST_NAME.set(host.to_string());
+}
+
+fn current_user_name() -> &'static str {
+    USER_NAME.get().map(|s| s.as_str()).unwrap_or("root")
+}
+
+fn current_host_name() -> &'static str {
+    HOST_NAME.get().map(|s| s.as_str()).unwrap_or("hibos")
+}
+
 // ---------------------------------------------------------------------------
 // 命令输出捕获
 //
@@ -152,6 +174,12 @@ static LOOP_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::ne
 /// 终端主题：极简 ANSI 配色（仅真实终端生效，管道/文件输出自动去色）。
 ///
 /// 让 "Linux 模式" 拥有更地道的外观：systemd 风彩色 `[  OK  ]` 启动行、经典彩色 prompt。
+///
+/// 颜色宏（仅在真实终端生效，否则原样输出）：
+/// * `ansi_red!()`, `ansi_green!()`, `ansi_yellow!()` —— 单色
+/// * `ansi_bold!()` —— 加粗
+/// * `ansi_bold_red!()`, `theme::ansi_bold_green!()`, `ansi_bold_yellow!()` —— 加粗 + 彩色
+/// 使用示例：`print!("{}", ansi_green!("OK"));`
 #[allow(dead_code)]
 mod theme {
     use std::io::IsTerminal;
@@ -192,11 +220,126 @@ mod theme {
         format!("{} Started {}", green("[  OK  ]"), service)
     }
 
-    /// 经典 Linux 风 prompt：`root@hibos:<path># `（绿主机 + 蓝路径）。
+    /// 经典 Linux 风 prompt：`root@hibos:<path># `（绿主机 + 蓝路径，加粗重点）。
     pub fn prompt(cwd: &str) -> String {
-        let host = green("root@hibos");
-        let path = blue(if cwd.is_empty() || cwd == "/" { "~" } else { cwd });
+        let host = theme::ansi_bold_green!("root@hibos");
+        let path = theme::ansi_bold_blue!(if cwd.is_empty() || cwd == "/" { "~" } else { cwd });
         format!("{}:{}# ", host, path)
+    }
+
+    // ==================== ANSI 颜色宏 ====================
+
+    /// 绿色（仅终端生效，否则原样）。
+    #[macro_export]
+#[macro_export]
+macro_rules! ansi_green {
+        ($s:expr) => {{
+            if std::io::stdout().is_terminal() {
+                format!("\x1b[32m{}\x1b[0m", $s)
+            } else {
+                format!("{}", $s)
+            }
+        }};
+    }
+
+    /// 红色（仅终端生效，否则原样）。
+    #[macro_export]
+macro_rules! ansi_red {
+        ($s:expr) => {{
+            if std::io::stdout().is_terminal() {
+                format!("\x1b[31m{}\x1b[0m", $s)
+            } else {
+                format!("{}", $s)
+            }
+        }};
+    }
+
+    /// 黄色（仅终端生效，否则原样）。
+    macro_rules! ansi_yellow {
+        ($s:expr) => {{
+            if std::io::stdout().is_terminal() {
+                format!("\x1b[33m{}\x1b[0m", $s)
+            } else {
+                format!("{}", $s)
+            }
+        }};
+    }
+
+    /// 蓝色（仅终端生效，否则原样）。
+        macro_rules! ansi_blue {
+        ($s:expr) => {{
+            if std::io::stdout().is_terminal() {
+                format!("\x1b[34m{}\x1b[0m", $s)
+            } else {
+                format!("{}", $s)
+            }
+        }};
+    }
+
+    /// 青色（仅终端生效，否则原样）。
+        macro_rules! ansi_cyan {
+        ($s:expr) => {{
+            if std::io::stdout().is_terminal() {
+                format!("\x1b[36m{}\x1b[0m", $s)
+            } else {
+                format!("{}", $s)
+            }
+        }};
+    }
+
+    /// 加粗（仅终端生效，否则原样）。
+        macro_rules! ansi_bold {
+        ($s:expr) => {{
+            if std::io::stdout().is_terminal() {
+                format!("\x1b[1m{}\x1b[0m", $s)
+            } else {
+                format!("{}", $s)
+            }
+        }};
+    }
+
+    /// 加粗 + 绿色（重点显示）。
+        macro_rules! ansi_bold_green {
+        ($s:expr) => {{
+            if std::io::stdout().is_terminal() {
+                format!("\x1b[1m\x1b[32m{}\x1b[0m", $s)
+            } else {
+                format!("{}", $s)
+            }
+        }};
+    }
+
+    /// 加粗 + 红色（重点显示）。
+        macro_rules! ansi_bold_red {
+        ($s:expr) => {{
+            if std::io::stdout().is_terminal() {
+                format!("\x1b[1m\x1b[31m{}\x1b[0m", $s)
+            } else {
+                format!("{}", $s)
+            }
+        }};
+    }
+
+    /// 加粗 + 黄色（重点显示）。
+        macro_rules! ansi_bold_yellow {
+        ($s:expr) => {{
+            if std::io::stdout().is_terminal() {
+                format!("\x1b[1m\x1b[33m{}\x1b[0m", $s)
+            } else {
+                format!("{}", $s)
+            }
+        }};
+    }
+
+    /// 加粗 + 蓝色（重点显示）。
+        macro_rules! ansi_bold_blue {
+        ($s:expr) => {{
+            if std::io::stdout().is_terminal() {
+                format!("\x1b[1m\x1b[34m{}\x1b[0m", $s)
+            } else {
+                format!("{}", $s)
+            }
+        }};
     }
 }
 
@@ -374,7 +517,7 @@ impl Shell {
         // 传统 shell 模式才输出启动画面；AI 模式保持极简。
         self.linux_boot();
 
-        sh_println!("Hib OS — interactive shell ready (help / exit)");
+        sh_println!("{}", ansi_green!("Hib OS — interactive shell ready (help / exit)"));
         if io::stdin().is_terminal() {
             sh_println!("↑↓ 历史, Tab 补全, ←→ 移动光标");
             sh_println!("设置环境变量 HIBOS_LLM_<PROVIDER>_KEY（兼容 DEEPSEEK_API_KEY）可启用 AI 闭环模式");
@@ -961,7 +1104,7 @@ impl Shell {
                 true
             }
             other => {
-                sh_println!("未知命令: {} (试试 help)", other);
+                sh_println!("{}", ansi_red!(format!("未知命令: {} (试试 help)", other)));
                 false
             }
         };
@@ -984,51 +1127,51 @@ impl Shell {
             }
             return;
         }
-        sh_println!("可用命令 (help <命令> 查看详细用法):");
-        sh_println!("统一感知层:");
-        sh_println!("  channels                 列出全部感知通道");
-        sh_println!("  sense <通道>             通过通道感知 (context/file/gpu/action ...)");
-        sh_println!("  act <通道> [负载...]     通过通道行动");
-        sh_println!("内核 / AI:");
-        sh_println!("  concepts [过滤]          列出概念本体 (可选名称过滤)");
-        sh_println!("  policy <概念名>          查询概念的调度策略");
-        sh_println!("  token <模型> [MiB] [prio] 创建 AI Action Token (默认 512 MiB / medium)");
-        sh_println!("  query <token_id>         查询 Token 状态");
-        sh_println!("  prio <token_id> <级别>   调整 Token 优先级 (low|medium|high|critical)");
-        sh_println!("  proc <概念名> [MiB]      创建并提交一个 Action Process");
-        sh_println!("  run                      调度并完成队首任务");
-        sh_println!("  queue                    查看就绪队列长度");
-        sh_println!("  stats                    系统统计");
-        sh_println!("  llm <provider>           LLM 多提供商对话 (deepseek 等)");
-        sh_println!("  llm key set <provider> <key>   设置 LLM Provider API Key");
-        sh_println!("  llm key del <provider>           删除 LLM Provider API Key");
-        sh_println!("  llm key list / show <provider>   查看已配置 Provider");
-        sh_println!("  deepseek                 llm 命令别名 (深度求索)");
-        sh_println!("  desktop [--pixels]       文本桌面面板 / 像素帧缓冲缩略图");
-        sh_println!("文件系统:");
-        sh_println!("  pwd / ls [路径] / cd [路径] / cat <路径>");
-        sh_println!("  write <路径> <内容...> / append <路径> <内容...>");
-        sh_println!("  mkdir <路径> / touch <路径> / rm <路径> / tree / df");
-        sh_println!("  save / load / resetfs    持久化 (JSON) 保存 / 载入 / 重置");
-        sh_println!("模块:");
-        sh_println!("  modules / modload <名称> / modunload <名称>");
-        sh_println!("Agent / 任务 / 能力 / 系统:");
-        sh_println!("  agent list / inspect <id> / start <id> / stop <id>");
-        sh_println!("  task create <描述> [--agent <id>] / list / inspect <id> / cancel <id> / pause <id> / resume <id>");
-        sh_println!("  capability list / inspect <id>");
-        sh_println!("  system status / resources / logs");
-        sh_println!("  app list / launch <名> / stop <id>");
-        sh_println!("管道 / 重定向 / 命令链:");
-        sh_println!("  echo hi | grep h         管道：左输出作为右输入");
-        sh_println!("  echo hi > /tmp/a.txt     覆盖写 / >> 追加写");
-        sh_println!("  cat < /tmp/a.txt         stdin 重定向");
-        sh_println!("  true && echo ok          && 成功才继续 / || 失败才继续 / ; 无条件");
-        sh_println!("  sleep 100 &  ...  jobs   & 后台作业 + 查询");
-        sh_println!("  grep / wc / head / tail / sort / uniq   常用管道过滤器");
-        sh_println!("  <任意命令> --json        机器可读输出");
-        sh_println!("其他:");
-        sh_println!("  history                  查看命令历史");
-        sh_println!("  exit                     退出");
+        sh_println!("{}", ansi_bold_yellow!("可用命令 (help <命令> 查看详细用法):"));
+        sh_println!("{}", ansi_yellow!("统一感知层:"));
+        sh_println!("{}", ansi_green!("  channels                 列出全部感知通道"));
+        sh_println!("{}", ansi_green!("  sense <通道>             通过通道感知 (context/file/gpu/action ...)"));
+        sh_println!("{}", ansi_green!("  act <通道> [负载...]     通过通道行动"));
+        sh_println!("{}", ansi_yellow!("内核 / AI:"));
+        sh_println!("{}", ansi_green!("  concepts [过滤]          列出概念本体 (可选名称过滤)"));
+        sh_println!("{}", ansi_green!("  policy <概念名>          查询概念的调度策略"));
+        sh_println!("{}", ansi_green!("  token <模型> [MiB] [prio] 创建 AI Action Token (默认 512 MiB / medium)"));
+        sh_println!("{}", ansi_green!("  query <token_id>         查询 Token 状态"));
+        sh_println!("{}", ansi_green!("  prio <token_id> <级别>   调整 Token 优先级 (low|medium|high|critical)"));
+        sh_println!("{}", ansi_green!("  proc <概念名> [MiB]      创建并提交一个 Action Process"));
+        sh_println!("{}", ansi_green!("  run                      调度并完成队首任务"));
+        sh_println!("{}", ansi_green!("  queue                    查看就绪队列长度"));
+        sh_println!("{}", ansi_green!("  stats                    系统统计"));
+        sh_println!("{}", ansi_green!("  llm <provider>           LLM 多提供商对话 (deepseek 等)"));
+        sh_println!("{}", ansi_green!("  llm key set <provider> <key>   设置 LLM Provider API Key"));
+        sh_println!("{}", ansi_green!("  llm key del <provider>           删除 LLM Provider API Key"));
+        sh_println!("{}", ansi_green!("  llm key list / show <provider>   查看已配置 Provider"));
+        sh_println!("{}", ansi_green!("  deepseek                 llm 命令别名 (深度求索)"));
+        sh_println!("{}", ansi_green!("  desktop [--pixels]       文本桌面面板 / 像素帧缓冲缩略图"));
+        sh_println!("{}", ansi_yellow!("文件系统:"));
+        sh_println!("{}", ansi_green!("  pwd / ls [路径] / cd [路径] / cat <路径>"));
+        sh_println!("{}", ansi_green!("  write <路径> <内容...> / append <路径> <内容...>"));
+        sh_println!("{}", ansi_green!("  mkdir <路径> / touch <路径> / rm <路径> / tree / df"));
+        sh_println!("{}", ansi_green!("  save / load / resetfs    持久化 (JSON) 保存 / 载入 / 重置"));
+        sh_println!("{}", ansi_yellow!("模块:"));
+        sh_println!("{}", ansi_green!("  modules / modload <名称> / modunload <名称>"));
+        sh_println!("{}", ansi_yellow!("Agent / 任务 / 能力 / 系统:"));
+        sh_println!("{}", ansi_green!("  agent list / inspect <id> / start <id> / stop <id>"));
+        sh_println!("{}", ansi_green!("  task create <描述> [--agent <id>] / list / inspect <id> / cancel <id> / pause <id> / resume <id>"));
+        sh_println!("{}", ansi_green!("  capability list / inspect <id>"));
+        sh_println!("{}", ansi_green!("  system status / resources / logs"));
+        sh_println!("{}", ansi_green!("  app list / launch <名> / stop <id>"));
+        sh_println!("{}", ansi_yellow!("管道 / 重定向 / 命令链:"));
+        sh_println!("{}", ansi_green!("  echo hi | grep h         管道：左输出作为右输入"));
+        sh_println!("{}", ansi_green!("  echo hi > /tmp/a.txt     覆盖写 / >> 追加写"));
+        sh_println!("{}", ansi_green!("  cat < /tmp/a.txt         stdin 重定向"));
+        sh_println!("{}", ansi_green!("  true && echo ok          && 成功才继续 / || 失败才继续 / ; 无条件"));
+        sh_println!("{}", ansi_green!("  sleep 100 &  ...  jobs   & 后台作业 + 查询"));
+        sh_println!("{}", ansi_green!("  grep / wc / head / tail / sort / uniq   常用管道过滤器"));
+        sh_println!("{}", ansi_green!("  <任意命令> --json        机器可读输出"));
+        sh_println!("{}", ansi_yellow!("其他:"));
+        sh_println!("{}", ansi_green!("  history                  查看命令历史"));
+        sh_println!("{}", ansi_green!("  exit                     退出"));
     }
 
     fn cmd_concepts(&self, filter: Option<&str>) {
@@ -2580,7 +2723,7 @@ impl Shell {
                 ACTION: act mem/ram alloc|free <MiB>            分配/释放主机 RAM\n\
                 ACTION: act mem/mmap mmap <MiB> [perms]         建立内存映射 (munmap <addr> 解除)\n\
                 ACTION: act fs/meta chmod <mode> <路径>         改权限 (chown/ln/mount 同理)\n\
-                ACTION: act user/db adduser <名> | su <名|uid> | sudo | whoami   身份与提权\n\
+                ACTION: act user/db adduser <名> | su <名|did> | sudo | whoami   身份与提权\n\
                 ACTION: act net/dns resolve <域名>              真实 DNS 解析\n\
                 ACTION: act socket/tcp connect <host:port> [数据] 真实 TCP 连接/读写\n\
                 ACTION: act ipc/pipe|shm|msgq|sem ...           进程间通信 (create/write/read/send/recv/init/post/wait)\n\

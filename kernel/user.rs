@@ -2,49 +2,63 @@
 //!
 //! 不复制 Linux 的 /etc/passwd，而是把「当前以谁的身份行动」建模成
 //! 可感知 (sense) / 可切换 (act) 的通道 `user/db`。
+//!
+//! 身份使用 DID（去中心化标识符）而非数字 uid，超级用户（root）以
+//! DID `did:hib:root` 确认，而非 uid=0 硬编码。
 
 use std::collections::BTreeSet;
 use std::sync::{Mutex, OnceLock};
 
 use crate::caps::ALL_CAPS;
 
+/// 超级用户（root）的 DID；持有全部能力。
+pub const ROOT_DID: &str = "did:hib:root";
+
 #[derive(Clone, Debug)]
 pub struct User {
-    pub uid: u32,
+    pub did: String,
     pub name: String,
     pub groups: Vec<String>,
 }
 
 pub struct UserDb {
     pub users: Vec<User>,
-    pub current_uid: u32,
+    pub current_did: String,
 }
 
 impl UserDb {
     fn new() -> Self {
         Self {
             users: vec![
-                User { uid: 0, name: "root".into(), groups: vec!["root".into()] },
-                User { uid: 1000, name: "hib".into(), groups: vec!["users".into()] },
                 User {
-                    uid: 1001,
+                    did: ROOT_DID.to_string(),
+                    name: "root".into(),
+                    groups: vec!["root".into()],
+                },
+                User {
+                    did: "did:hib:hib".to_string(),
+                    name: "hib".into(),
+                    groups: vec!["users".into()],
+                },
+                User {
+                    did: "did:hib:ai".to_string(),
                     name: "ai".into(),
                     groups: vec!["users".into(), "ai".into()],
                 },
             ],
             // 默认以「ai」身份行动 —— 一切皆模型的意图。
-            current_uid: 1001,
+            current_did: "did:hib:ai".to_string(),
         }
     }
 
     pub fn list(&self) -> String {
         let mut out = String::new();
         for u in &self.users {
-            let marker = if u.uid == self.current_uid { "*" } else { " " };
+            let marker = if u.did == self.current_did { "*" } else { " " };
             out.push_str(&format!(
-                "{} uid={:<4} {:<8} groups=[{}]\n",
+                "{} did={:<20} {:<8} groups=[{}]\n",
                 marker,
-                u.uid,
+                u.did,
                 u.name,
                 u.groups.join(",")
             ));
@@ -53,72 +67,87 @@ impl UserDb {
     }
 
     pub fn whoami(&self) -> String {
-        match self.users.iter().find(|u| u.uid == self.current_uid) {
+        match self.users.iter().find(|u| u.did == self.current_did) {
             Some(u) => format!(
-                "uid={} name={} groups=[{}] caps={}",
-                u.uid,
+                "did={} name={} groups=[{}] caps={}",
+                u.did,
                 u.name,
                 u.groups.join(","),
                 self.current_caps().iter().cloned().collect::<Vec<_>>().join(",")
             ),
-            None => format!("uid={} (unknown)", self.current_uid),
+            None => format!("did={} (unknown)", self.current_did),
         }
     }
 
-    /// 给定 uid 能持有的 capability 集合。
+    /// 给定 did 能持有的 capability 集合。
     ///
-    /// root (uid=0) 持有全部能力；其它用户默认只持有 `CAP_SYS_ADMIN`
+    /// root (did:hib:root) 持有全部能力；其它用户默认只持有 `CAP_SYS_ADMIN`
     ///（演示环境下可自行提权），其余能力需通过 `sec/caps` 显式授予。
-    /// 这是「root 以能力集合而非 uid=0 全权」的具体体现。
-    pub fn capabilities_of(uid: u32) -> BTreeSet<String> {
-        if uid == 0 {
+    /// 这是「root 以能力集合而非 did 硬编码」的具体体现。
+    pub fn capabilities_of(did: &str) -> BTreeSet<String> {
+        if did == ROOT_DID {
             return ALL_CAPS.iter().map(|s| s.to_string()).collect();
         }
-        match uid {
-            1000 | 1001 => ["CAP_SYS_ADMIN"].iter().map(|s| s.to_string()).collect(),
+        match did {
+            "did:hib:hib" | "did:hib:ai" => {
+                ["CAP_SYS_ADMIN"].iter().map(|s| s.to_string()).collect()
+            }
             _ => BTreeSet::new(),
         }
     }
 
     /// 当前会话身份持有的 capability 集合。
     pub fn current_caps(&self) -> BTreeSet<String> {
-        Self::capabilities_of(self.current_uid)
+        Self::capabilities_of(&self.current_did)
     }
 
-    pub fn adduser(&mut self, name: &str) -> Result<u32, String> {
+    pub fn adduser(&mut self, name: &str) -> Result<String, String> {
         if self.users.iter().any(|u| u.name == name) {
             return Err(format!("用户 {} 已存在", name));
         }
-        let uid = self.users.iter().map(|u| u.uid).max().unwrap_or(1000) + 1;
-        self.users.push(User { uid, name: name.to_string(), groups: vec!["users".into()] });
-        Ok(uid)
+        let did = format!("did:hib:{}", name);
+        if self.users.iter().any(|u| u.did == did) {
+            return Err(format!("DID {} 已存在", did));
+        }
+        self.users.push(User {
+            did: did.clone(),
+            name: name.to_string(),
+            groups: vec!["users".into()],
+        });
+        Ok(did)
     }
 
     pub fn su(&mut self, who: &str) -> Result<String, String> {
-        let target = who
-            .parse::<u32>()
-            .ok()
-            .or_else(|| self.users.iter().find(|u| u.name == who).map(|u| u.uid));
-        match target.and_then(|uid| {
-            self.users.iter().find(|u| u.uid == uid).map(|u| (uid, u.name.clone()))
-        }) {
-            Some((uid, name)) => {
-                self.current_uid = uid;
-                Ok(format!("已切换到 {} (uid={})", name, uid))
+        // 支持直接以 DID 或用户名切换身份。
+        let target = if who.starts_with("did:") {
+            self.users.iter().find(|u| u.did == who).map(|u| u.did.clone())
+        } else {
+            self.users.iter().find(|u| u.name == who).map(|u| u.did.clone())
+        };
+        match target {
+            Some(did) => {
+                let name = self
+                    .users
+                    .iter()
+                    .find(|u| u.did == did)
+                    .map(|u| u.name.clone())
+                    .unwrap_or_default();
+                self.current_did = did.clone();
+                Ok(format!("已切换到 {} ({})", name, did))
             }
             None => Err(format!("用户 {} 不存在", who)),
         }
     }
 
     pub fn sudo(&mut self) -> String {
-        if self.current_uid == 0 {
+        if self.current_did == ROOT_DID {
             return "已在 root 身份下".to_string();
         }
-        // root 以能力集合表示：提权需持有 CAP_SYS_ADMIN，而非凭 uid 硬编码。
+        // root 以能力集合表示：提权需持有 CAP_SYS_ADMIN，而非凭 did 硬编码。
         if !self.current_caps().contains("CAP_SYS_ADMIN") {
             return "缺少 CAP_SYS_ADMIN 能力，无法提权到 root".to_string();
         }
-        self.current_uid = 0;
+        self.current_did = ROOT_DID.to_string();
         "已提权到 root (capability 集合: 全部)".to_string()
     }
 }
