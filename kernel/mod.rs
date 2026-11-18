@@ -71,6 +71,7 @@ pub mod user;
 pub mod llm;
 pub mod debug;
 pub mod shell;
+pub mod theme;
 pub mod syscall;
 pub mod syscall_handler;
 pub mod verification;

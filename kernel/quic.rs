@@ -131,19 +131,22 @@ impl QuicManager {
     pub fn send(&mut self, id: u64, data: &str) -> Result<u64, String> {
         let did = self.current_did();
         let is_root = self.is_root();
-        let session = self
-            .sessions
-            .get_mut(&id)
-            .ok_or_else(|| format!("会话 {} 不存在", id))?;
-        if !is_root && session.local_did != did {
-            return Err(format!("会话 {} 不属于当前身份 {}", id, did));
-        }
-        if session.state == QuicState::Closed {
-            return Err(format!("会话 {} 已关闭", id));
-        }
-        session.sent_bytes += data.len() as u64;
-        if let Some(peer) = &session.peer_did {
-            self.peers.insert(peer.clone());
+        let peer_did = {
+            let session = self
+                .sessions
+                .get_mut(&id)
+                .ok_or_else(|| format!("会话 {} 不存在", id))?;
+            if !is_root && session.local_did != did {
+                return Err(format!("会话 {} 不属于当前身份 {}", id, did));
+            }
+            if session.state == QuicState::Closed {
+                return Err(format!("会话 {} 已关闭", id));
+            }
+            session.sent_bytes += data.len() as u64;
+            session.peer_did.clone()
+        };
+        if let Some(peer) = peer_did {
+            self.peers.insert(peer);
         }
         Ok(data.len() as u64)
     }
@@ -152,17 +155,18 @@ impl QuicManager {
     pub fn close(&mut self, id: u64) -> Result<(), String> {
         let did = self.current_did();
         let is_root = self.is_root();
-        let session = self
-            .sessions
-            .get_mut(&id)
-            .ok_or_else(|| format!("会话 {} 不存在", id))?;
-        if !is_root && session.local_did != did {
-            return Err(format!("会话 {} 不属于当前身份 {}", id, did));
-        }
-        session.state = QuicState::Closed;
-        if let Some(addr) = session.local_addr.clone() {
-            self.listen_addrs.remove(&addr);
-        }
+        let local_addr = {
+            let session = self
+                .sessions
+                .get_mut(&id)
+                .ok_or_else(|| format!("会话 {} 不存在", id))?;
+            if !is_root && session.local_did != did {
+                return Err(format!("会话 {} 不属于当前身份 {}", id, did));
+            }
+            session.state = QuicState::Closed;
+            session.local_addr.clone()
+        };
+        self.listen_addrs.remove(&local_addr);
         Ok(())
     }
 
