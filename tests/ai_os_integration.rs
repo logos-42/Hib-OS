@@ -463,7 +463,7 @@ fn full_ai_os_integration() {
 #[test]
 fn cross_interface_filesystem_consistency() {
     use hibos::capability::{
-        capability_registry, CapabilityError, ErrorCode, ExecutionContext, ResourceQuota,
+        capability_registry, ErrorCode, ExecutionContext, ResourceQuota,
     };
     use serde_json::json;
 
@@ -570,7 +570,7 @@ fn cross_interface_filesystem_consistency() {
 #[test]
 fn cross_interface_task_consistency() {
     use hibos::capability::{
-        capability_registry, CapabilityError, ExecutionContext, ResourceQuota,
+        capability_registry, ExecutionContext, ResourceQuota,
     };
     use serde_json::json;
 
