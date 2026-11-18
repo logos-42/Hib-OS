@@ -10,7 +10,7 @@ use std::io::IsTerminal;
 use std::io::Write as _;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::{ansi_bold_green, ansi_bold_yellow, ansi_cyan, ansi_green, ansi_red, ansi_yellow, ansi_bold_blue};
+use crate::{ansi_bold_green, ansi_bold_yellow, ansi_green, ansi_red, ansi_yellow};
 static USER_NAME: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 static HOST_NAME: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 
@@ -24,10 +24,14 @@ pub fn set_host_name(host: &str) {
     let _ = HOST_NAME.set(host.to_string());
 }
 
+/// 获取当前用户名（shell 启动前可通过 set_user_name 自定义）。
+#[allow(dead_code)]
 fn current_user_name() -> &'static str {
     USER_NAME.get().map(|s| s.as_str()).unwrap_or("root")
 }
 
+/// 获取当前主机名（shell 启动前可通过 set_host_name 自定义）。
+#[allow(dead_code)]
 fn current_host_name() -> &'static str {
     HOST_NAME.get().map(|s| s.as_str()).unwrap_or("hibos")
 }
@@ -183,6 +187,8 @@ static LOOP_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::ne
 #[allow(dead_code)]
 mod theme {
     use std::io::IsTerminal;
+
+    use crate::{ansi_bold_blue, ansi_bold_green};
 
     const RESET: &str = "\x1b[0m";
     const BOLD: &str = "\x1b[1m";
