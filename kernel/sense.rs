@@ -407,6 +407,9 @@ pub fn probe(name: &str) -> Option<String> {
         "plugin/hotreload" => Some(crate::plugin::plugin_hotreload_sense()),
         // 自造插件自有通道 `plugin/<name>`
         other if other.starts_with("plugin/") => crate::plugin::plugin_sense_one(other),
+        // —— 实时生成应用：运行时总览 + 每个应用的专属通道 ——
+        "app/runtime" => Some(crate::appgen::sense_runtime()),
+        other if other.starts_with("app/app-") => crate::appgen::sense_app(other),
         // 应用安装通道：exe / dmg / linux
         other if other.starts_with("exe/") || other.starts_with("dmg/") || other.starts_with("linux/") => {
             Some(format!("应用安装通道：{}，使用 act <通道> install", other))
@@ -967,6 +970,9 @@ fn act_raw(name: &str, payload: &str) -> Option<Result<String, String>> {
         other if other.starts_with("plugin/") => {
             Some(crate::plugin::plugin_act_dynamic(other, payload))
         }
+        // —— 实时生成应用：总通道负责生成/销毁，专属通道负责调用动作 ——
+        "app/runtime" => Some(crate::appgen::act_runtime(payload)),
+        other if other.starts_with("app/app-") => Some(crate::appgen::act_app(other, payload)),
         // 应用安装通道：exe / dmg / linux
         other if other.starts_with("exe/") || other.starts_with("dmg/") || other.starts_with("linux/") => {
             let parts: Vec<&str> = payload.split_whitespace().collect();

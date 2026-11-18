@@ -396,6 +396,8 @@ pub fn bootstrap() -> ChannelRegistry {
         (ChannelKind::Device, "dev/monitor", Access::Read),
         (ChannelKind::App, "app/shell", Access::ReadWrite),
         (ChannelKind::App, "app/procs", Access::ReadWrite),
+        // 实时生成应用的统一入口；每个生成的应用另有 `app/app-<序号>` 动态通道。
+        (ChannelKind::App, "app/runtime", Access::ReadWrite),
         (ChannelKind::Browser, "browser/gateway", Access::ReadWrite),
         (ChannelKind::Driver, "driver/gpu", Access::ReadWrite),
         (ChannelKind::Driver, "driver/iommu", Access::ReadWrite),
@@ -646,7 +648,7 @@ mod tests {
     #[test]
     fn bootstrap_opens_all_channels() {
         let reg = bootstrap();
-        assert_eq!(reg.len(), 247);
+        assert_eq!(reg.len(), 248);
         assert_eq!(reg.of_kind(ChannelKind::Net).count(), 5);
         assert_eq!(reg.of_kind(ChannelKind::Will).count(), 4);
         assert_eq!(reg.of_kind(ChannelKind::Context).count(), 2);
@@ -657,7 +659,7 @@ mod tests {
         assert_eq!(reg.of_kind(ChannelKind::Memory).count(), 6);
         assert_eq!(reg.of_kind(ChannelKind::Process).count(), 8);
         assert_eq!(reg.of_kind(ChannelKind::User).count(), 2);
-        assert_eq!(reg.of_kind(ChannelKind::App).count(), 3);
+        assert_eq!(reg.of_kind(ChannelKind::App).count(), 4);
         assert_eq!(reg.of_kind(ChannelKind::Browser).count(), 1);
         assert_eq!(reg.of_kind(ChannelKind::Driver).count(), 2);
         assert_eq!(reg.of_kind(ChannelKind::Plugin).count(), 2);

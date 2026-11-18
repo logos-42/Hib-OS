@@ -231,6 +231,15 @@ impl Compositor {
         id
     }
 
+    /// 打开一个「实时生成的应用」：窗口内容来自生成出来的说明书。
+    pub fn open_generated_app(&mut self, spec: &crate::appgen::AppSpec) -> WindowId {
+        let id = self.open(&spec.title, 460, 280, AppKind::Generated.accent());
+        if let Some(w) = self.window_mut(id) {
+            w.app = Some(AppState::from_spec(spec));
+        }
+        id
+    }
+
     /// 任务栏命中测试（输入层优先调用）。
     pub fn taskbar_hit(&self, x: i32, y: i32) -> Option<TaskbarHit> {
         self.taskbar

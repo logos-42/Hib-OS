@@ -80,6 +80,7 @@ pub mod irq;
 pub mod mm;
 pub mod file_channel;
 pub mod worktree;
+pub mod appgen;    // 实时生成应用（AppGen）：需求 -> 说明书 -> 专属通道
 
 // —— Subagent-A 新增：内核核心与通道系统扩充 ——
 pub mod channel_ext;

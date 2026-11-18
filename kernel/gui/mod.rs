@@ -777,10 +777,18 @@ fn sample(s: &Surface, cx: usize, cy: usize, cols: usize, px_rows: usize) -> u32
 
 /// 启动一个「窗口内运行的应用」，返回窗口 id。
 pub fn open_app(name: &str) -> Result<u64, String> {
-    let kind = apps::AppKind::parse(name).ok_or_else(|| {
-        format!("未知应用 {} (可用: {})", name, apps::AppKind::list())
+    // 内置应用优先；找不到时再查「实时生成应用」注册表，两者用同一个桌面合成器。
+    if let Some(kind) = apps::AppKind::parse(name) {
+        return Ok(desktop().lock().unwrap().open_app(kind));
+    }
+    let spec = crate::appgen::find_spec(name).ok_or_else(|| {
+        format!(
+            "未知应用 {} (内置: {}；也可用 app generate <需求> 生成一个)",
+            name,
+            apps::AppKind::list()
+        )
     })?;
-    Ok(desktop().lock().unwrap().open_app(kind))
+    Ok(desktop().lock().unwrap().open_generated_app(&spec))
 }
 
 /// 把内核执行结果回显到应用窗口（终端应用会显示）。

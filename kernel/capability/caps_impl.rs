@@ -1657,6 +1657,99 @@ impl SystemCapability for SettingsCapability {
 }
 
 // ============================================================================
+// 实时生成应用能力（appgen.*）
+// ============================================================================
+
+/// 把 AppGen 运行时接进统一能力层：Shell / GUI / Agent 三条入口共用同一实现。
+pub struct AppGenCapability;
+
+impl AppGenCapability {
+    pub fn new() -> Arc<dyn SystemCapability> {
+        Arc::new(Self)
+    }
+}
+
+impl SystemCapability for AppGenCapability {
+    fn id(&self) -> String {
+        "appgen".to_string()
+    }
+
+    fn description(&self) -> &str {
+        "实时生成应用：生成/列表/查看/调用/热替换/销毁/状态"
+    }
+
+    fn input_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "op": {"type": "string", "enum": ["generate", "list", "status", "inspect", "invoke", "replace", "drop"]},
+                "requirement": {"type": "string"},
+                "id": {"type": "string"},
+                "action": {"type": "string"},
+                "payload": {"type": "string"},
+                "use_llm": {"type": "boolean"}
+            },
+            "required": ["op"]
+        })
+    }
+
+    fn output_schema(&self) -> Value {
+        json!({"type": "object"})
+    }
+
+    fn error_schema(&self) -> Value {
+        json!({"type": "object", "properties": {"code": {"type": "string"}, "message": {"type": "string"}}})
+    }
+
+    fn required_permissions(&self) -> Vec<String> {
+        vec!["appgen:use".to_string()]
+    }
+
+    fn execute(&self, req: CapabilityRequest) -> Result<CapabilityResponse, CapabilityError> {
+        enforce_permissions(&req.context, &self.required_permissions())?;
+        check_cancellation(&req.cancellation_token)?;
+        let start_ns = now_ns();
+        check_timeout(start_ns, req.timeout_ns)?;
+
+        // 所有参数都从请求 JSON 读取，读不到就用安全默认值；外部不能塞进任意结构。
+        let op = req.input.get("op").and_then(|v| v.as_str()).unwrap_or("");
+        let requirement = req.input.get("requirement").and_then(|v| v.as_str()).unwrap_or("");
+        let id = req.input.get("id").and_then(|v| v.as_str()).unwrap_or("");
+        let action = req.input.get("action").and_then(|v| v.as_str()).unwrap_or("echo");
+        let payload = req.input.get("payload").and_then(|v| v.as_str()).unwrap_or("");
+        let use_llm = req.input.get("use_llm").and_then(|v| v.as_bool()).unwrap_or(false);
+
+        let outcome: Result<Value, String> = match op {
+            "generate" => crate::appgen::generate_app(requirement, use_llm)
+                .map(|s| s.to_json())
+                .map_err(|e| e.to_string()),
+            "list" => Ok(json!({"text": crate::appgen::list_text()})),
+            "status" => Ok(json!({"text": crate::appgen::status_text()})),
+            "inspect" => crate::appgen::find_spec(id)
+                .map(|s| s.to_json())
+                .ok_or_else(|| format!("应用不存在: {id}")),
+            "invoke" => crate::appgen::invoke_by_id(id, action, payload)
+                .map(|text| json!({"result": text})),
+            "replace" => crate::appgen::replace_app(id, requirement, use_llm)
+                .map(|s| s.to_json())
+                .map_err(|e| e.to_string()),
+            "drop" => crate::appgen::drop_app(id)
+                .map(|s| json!({"dropped": s.id}))
+                .map_err(|e| e.to_string()),
+            _ => Err(format!("未知操作: {op}")),
+        };
+        let result = outcome.map_err(|e| CapabilityError {
+            code: ErrorCode::InvalidInput,
+            message: e,
+            source: Some("appgen".to_string()),
+            retryable: false,
+            audit: req.audit.clone(),
+        })?;
+        Ok(ok_response(&req, result, &format!("appgen.{op}")))
+    }
+}
+
+// ============================================================================
 // 注册所有能力
 // ============================================================================
 
@@ -1673,6 +1766,7 @@ pub fn register_all_capabilities() {
     caps.register(TaskCapability::new());
     caps.register(SystemCapabilityImpl::new());
     caps.register(SettingsCapability::new());
+    caps.register(AppGenCapability::new());
 
     #[cfg(feature = "gui")]
     caps.register(WindowCapability::new());

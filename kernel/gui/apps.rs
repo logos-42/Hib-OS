@@ -16,6 +16,8 @@ pub enum AppKind {
     Monitor,
     Wallpaper,
     Notes,
+    /// 运行时由需求生成的应用：不出现在内置菜单，靠 `app generate` 产生。
+    Generated,
 }
 
 pub const ALL_APPS: [AppKind; 5] = [
@@ -34,6 +36,7 @@ impl AppKind {
             AppKind::Monitor => "monitor",
             AppKind::Wallpaper => "wallpaper",
             AppKind::Notes => "notes",
+            AppKind::Generated => "generated",
         }
     }
 
@@ -44,6 +47,7 @@ impl AppKind {
             AppKind::Monitor => "MONITOR",
             AppKind::Wallpaper => "WALLPAPER",
             AppKind::Notes => "NOTES",
+            AppKind::Generated => "GENERATED APP",
         }
     }
 
@@ -54,6 +58,7 @@ impl AppKind {
             AppKind::Monitor => palette::MAUVE,
             AppKind::Wallpaper => palette::PEACH,
             AppKind::Notes => palette::YELLOW,
+            AppKind::Generated => palette::MAUVE,
         }
     }
 
@@ -77,6 +82,8 @@ pub struct AppState {
     pub input: String,
     pub scroll: usize,
     pub ticks: u64,
+    /// 实时生成应用对应的说明书编号；内置应用为 `None`。
+    pub spec_id: Option<String>,
 }
 
 impl AppState {
@@ -87,6 +94,7 @@ impl AppState {
             input: String::new(),
             scroll: 0,
             ticks: 0,
+            spec_id: None,
         };
         s.lines.push(format!("HIB OS / {}", kind.title()));
         match kind {
@@ -99,6 +107,18 @@ impl AppState {
             _ => s.lines.push("上下方向键滚动".into()),
         }
         s
+    }
+
+    /// 用一份实时生成的说明书创建应用状态：窗口内容来自说明书，而不是编译期枚举。
+    pub fn from_spec(spec: &crate::appgen::AppSpec) -> Self {
+        Self {
+            kind: AppKind::Generated,
+            lines: spec.summary_lines(),
+            input: String::new(),
+            scroll: 0,
+            ticks: 0,
+            spec_id: Some(spec.id.clone()),
+        }
     }
 
     /// 每帧重绘客户端表面（实时数据在这里刷新）。
@@ -157,7 +177,7 @@ impl AppState {
             s.draw_text_clipped(8, 8 + i as i32 * line_h, line, color, 1, s.width() as i32 - 8);
         }
         // 输入行（终端 / 记事本）
-        if matches!(self.kind, AppKind::Terminal | AppKind::Notes) {
+        if matches!(self.kind, AppKind::Terminal | AppKind::Notes | AppKind::Generated) {
             let y = 8 + (rows.len() - start).min(max) as i32 * line_h;
             if y + line_h < s.height() as i32 {
                 let prompt = if self.kind == AppKind::Terminal { "> " } else { "" };
@@ -210,6 +230,21 @@ impl AppState {
             }
             AppKind::Notes => {
                 self.lines.push(line);
+                None
+            }
+            AppKind::Generated => {
+                // 生成的应用也能交互：输入一行就执行它的 echo 动作，结果回显到窗口。
+                self.lines.push(format!("> {}", line));
+                if line.trim().is_empty() {
+                    return None;
+                }
+                // 先复制编号再改 lines，避免同时可变/不可变借用 self。
+                if let Some(id) = self.spec_id.clone() {
+                    match crate::appgen::invoke_by_id(&id, "echo", &line) {
+                        Ok(text) => self.lines.push(text),
+                        Err(e) => self.lines.push(format!("调用失败: {}", e)),
+                    }
+                }
                 None
             }
             _ => {

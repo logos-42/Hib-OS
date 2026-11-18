@@ -1501,6 +1501,18 @@ impl Shell {
 
     /// 自造插件通道按需注册：插件安装后，其 `plugin/<name>` 通道即可被感知/行动。
     fn ensure_dynamic_channel(&mut self, name: &str) -> Option<ChannelKind> {
+        // 实时生成的应用注册后，按需开通 `app/app-<序号>` 通道（与插件同一套机制）。
+        if name.starts_with("app/app-") {
+            if !crate::appgen::has_channel(name) {
+                return None;
+            }
+            let _ = self.channels.open(
+                ChannelKind::App,
+                name,
+                crate::channels::Access::ReadWrite,
+            );
+            return Some(ChannelKind::App);
+        }
         if !name.starts_with("plugin/") {
             return None;
         }
@@ -3396,9 +3408,90 @@ impl Shell {
         let sub = parts.get(1).copied().unwrap_or("list");
         match sub {
             "list" => {
-                let apps = crate::gui::apps::AppKind::list();
-                sh_println!("可用应用: {}", apps);
+                sh_println!("内置应用: {}", crate::gui::apps::AppKind::list());
+                sh_println!("{}", crate::appgen::list_text());
             }
+            // 一句话需求 -> 当场生成说明书 -> 注册并获得专属通道。
+            "generate" | "gen" => {
+                let use_ai = parts[2..].iter().any(|p| *p == "--ai");
+                let words: Vec<&str> = parts[2..]
+                    .iter()
+                    .copied()
+                    .filter(|p| *p != "--ai")
+                    .collect();
+                let requirement = words.join(" ");
+                match crate::appgen::generate_app(&requirement, use_ai) {
+                    Ok(spec) => {
+                        sh_println!("已生成应用 {} (v{})", spec.id, spec.version);
+                        sh_println!("  名称: {}  标题: {}", spec.name, spec.title);
+                        sh_println!("  通道: {}  引擎: {}", spec.channel(), spec.engine);
+                        sh_println!(
+                            "  组件: {}  动作: {}",
+                            spec.components.len(),
+                            spec.actions.join(", ")
+                        );
+                        sh_println!(
+                            "  试试: app run {} echo 你好 | app launch {}",
+                            spec.id,
+                            spec.name
+                        );
+                    }
+                    Err(e) => sh_println!("生成失败: {}", e),
+                }
+            }
+            "inspect" => {
+                let id = parts.get(2).copied().unwrap_or("");
+                match crate::appgen::find_spec(id) {
+                    Some(spec) => sh_println!(
+                        "{}",
+                        serde_json::to_string_pretty(&spec.to_json()).unwrap()
+                    ),
+                    None => sh_println!("应用 {} 不存在", id),
+                }
+            }
+            "run" => {
+                let id = parts.get(2).copied().unwrap_or("");
+                let action = parts.get(3).copied().unwrap_or("echo");
+                let payload = if parts.len() > 4 {
+                    parts[4..].join(" ")
+                } else {
+                    String::new()
+                };
+                match crate::appgen::invoke_by_id(id, action, &payload) {
+                    Ok(text) => sh_println!("{}", text),
+                    Err(e) => sh_println!("调用失败: {}", e),
+                }
+            }
+            "hot" => {
+                let id = parts.get(2).copied().unwrap_or("");
+                let requirement = if parts.len() > 3 {
+                    parts[3..].join(" ")
+                } else {
+                    String::new()
+                };
+                match crate::appgen::replace_app(id, &requirement, false) {
+                    Ok(spec) => sh_println!(
+                        "已热替换 {} -> v{} (通道 {} 不变)",
+                        spec.id,
+                        spec.version,
+                        spec.channel()
+                    ),
+                    Err(e) => sh_println!("热替换失败: {}", e),
+                }
+            }
+            "drop" | "remove" => {
+                let id = parts.get(2).copied().unwrap_or("");
+                match crate::appgen::drop_app(id) {
+                    Ok(spec) => sh_println!(
+                        "已销毁应用 {} (v{})，通道 {} 失效",
+                        spec.id,
+                        spec.version,
+                        spec.channel()
+                    ),
+                    Err(e) => sh_println!("销毁失败: {}", e),
+                }
+            }
+            "status" => sh_println!("{}", crate::appgen::status_text()),
             "launch" => {
                 let name = parts.get(2).copied().unwrap_or("");
                 match crate::gui::open_app(name) {
@@ -3415,7 +3508,9 @@ impl Shell {
                     sh_println!("窗口 {} 不存在", id);
                 }
             }
-            _ => sh_println!("用法: app list / launch <名> / stop <id>"),
+            _ => sh_println!(
+                "用法: app list / generate <需求> [--ai] / inspect <id> / run <id> [动作] [参数] / hot <id> <新需求> / drop <id> / status / launch <名> / stop <id>"
+            ),
         }
     }
 }
@@ -3542,7 +3637,7 @@ pub fn usage_line(cmd: &str) -> Option<&'static str> {
         "task" => "task create <描述> [--agent <id>] | list | inspect <id> | cancel <id> | pause <id> | resume <id>",
         "capability" => "capability list / inspect <id>",
         "system" => "system status / resources / logs [--json]",
-        "app" => "app list / launch <名> / stop <id> [--json]",
+        "app" => "app list / generate <需求> [--ai] / inspect <id> / run <id> [动作] [参数] / hot <id> <新需求> / drop <id> / status / launch <名> / stop <id>",
         "echo" => "echo <文本...>          —— 常用于管道与重定向",
         "true" | "false" => "true / false         —— 返回成功/失败退出码",
         "sleep" => "sleep <毫秒>          —— 等待（上限 2000ms）",
@@ -3599,7 +3694,7 @@ pub fn describe(cmd: &str) -> Option<&'static str> {
         "task" => "任务管理：创建/列表/查看/取消/暂停/恢复任务",
         "capability" => "系统能力：列出/查看已注册能力",
         "system" => "系统信息：状态/资源/日志",
-        "app" => "应用管理：列表/启动/停止 GUI 应用",
+        "app" => "应用管理：按需求实时生成/查看/运行/热替换/销毁应用，也能启动 GUI 应用",
         "echo" => "打印文本（管道/重定向的常用数据源）",
         "true" | "false" => "返回成功 / 失败退出码，用于测试 && 与 ||",
         "sleep" => "等待指定毫秒（最长 2000ms）",
@@ -3624,7 +3719,10 @@ pub fn complete_parameters(cmd: &str) -> &'static [&'static str] {
         ],
         "capability" => &["list", "inspect", "--json"],
         "system" => &["status", "resources", "logs", "--json"],
-        "app" => &["list", "launch", "stop", "--json"],
+        "app" => &[
+            "list", "generate", "gen", "inspect", "run", "hot", "drop", "remove",
+            "status", "launch", "stop", "--ai", "--json",
+        ],
         "llm" | "deepseek" => &[
             "status", "providers", "key", "chat", "loop", "list", "set", "del", "show",
         ],
