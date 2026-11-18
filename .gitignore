@@ -25,7 +25,7 @@ hibos_vfs.json
 .env/
 
 Cargo.lock
-
+.swarm/
 # 编辑器缓存与临时文件
 .vscode/
 *.swp

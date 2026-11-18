@@ -297,26 +297,6 @@ impl Shell {
 
     /// 启动交互循环 (EOF / Ctrl+D / `exit` 结束)。
     ///
-    /// 极简 Linux 风启动画面（彩色；管道下自动去色）。
-    fn linux_boot(&self) {
-        sh_println!(
-            "{}",
-            ansi_bold!(concat!(
-                "Hib OS ",
-                crate::version::hibos_version!(),
-                " (linux)"
-            ))
-        );
-        sh_println!(
-            "{} hibos: GPU-Centric macro-kernel (by logos-42, MIT)",
-            ansi_grey!("[    0.000000 ]")
-        );
-        sh_println!("{}", crate::theme::ok("GPU 显存 / IOMMU"));
-        sh_println!("{}", crate::theme::ok("GPU 调度器"));
-        sh_println!("{}", crate::theme::ok("系统调用门闸 (10 种调用)"));
-        sh_println!("{}", crate::theme::ok("形式化验证框架"));
-        sh_println!("{}", crate::theme::ok("虚拟文件系统 (VFS)"));
-    }
 
     /// 默认进入 LLM 闭环循环模式 (loop)：AI 自动感知系统状态、思考、执行行动。
     /// 如未配置 API Key，则退回到传统命令行 shell 模式。
