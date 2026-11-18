@@ -10,31 +10,8 @@ use std::io::IsTerminal;
 use std::io::Write as _;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::{ansi_bold_green, ansi_bold_yellow, ansi_green, ansi_red, ansi_yellow};
-static USER_NAME: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-static HOST_NAME: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-
-/// 设置用户名（shell 启动前调用）。
-pub fn set_user_name(name: &str) {
-    let _ = USER_NAME.set(name.to_string());
-}
-
-/// 设置主机名（shell 启动前调用）。
-pub fn set_host_name(host: &str) {
-    let _ = HOST_NAME.set(host.to_string());
-}
-
-/// 获取当前用户名（shell 启动前可通过 set_user_name 自定义）。
-#[allow(dead_code)]
-fn current_user_name() -> &'static str {
-    USER_NAME.get().map(|s| s.as_str()).unwrap_or("root")
-}
-
-/// 获取当前主机名（shell 启动前可通过 set_host_name 自定义）。
-#[allow(dead_code)]
-fn current_host_name() -> &'static str {
-    HOST_NAME.get().map(|s| s.as_str()).unwrap_or("hibos")
-}
+use crate::{ansi_bold, ansi_bold_green, ansi_bold_yellow, ansi_grey, ansi_green, ansi_red, ansi_yellow, ansi_bold_blue};
+use crate::theme::{current_user_name, current_host_name};
 
 // ---------------------------------------------------------------------------
 // 命令输出捕获
@@ -182,56 +159,15 @@ static LOOP_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::ne
 /// 颜色宏（仅在真实终端生效，否则原样输出）：
 /// * `ansi_red!()`, `ansi_green!()`, `ansi_yellow!()` —— 单色
 /// * `ansi_bold!()` —— 加粗
-/// * `ansi_bold_red!()`, `theme::ansi_bold_green!()`, `ansi_bold_yellow!()` —— 加粗 + 彩色
+/// * `ansi_bold_red!()`, `ansi_bold_green!()`, `ansi_bold_yellow!()` —— 加粗 + 彩色
 /// 使用示例：`print!("{}", ansi_green!("OK"));`
-#[allow(dead_code)]
-mod theme {
-    use std::io::IsTerminal;
 
-    use crate::{ansi_bold_blue, ansi_bold_green};
 
-    const RESET: &str = "\x1b[0m";
-    const BOLD: &str = "\x1b[1m";
-    const GREEN: &str = "\x1b[32m";
-    const RED: &str = "\x1b[31m";
-    const YELLOW: &str = "\x1b[33m";
-    const BLUE: &str = "\x1b[34m";
-    const CYAN: &str = "\x1b[36m";
-    const GREY: &str = "\x1b[90m";
-
-    /// 真实终端（stdout 是 tty）才上色，避免管道/重定向输出出现乱码转义符。
-    fn enabled() -> bool {
-        std::io::stdout().is_terminal()
-    }
-
-    /// 仅终端时上色，否则原样返回（保证管道输出干净）。
-    pub fn paint(s: &str, code: &str) -> String {
-        if enabled() {
-            format!("{}{}{}", code, s, RESET)
-        } else {
-            s.to_string()
-        }
-    }
-
-    pub fn bold(s: &str) -> String { paint(s, BOLD) }
-    pub fn green(s: &str) -> String { paint(s, GREEN) }
-    pub fn red(s: &str) -> String { paint(s, RED) }
-    pub fn yellow(s: &str) -> String { paint(s, YELLOW) }
-    pub fn blue(s: &str) -> String { paint(s, BLUE) }
-    pub fn cyan(s: &str) -> String { paint(s, CYAN) }
-    pub fn grey(s: &str) -> String { paint(s, GREY) }
-
-    /// systemd 风启动行：`[  OK  ] Started <service>`。
-    pub fn ok(service: &str) -> String {
-        format!("{} Started {}", green("[  OK  ]"), service)
-    }
-
-    /// 经典 Linux 风 prompt：`root@hibos:<path># `（绿主机 + 蓝路径，加粗重点）。
-    pub fn prompt(cwd: &str) -> String {
-        let host = ansi_bold_green!("root@hibos");
-        let path = ansi_bold_blue!(if cwd.is_empty() || cwd == "/" { "~" } else { cwd });
-        format!("{}:{}# ", host, path)
-    }
+/// 经典 Linux 风 prompt：`<user>@<host>:<path># `（绿主机 + 蓝路径，加粗重点）。
+pub fn prompt(cwd: &str) -> String {
+    let host = ansi_bold_green!(format!("{}@{}", current_user_name(), current_host_name()));
+    let path = ansi_bold_blue!(if cwd.is_empty() || cwd == "/" { "~" } else { cwd });
+    format!("{}:{}# ", host, path)
 }
 
 /// 带方括号标识的输出：**方括号内的标识用绿色，方括号外的正文保持终端默认色**。
@@ -241,7 +177,7 @@ mod theme {
 /// 例：`tagged_out!("[llm]", "Provider '{}' => {}", provider, masked)`
 macro_rules! tagged_out {
     ($tag:expr, $($body:tt)*) => {
-        sh_println!("{} {}", theme::green($tag), format!($($body)*))
+        sh_println!("{} {}", ansi_green!($tag), format!($($body)*))
     };
 }
 
@@ -356,7 +292,7 @@ impl Shell {
 
     /// 提示符 (经典 Linux 风格，彩色): `root@hibos:~# `。
     pub fn prompt(&self) -> String {
-        theme::prompt(&self.vfs.cwd_path())
+        prompt(&self.vfs.cwd_path())
     }
 
     /// 启动交互循环 (EOF / Ctrl+D / `exit` 结束)。
@@ -365,7 +301,7 @@ impl Shell {
     fn linux_boot(&self) {
         sh_println!(
             "{}",
-            theme::bold(concat!(
+            ansi_bold!(concat!(
                 "Hib OS ",
                 crate::version::hibos_version!(),
                 " (linux)"
@@ -373,13 +309,13 @@ impl Shell {
         );
         sh_println!(
             "{} hibos: GPU-Centric macro-kernel (by logos-42, MIT)",
-            theme::grey("[    0.000000 ]")
+            ansi_grey!("[    0.000000 ]")
         );
-        sh_println!("{}", theme::ok("GPU 显存 / IOMMU"));
-        sh_println!("{}", theme::ok("GPU 调度器"));
-        sh_println!("{}", theme::ok("系统调用门闸 (10 种调用)"));
-        sh_println!("{}", theme::ok("形式化验证框架"));
-        sh_println!("{}", theme::ok("虚拟文件系统 (VFS)"));
+        sh_println!("{}", crate::theme::ok("GPU 显存 / IOMMU"));
+        sh_println!("{}", crate::theme::ok("GPU 调度器"));
+        sh_println!("{}", crate::theme::ok("系统调用门闸 (10 种调用)"));
+        sh_println!("{}", crate::theme::ok("形式化验证框架"));
+        sh_println!("{}", crate::theme::ok("虚拟文件系统 (VFS)"));
     }
 
     /// 默认进入 LLM 闭环循环模式 (loop)：AI 自动感知系统状态、思考、执行行动。
@@ -2691,7 +2627,7 @@ impl Shell {
             }
 
             // — 外部输入驱动 —
-            let prompt = theme::prompt("~");
+            let prompt = prompt("~");
             let mut editor = std::mem::replace(&mut self.editor, LineEditor::new());
             let outcome = editor.read_line(&prompt, |input| self.completion(input));
             self.editor = editor;

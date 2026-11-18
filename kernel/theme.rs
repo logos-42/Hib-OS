@@ -8,6 +8,8 @@
 //! print!("{}", ansi_green!("OK"));
 //! ```
 
+use std::io::IsTerminal;
+
 /// 绿色（仅真实终端生效，否则原样）。
 #[macro_export]
 macro_rules! ansi_green {
@@ -150,4 +152,52 @@ macro_rules! ansi_yellow_bold {
     ($s:expr) => {{
         crate::theme::ansi_bold_yellow!($s)
     }};
+}
+
+/// 灰色（仅真实终端生效，否则原样）。
+#[macro_export]
+macro_rules! ansi_grey {
+    ($s:expr) => {{
+        if std::io::stdout().is_terminal() {
+            format!("\x1b[90m{}\x1b[0m", $s)
+        } else {
+            format!("{}", $s)
+        }
+    }};
+}
+
+/// 用户名与主机名（可自定义，默认 root@hibos）。
+static USER_NAME: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+static HOST_NAME: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+/// 设置用户名（shell 启动前调用）。
+pub fn set_user_name(name: &str) {
+    let _ = USER_NAME.set(name.to_string());
+}
+
+/// 设置主机名（shell 启动前调用）。
+pub fn set_host_name(host: &str) {
+    let _ = HOST_NAME.set(host.to_string());
+}
+
+/// 获取当前用户名（shell 启动前可通过 set_user_name 自定义）。
+pub fn current_user_name() -> &'static str {
+    USER_NAME.get().map(|s| s.as_str()).unwrap_or("root")
+}
+
+/// 获取当前主机名（shell 启动前可通过 set_host_name 自定义）。
+pub fn current_host_name() -> &'static str {
+    HOST_NAME.get().map(|s| s.as_str()).unwrap_or("hibos")
+}
+
+/// 经典 Linux 风 prompt：`<user>@<host>:<path># `（绿主机 + 蓝路径，加粗重点）。
+pub fn prompt(cwd: &str) -> String {
+    let host = ansi_bold_green!(format!("{}@{}", current_user_name(), current_host_name()));
+    let path = ansi_bold_blue!(if cwd.is_empty() || cwd == "/" { "~" } else { cwd });
+    format!("{}:{}# ", host, path)
+}
+
+/// systemd 风启动行：`[  OK  ] Started <service>`。
+pub fn ok(service: &str) -> String {
+    format!("{} Started {}", ansi_green!("[  OK  ]"), service)
 }
