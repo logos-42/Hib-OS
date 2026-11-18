@@ -323,14 +323,6 @@ impl Shell {
             return;
         }
 
-        // 传统 shell 模式才输出启动画面；AI 模式保持极简。
-        self.linux_boot();
-
-        sh_println!("{}", ansi_green!("Hib OS — interactive shell ready (help / exit)"));
-        if io::stdin().is_terminal() {
-            sh_println!("↑↓ 历史, Tab 补全, ←→ 移动光标");
-            sh_println!("设置环境变量 HIBOS_LLM_<PROVIDER>_KEY（兼容 DEEPSEEK_API_KEY）可启用 AI 闭环模式");
-        }
 
         loop {
             let prompt = self.prompt();
