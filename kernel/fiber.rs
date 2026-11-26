@@ -194,19 +194,27 @@ where
         let mut s = scheduler().lock().unwrap();
         let id = s.next_id;
         s.next_id += 1;
+        let param = Box::into_raw(Box::new(FiberEntryParam {
+            scheduler_fiber,
+            closure: Box::new(f),
+        })) as *mut c_void;
         let handle = unsafe {
             CreateFiberEx(
-                64 * 1024,    // commit 64KB
+                64 * 1024,       // commit 64KB
                 2 * 1024 * 1024, // reserve 2MB
                 0,
                 fiber_entry as *mut c_void,
-                Box::into_raw(Box::new(FiberEntryParam {
-                    scheduler_fiber,
-                    closure: Box::new(f),
-                })) as *mut c_void,
+                param,
             )
         };
         if handle.is_null() {
+            // 非 Windows 平台：没有纤程 API，回收入口参数并记录一个
+            // 「不可切换」的纤程，状态查询仍可用（测试与诊断依赖）。
+            #[cfg(not(windows))]
+            unsafe {
+                drop(Box::from_raw(param as *mut FiberEntryParam));
+            }
+            #[cfg(windows)]
             panic!("CreateFiberEx 失败");
         }
         s.fibers.insert(
@@ -280,6 +288,14 @@ fn switch_to_fiber(fiber_id: FiberId) {
         }
     };
     if handle.is_null() {
+        // 非 Windows 平台：句柄为空表示没有真实纤程可切换，
+        // 直接把该纤程标记为退出，避免调度器反复取到同一个空句柄。
+        #[cfg(not(windows))]
+        {
+            if let Some(f) = scheduler().lock().unwrap().fibers.get_mut(&fiber_id) {
+                f.state = FiberState::Exited;
+            }
+        }
         return;
     }
     // 第二步：更新状态（新的锁作用域）。
@@ -449,6 +465,36 @@ mod tests {
 
 // ===== Windows Fiber API 手动声明（避免引入重型 windows-sys crate）=====
 
+/// 非 Windows 平台没有纤程 API。为了让 `cargo test` / 宿主侧调试在
+/// macOS / Linux 上也能链接通过，这里提供同名的空实现：
+/// * 创建纤程返回空句柄，表示"不可切换"；
+/// * 切换是空操作，调度器会把该纤程标记为已退出，避免空转。
+/// 真正的裸机 / Windows 运行时仍走下面的 Win32 声明。
+#[cfg(not(windows))]
+mod win_fiber {
+    use std::ffi::c_void;
+
+    pub unsafe fn ConvertThreadToFiber(_lp: *mut c_void) -> *mut c_void {
+        std::ptr::null_mut()
+    }
+
+    pub unsafe fn CreateFiberEx(
+        _commit: usize,
+        _reserve: usize,
+        _flags: u32,
+        _entry: *mut c_void,
+        _param: *mut c_void,
+    ) -> *mut c_void {
+        std::ptr::null_mut()
+    }
+
+    pub unsafe fn SwitchToFiber(_handle: *mut c_void) {}
+}
+
+#[cfg(not(windows))]
+use win_fiber::{ConvertThreadToFiber, CreateFiberEx, SwitchToFiber};
+
+#[cfg(windows)]
 #[link(name = "kernel32")]
 extern "system" {
     /// 将当前线程转换为纤程，返回纤程句柄。
