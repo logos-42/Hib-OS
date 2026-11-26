@@ -82,7 +82,8 @@ pub struct Dock {
 
 impl Dock {
     pub fn new() -> Self {
-        Self { auto_hide: true, revealed: false, pending_permission: false, unread: 0 }
+        // 默认常驻显示；「高级工具」需显式展开；自动隐藏作为可选项。
+        Self { auto_hide: false, revealed: false, pending_permission: false, unread: 0 }
     }
 
     /// 三态可见性：常驻始终显示；条件图标按状态；隐藏图标需显式展开。
@@ -91,6 +92,7 @@ impl Dock {
             Icon::Conversation | Icon::Tasks | Icon::Files => true,
             Icon::Permission => self.pending_permission,
             Icon::Notification => self.unread > 0,
+            // 高级工具需要显式展开（点击「更多」或快捷键）。
             Icon::Advanced => self.revealed,
         }
     }
@@ -164,7 +166,10 @@ mod tests {
 
     #[test]
     fn auto_hide_respects_cursor() {
-        let dock = Dock::new();
+        let mut dock = Dock::new();
+        // 默认常驻；开启自动隐藏后才按光标位置判定。
+        assert!(dock.is_shown(100, 600));
+        dock.auto_hide = true;
         assert!(!dock.is_shown(100, 600));
         assert!(dock.is_shown(596, 600));
     }

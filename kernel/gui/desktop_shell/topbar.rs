@@ -1,7 +1,7 @@
 //! 极简顶栏：左侧一个系统图标（返回桌面），右侧 token 速率 / 联网 / 时钟 / 通知。
 //!
 //! 右侧状态全部来自真实数据源，不再硬编码：
-//! * 时钟 —— `statusbar::clock_hms()`
+//! * 时钟 —— 本模块 `clock_hms()`
 //! * 联网 —— `drivers::net_driver::NetDriver::driver().any_link_up()`
 //! * 通知 —— `notification::unread_notifications()`
 //! * token 速率 —— 本模块计数器（由推理/生成路径写入）。
@@ -40,6 +40,20 @@ fn link_up() -> bool {
     crate::drivers::net_driver::NetDriver::driver().lock().any_link_up()
 }
 
+/// 本地时钟 HH:MM:SS。
+pub fn clock_hms() -> String {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    format!(
+        "{:02}:{:02}:{:02}",
+        (secs / 3600) % 24,
+        (secs / 60) % 60,
+        secs % 60
+    )
+}
+
 pub fn draw(frame: &mut Surface) {
     let w = frame.width();
     frame.fill_rect(0, 0, w, TOPBAR_H as u32, BG);
@@ -55,7 +69,7 @@ pub fn draw(frame: &mut Surface) {
     frame.draw_text(right - 96, 6, &rate, TEXT, 1);
     let (net_label, net_color) = if link_up() { ("~", ACCENT) } else { ("x", OFFLINE) };
     frame.draw_text(right - 56, 6, net_label, net_color, 1);
-    let clock = super::super::statusbar::clock_hms();
+    let clock = clock_hms();
     frame.draw_text(right - 36, 6, &clock, TEXT, 1);
     if super::super::notification::unread_notifications() > 0 {
         frame.fill_rect(right - 4, 9, 3, 3, 0xFFE08A63);

@@ -7,7 +7,7 @@
 //! 像素格式为 `0xAARRGGBB`（与 Windows GDI / softbuffer 的 0x00RRGGBB 兼容，
 //! 高位 alpha 仅在本模块内部用于混合）。
 
-use crate::gpu::framebuffer::{glyph, ADVANCE, FONT_WIDTH, LINE_HEIGHT};
+use crate::gpu::framebuffer::{glyph, ADVANCE, FONT_HEIGHT, FONT_WIDTH, LINE_HEIGHT};
 
 /// 打包一个 ARGB 像素。
 #[inline]
@@ -428,6 +428,94 @@ impl Surface {
         x + ADVANCE as i32 * scale
     }
 
+    /// 抗锯齿字符：先算 4×4 超采样的覆盖率，scale≥2 时再做 3×3 高斯后滤波，
+    /// 让位图放大后的边缘出现平滑过渡。
+    ///
+    /// `scale == 1` 时跳过滤波，结果与 [`draw_char`] 完全一致（小字号保持清晰）。
+    pub fn draw_char_aa(&mut self, x: i32, y: i32, ch: char, color: u32, scale: u32) -> i32 {
+        const SS: i32 = 4; // 每像素超采样倍数
+        let rows = glyph(ch);
+        let s = scale.max(1) as i32;
+        let cell_w = FONT_WIDTH as i32 * s;
+        let cell_h = FONT_HEIGHT as i32 * s;
+        let inv = s as f32;
+        let mut cov = vec![0f32; (cell_w * cell_h) as usize];
+        for oy in 0..cell_h {
+            for ox in 0..cell_w {
+                let mut covered = 0u32;
+                for j in 0..SS {
+                    let sy = ((oy as f32 + (j as f32 + 0.5) / SS as f32) / inv) as i32;
+                    if sy < 0 || sy as usize >= FONT_HEIGHT {
+                        continue;
+                    }
+                    let bits = rows[sy as usize];
+                    for i in 0..SS {
+                        let sx = ((ox as f32 + (i as f32 + 0.5) / SS as f32) / inv) as i32;
+                        if sx < 0 || sx as usize >= FONT_WIDTH {
+                            continue;
+                        }
+                        if bits & (1u8 << (FONT_WIDTH - 1 - sx as usize)) != 0 {
+                            covered += 1;
+                        }
+                    }
+                }
+                cov[(oy * cell_w + ox) as usize] = covered as f32 / (SS * SS) as f32;
+            }
+        }
+        // 大字号做 3×3 高斯后滤波，消除硬锯齿；小字号跳过以保持锐利。
+        if s >= 2 {
+            let src = cov.clone();
+            let at = |xx: i32, yy: i32| -> f32 {
+                if xx < 0 || yy < 0 || xx >= cell_w || yy >= cell_h {
+                    0.0
+                } else {
+                    src[(yy * cell_w + xx) as usize]
+                }
+            };
+            for oy in 0..cell_h {
+                for ox in 0..cell_w {
+                    let mut acc = 0.0;
+                    for dy in -1..=1i32 {
+                        for dx in -1..=1i32 {
+                            // 权重 (1,2,1)×(1,2,1)/16
+                            let wx = if dx == 0 { 2.0 } else { 1.0 };
+                            let wy = if dy == 0 { 2.0 } else { 1.0 };
+                            acc += at(ox + dx, oy + dy) * wx * wy;
+                        }
+                    }
+                    cov[(oy * cell_w + ox) as usize] = acc / 16.0;
+                }
+            }
+        }
+        for oy in 0..cell_h {
+            for ox in 0..cell_w {
+                let c = cov[(oy * cell_w + ox) as usize];
+                if c > 0.0 {
+                    let cov_u = (c * 255.0).round().clamp(0.0, 255.0) as u32;
+                    let src = (cov_u << 24) | (color & 0x00FF_FFFF);
+                    self.blend(x + ox, y + oy, src);
+                }
+            }
+        }
+        x + ADVANCE as i32 * s
+    }
+
+    /// 抗锯齿文本行（不换行、超宽裁剪）。
+    pub fn draw_text_aa(&mut self, x: i32, y: i32, text: &str, color: u32, scale: u32) -> i32 {
+        let mut cx = x;
+        let s = scale.max(1) as i32;
+        for ch in text.chars() {
+            if ch == '\n' {
+                break;
+            }
+            if cx + FONT_WIDTH as i32 * s > self.width as i32 {
+                break;
+            }
+            cx = self.draw_char_aa(cx, y, ch, color, scale);
+        }
+        cx
+    }
+
     /// 画一行字符（**不换行**，超出表面宽度自动裁剪），返回结束 x。
     ///
     /// 换行由调用方通过 [`wrap_text`] 显式完成 —— 之前这里是隐式换行，
@@ -594,6 +682,38 @@ mod tests {
         assert_eq!(s.get(-1, 0), None);
         assert_eq!(s.width(), 8);
         assert_eq!(s.height(), 4);
+    }
+
+    #[test]
+    fn aa_matches_crisp_rendering_at_scale_one() {
+        // scale=1 时覆盖率只有 0/1，抗锯齿结果必须与普通渲染逐像素一致。
+        let mut a = Surface::filled(24, 12, rgb(0, 0, 0));
+        let mut b = Surface::filled(24, 12, rgb(0, 0, 0));
+        a.draw_text(0, 0, "AB", rgb(255, 255, 255), 1);
+        b.draw_text_aa(0, 0, "AB", rgb(255, 255, 255), 1);
+        for y in 0..12 {
+            for x in 0..24 {
+                assert_eq!(a.get(x, y), b.get(x, y), "像素 ({},{}) 不一致", x, y);
+            }
+        }
+    }
+
+    #[test]
+    fn aa_produces_smooth_edges_at_scale_two() {
+        // scale=2 时边缘应出现“部分覆盖”的过渡像素（既非纯背景也非纯前景）。
+        let mut s = Surface::filled(40, 20, rgb(0, 0, 0));
+        s.draw_text_aa(0, 0, "A", rgb(255, 255, 255), 2);
+        let mut partial = 0;
+        for y in 0..20 {
+            for x in 0..40 {
+                let p = s.get(x, y).unwrap();
+                let r = red_of(p);
+                if r > 0 && r < 255 {
+                    partial += 1;
+                }
+            }
+        }
+        assert!(partial > 0, "抗锯齿应产生过渡像素");
     }
 
     #[test]

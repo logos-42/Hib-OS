@@ -1360,22 +1360,6 @@ impl Shell {
                 Ok(id) => sh_println!("已启动应用 {} -> win#{}", rest, id),
                 Err(e) => sh_println!("{}", e),
             },
-            "taskbar" => {
-                let mut p = rest.split_whitespace();
-                let xy = (
-                    p.next().and_then(|s| s.parse::<i32>().ok()),
-                    p.next().and_then(|s| s.parse::<i32>().ok()),
-                );
-                match xy {
-                    (Some(x), Some(y)) => sh_println!(
-                        "任务栏点击 ({},{}) -> {:?}",
-                        x,
-                        y,
-                        gui::taskbar_click(x, y)
-                    ),
-                    _ => sh_println!("用法: gui taskbar <x> <y>"),
-                }
-            }
             "open" | "term" | "terminal" => {
                 let title = if rest.is_empty() { "TERMINAL".to_string() } else { rest };
                 let id = gui::open_terminal(&title, 420, 280);

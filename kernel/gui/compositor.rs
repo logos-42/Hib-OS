@@ -12,9 +12,7 @@
 //! * `drag` 标题栏拖动 / 右下角缩放的状态机
 
 use super::apps::{AppKind, AppState};
-use super::input::Effect;
 use super::surface::{argb, palette, Rect, Surface};
-use super::taskbar::{Taskbar, TaskbarHit};
 use super::window::{Hit, Window, WindowId};
 use crate::monitor::get_time_ns;
 
@@ -56,8 +54,6 @@ pub struct Compositor {
     /// 最近一次合成的窗口数量 / 脏标记（可观测性）。
     pub frames: u64,
     pub last_compose_ns: u64,
-    /// 底部真实任务栏。
-    pub taskbar: Taskbar,
 }
 
 impl Compositor {
@@ -75,7 +71,6 @@ impl Compositor {
             frame: Surface::new(width, height),
             frames: 0,
             last_compose_ns: 0,
-            taskbar: Taskbar::new(),
         }
     }
 
@@ -238,43 +233,6 @@ impl Compositor {
             w.app = Some(AppState::from_spec(spec));
         }
         id
-    }
-
-    /// 任务栏命中测试（输入层优先调用）。
-    pub fn taskbar_hit(&self, x: i32, y: i32) -> Option<TaskbarHit> {
-        self.taskbar
-            .hit(self.width, self.height, &self.windows, x, y)
-    }
-
-    /// 处理任务栏点击：启动器开合、菜单启动应用、窗口按钮聚焦/最小化/还原。
-    pub fn handle_taskbar(&mut self, hit: TaskbarHit) -> Vec<Effect> {
-        match hit {
-            TaskbarHit::Launcher => {
-                self.taskbar.toggle_menu();
-                vec![Effect::Redraw]
-            }
-            TaskbarHit::Menu(i) => {
-                self.taskbar.menu_open = false;
-                match Taskbar::app_at(i) {
-                    Some(kind) => {
-                        let id = self.open_app(kind);
-                        vec![Effect::Focused(Some(id)), Effect::Redraw]
-                    }
-                    None => vec![Effect::Redraw],
-                }
-            }
-            TaskbarHit::Window(id) => {
-                let is_focus = self.focused == Some(id);
-                let minimized = self.window(id).map(|w| w.minimized).unwrap_or(false);
-                if let Some(w) = self.window_mut(id) {
-                    w.minimized = is_focus && !minimized;
-                }
-                if !is_focus || minimized {
-                    self.focus(id);
-                }
-                vec![Effect::Focused(self.focused), Effect::Redraw]
-            }
-        }
     }
 
     /// 合成一帧，返回像素缓冲。

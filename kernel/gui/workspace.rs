@@ -2,6 +2,9 @@
 //!
 //! 工作区是「语义页面」而不是桌面里的小窗口：它覆盖整个画布，顶栏仍保留；
 //! 通过 Esc / 顶部下滑 / 左上图标返回桌面；左右滑动或 ⌘Tab 在页面间切换。
+//!
+//! 页面内容来自真实内核数据（Agent 状态 / 权限 / 文件系统 / 系统监控），
+//! 且全部用 ASCII 短标签渲染 —— 位图字体只覆盖 ASCII，中文标签会显示成方块。
 
 use std::sync::{Mutex, OnceLock};
 
@@ -66,11 +69,100 @@ impl WorkspaceManager {
 
     /// 把当前全屏页面绘制到帧缓冲（在窗口层之上、外壳之下）。
     pub fn draw(&self, frame: &mut Surface) {
-        if let Some(page) = self.current() {
-            frame.fill_rect(0, 0, frame.width(), frame.height(), 0xFF141518);
-            frame.draw_text(40, 40, page.kind.label(), 0xFFE6E8EC, 2);
-            frame.fill_rect(40, 70, 120, 2, 0xFF7FB3A0);
+        let Some(page) = self.current() else {
+            return;
+        };
+        // 页面底色：近黑，避免抢走内容。
+        frame.fill_rect(0, 0, frame.width(), frame.height(), 0xFF141518);
+
+        // 顶部：页面标题 + 强调色细线。
+        let title = page.kind.label_en();
+        frame.draw_text_aa(40, 34, title, 0xFFE6E8EC, 2);
+        frame.fill_rect(40, 58, 140, 2, 0xFF7FB3A0);
+
+        // 内容区：真实数据行，逐行绘制（行距 16px，适配 5x7 字形）。
+        let lines = page_lines(page.kind);
+        let mut y = 84;
+        for line in lines {
+            frame.draw_text(40, y, &line, 0xFFB9BCC4, 1);
+            y += 16;
         }
+    }
+}
+
+/// 按页面类型收集真实内核数据，返回可直接渲染的 ASCII 行。
+fn page_lines(kind: PageKind) -> Vec<String> {
+    match kind {
+        PageKind::Conversation => vec![
+            "Say what you want to do.".to_string(),
+            "Try: \"open tasks\" / \"show permissions\" / \"back to desktop\".".to_string(),
+            String::new(),
+            "This page never shows terminal commands.".to_string(),
+        ],
+        PageKind::Tasks => {
+            use crate::ai_os::agent_proc::{agents, AgentPcbState};
+            let t = agents().lock().unwrap_or_else(|e| e.into_inner());
+            let total = t.iter().count();
+            let ready = t.state_count(AgentPcbState::Ready);
+            let running = t.state_count(AgentPcbState::Running);
+            let blocked = t.state_count(AgentPcbState::Blocked);
+            vec![
+                format!("agents total  {}", total),
+                format!("ready         {}", ready),
+                format!("running       {}", running),
+                format!("waiting       {}", blocked),
+            ]
+        }
+        PageKind::Permission => {
+            let pm = crate::permission::permission_manager()
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
+            let agents = pm.list_agents();
+            let pending = super::notification::unread_notifications();
+            vec![
+                format!("agents with permissions  {}", agents.len()),
+                format!("notifications waiting   {}", pending),
+                String::new(),
+                "High-risk actions always ask for your approval.".to_string(),
+            ]
+        }
+        PageKind::Files => {
+            let stats = crate::fs::vfs::vfs_stats();
+            let mut lines: Vec<String> = stats
+                .lines()
+                .filter(|l| !l.trim().is_empty())
+                .map(|l| l.trim_end().to_string())
+                .take(8)
+                .collect();
+            if lines.is_empty() {
+                lines.push("(no files yet)".to_string());
+            }
+            lines
+        }
+        PageKind::Observation => {
+            let s = crate::monitor::get_stats();
+            let up_s = s.system_uptime_ns / 1_000_000_000;
+            vec![
+                format!("uptime        {}s", up_s),
+                format!("tokens live   {}", s.active_tokens),
+                format!("tasks done    {}", s.total_tasks_completed),
+                format!("tasks failed  {}", s.total_tasks_failed),
+            ]
+        }
+        PageKind::Settings => vec![
+            "Appearance: minimal, dark.".to_string(),
+            "Dock: always visible (auto-hide optional).".to_string(),
+            "More settings coming soon.".to_string(),
+        ],
+        PageKind::Help => vec![
+            "Click a Dock icon to open a full-screen page.".to_string(),
+            "Esc or the top-left icon returns to the desktop.".to_string(),
+            "Swipe left/right or Cmd+Tab to switch pages.".to_string(),
+        ],
+        PageKind::Advanced => vec![
+            "Advanced tools live here, not on the main screen.".to_string(),
+            "Press Cmd+K for the command palette.".to_string(),
+        ],
     }
 }
 
@@ -117,5 +209,31 @@ mod tests {
         assert_eq!(mgr.current_kind(), Some(PageKind::Tasks));
         mgr.handle_intent(Intent::PrevPage);
         assert_eq!(mgr.current_kind(), Some(PageKind::Files));
+    }
+
+    #[test]
+    fn every_page_has_real_lines() {
+        for kind in [
+            PageKind::Conversation,
+            PageKind::Tasks,
+            PageKind::Permission,
+            PageKind::Files,
+            PageKind::Observation,
+            PageKind::Settings,
+            PageKind::Help,
+            PageKind::Advanced,
+        ] {
+            let lines = page_lines(kind);
+            assert!(!lines.is_empty(), "{:?} 应有内容", kind);
+        }
+    }
+
+    #[test]
+    fn draw_marks_page_background() {
+        let mut mgr = WorkspaceManager::new();
+        mgr.open(PageKind::Help, 400, 300);
+        let mut s = Surface::new(400, 300);
+        mgr.draw(&mut s);
+        assert_eq!(s.get(5, 5), Some(0xFF141518));
     }
 }

@@ -29,10 +29,8 @@ pub mod command_palette;
 pub mod permission_center;
 pub mod png;
 pub mod shell;
-pub mod statusbar;
 pub mod system_monitor;
 pub mod task_workspace;
-pub mod taskbar;
 pub mod terminal;
 pub mod text_render;
 pub mod theme;
@@ -807,18 +805,6 @@ pub fn app_output(id: u64, text: &str) {
         if let Some(app) = w.app.as_mut() {
             app.output(text);
         }
-    }
-}
-
-/// 模拟点击任务栏（键盘/脚本也能走同一套窗口管理逻辑）。
-pub fn taskbar_click(x: i32, y: i32) -> Vec<input::Effect> {
-    let hit = {
-        let d = desktop().lock().unwrap();
-        d.taskbar_hit(x, y)
-    };
-    match hit {
-        Some(h) => desktop().lock().unwrap().handle_taskbar(h),
-        None => Vec::new(),
     }
 }
 

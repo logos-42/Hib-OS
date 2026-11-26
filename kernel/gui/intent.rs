@@ -30,6 +30,20 @@ impl PageKind {
             PageKind::Advanced => "高级工具",
         }
     }
+
+    /// 屏幕短标签（ASCII）：位图字体只覆盖 ASCII，界面统一用它，避免豆腐块。
+    pub fn label_en(self) -> &'static str {
+        match self {
+            PageKind::Conversation => "CHAT",
+            PageKind::Tasks => "TASKS",
+            PageKind::Permission => "PERMISSION",
+            PageKind::Files => "FILES",
+            PageKind::Observation => "OBSERVE",
+            PageKind::Settings => "SETTINGS",
+            PageKind::Help => "HELP",
+            PageKind::Advanced => "ADVANCED",
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -72,8 +86,29 @@ impl IntentRouter {
                 what: "删除所有文件".into(),
                 level: AuthLevel::Once,
             }),
-            _ => None,
+            // 精确匹配失败后走语义兜底：同义短语 + 最长匹配 + 高风险优先。
+            _ => Self::resolve_fuzzy(t),
         }
+    }
+
+    /// 语义兜底：覆盖用户不必记住精确说法的同义表达。
+    ///
+    /// 打分规则：命中关键词的最长长度（越长越具体）；高分者胜。
+    /// 高风险操作放在表首，避免「删除所有文件」被「文件」抢走。
+    fn resolve_fuzzy(text: &str) -> Option<Intent> {
+        let t = text.to_lowercase();
+        let mut best: Option<(usize, Intent)> = None;
+        for &(keys, intent) in fuzzy_table() {
+            for k in keys {
+                if t.contains(*k) {
+                    let score = k.chars().count();
+                    if best.as_ref().map_or(true, |(s, _)| score > *s) {
+                        best = Some((score, intent()));
+                    }
+                }
+            }
+        }
+        best.map(|(_, i)| i)
     }
 
     /// 快捷键 → 意图。快捷键是可选加速，不是必需知识。
@@ -104,6 +139,49 @@ impl IntentRouter {
     }
 }
 
+/// 语义兜底短语表：高风险操作在前，其次按页面；关键词越具体越优先。
+fn fuzzy_table() -> &'static [(&'static [&'static str], fn() -> Intent)] {
+    &[
+        (
+            &["删除所有", "清空所有", "格式化", "rm -rf", "delete all", "wipe"],
+            || Intent::RequestPermission {
+                what: "删除所有文件".into(),
+                level: AuthLevel::Once,
+            },
+        ),
+        (&["对话", "聊天", "chat", "conversation"], || {
+            Intent::OpenPage(PageKind::Conversation)
+        }),
+        (&["任务", "待办", "task", "todo"], || Intent::OpenPage(PageKind::Tasks)),
+        (
+            &["权限", "授权", "确认", "permission", "approve", "allow"],
+            || Intent::OpenPage(PageKind::Permission),
+        ),
+        (&["文件", "目录", "文件夹", "file", "folder", "dir"], || {
+            Intent::OpenPage(PageKind::Files)
+        }),
+        (
+            &["观察", "监控", "状态", "observe", "monitor", "status"],
+            || Intent::OpenPage(PageKind::Observation),
+        ),
+        (
+            &["设置", "配置", "setting", "config", "preference"],
+            || Intent::OpenPage(PageKind::Settings),
+        ),
+        (&["帮助", "怎么用", "guide", "help"], || Intent::OpenPage(PageKind::Help)),
+        (
+            &["高级", "终端", "命令", "advanced", "terminal", "shell"],
+            || Intent::OpenPage(PageKind::Advanced),
+        ),
+        (
+            &["返回桌面", "回到桌面", "桌面", "desktop", "home", "back"],
+            || Intent::ReturnDesktop,
+        ),
+        (&["下一个", "下一页", "next"], || Intent::NextPage),
+        (&["上一个", "上一页", "previous", "prev"], || Intent::PrevPage),
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -112,6 +190,31 @@ mod tests {
     fn natural_language_maps_to_open_page() {
         assert_eq!(IntentRouter::resolve("打开任务"), Some(Intent::OpenPage(PageKind::Tasks)));
         assert_eq!(IntentRouter::resolve("看看有什么要我确认的"), Some(Intent::OpenPage(PageKind::Permission)));
+    }
+
+    #[test]
+    fn fuzzy_understands_synonyms_and_phrases() {
+        // 非精确说法也要能命中。
+        assert_eq!(IntentRouter::resolve("帮我打开任务吧"), Some(Intent::OpenPage(PageKind::Tasks)));
+        assert_eq!(IntentRouter::resolve("我想看看文件"), Some(Intent::OpenPage(PageKind::Files)));
+        assert_eq!(IntentRouter::resolve("show me permissions"), Some(Intent::OpenPage(PageKind::Permission)));
+        assert_eq!(IntentRouter::resolve("回到桌面"), Some(Intent::ReturnDesktop));
+        assert_eq!(IntentRouter::resolve("go home"), Some(Intent::ReturnDesktop));
+    }
+
+    #[test]
+    fn high_risk_phrase_beats_page_keyword() {
+        // 「删除所有…」必须优先于「文件」这一页面关键词。
+        let i = IntentRouter::resolve("删除所有文件").unwrap();
+        assert!(matches!(
+            i,
+            Intent::RequestPermission { level: AuthLevel::Once, .. }
+        ));
+    }
+
+    #[test]
+    fn gibberish_has_no_intent() {
+        assert_eq!(IntentRouter::resolve("随便说点什么"), None);
     }
 
     #[test]
