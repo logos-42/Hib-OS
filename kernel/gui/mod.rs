@@ -21,6 +21,7 @@ pub mod compositor_ext;
 pub mod conversation;
 pub mod file_manager;
 pub mod gesture;
+pub mod glyph12;
 pub mod input;
 pub mod intent;
 pub mod notification;
@@ -204,7 +205,7 @@ pub fn build_agent_workspace(comp: &mut Compositor, x: i32, y: i32, w: u32, h: u
             }
         }
         lines.push(String::new());
-        lines.push("操作: shell 输入 `agent list / inspect <id> / start <id> / stop <id>`".to_string());
+        lines.push("Use 'agent list / inspect <id> / start <id> / stop <id>' in the shell.".to_string());
         paint_lines(win, &lines);
     }
 }
@@ -257,7 +258,7 @@ pub fn build_task_workspace(comp: &mut Compositor, x: i32, y: i32, w: u32, h: u3
             lines.push("能力 task 未注册".to_string());
         }
         lines.push(String::new());
-        lines.push("操作: shell 输入 `task create <描述> / cancel <id> / pause <id> / resume <id>`".to_string());
+        lines.push("Use 'task create <desc> / cancel <id> / pause <id> / resume <id>' in the shell.".to_string());
         paint_lines(win, &lines);
     }
 }
@@ -281,7 +282,7 @@ pub fn build_permission_center(comp: &mut Compositor, x: i32, y: i32, w: u32, h:
             ));
         }
         lines.push(String::new());
-        lines.push("--- 最近审计 ---".to_string());
+        lines.push("--- Recent audit ---".to_string());
         for entry in crate::permission::permission_manager().lock().unwrap().query_audit(Some(10)) {
             lines.push(format!(
                 "  {} {} {} -> {:?}",
@@ -289,7 +290,7 @@ pub fn build_permission_center(comp: &mut Compositor, x: i32, y: i32, w: u32, h:
             ));
         }
         lines.push(String::new());
-        lines.push("操作: shell 输入 `system logs` 查看更多审计".to_string());
+        lines.push("Use 'system logs' in the shell for more audit entries.".to_string());
         paint_lines(win, &lines);
     }
 }
@@ -317,9 +318,9 @@ pub fn refresh_workspaces(comp: &mut Compositor) {
                     let mut lines = vec!["=== Agent Workspace ===".to_string(), String::new()];
                     lines.push(crate::agent::status());
                     lines.push(String::new());
-                    for line in crate::agent::list().lines() {
+                    for line in ascii_only_lines(&crate::agent::list()) {
                         if !line.is_empty() {
-                            lines.push(line.to_string());
+                            lines.push(line);
                         }
                     }
                     paint_lines(win, &lines);
@@ -356,13 +357,24 @@ pub fn refresh_workspaces(comp: &mut Compositor) {
                                     let id = t.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
                                     let desc = t.get("description").and_then(|v| v.as_str()).unwrap_or("");
                                     let state = t.get("state").and_then(|v| v.as_str()).unwrap_or("?");
+                                    // 后端任务描述可能是中文；GUI 字形只覆盖 ASCII。
+                                    let desc = if desc.chars().all(|c| c.is_ascii()) {
+                                        desc.to_string()
+                                    } else {
+                                        "task".to_string()
+                                    };
+                                    let state = if state.chars().all(|c| c.is_ascii()) {
+                                        state.to_string()
+                                    } else {
+                                        "pending".to_string()
+                                    };
                                     lines.push(format!("  [{}] {} ({})", id, desc, state));
                                 }
                             }
                         }
                     }
                     lines.push(String::new());
-                    lines.push("操作: shell 输入 `task ...` 管理任务".to_string());
+                    lines.push("Use 'task ...' in the shell to manage tasks.".to_string());
                     paint_lines(win, &lines);
                 }
             }
@@ -379,7 +391,7 @@ pub fn refresh_workspaces(comp: &mut Compositor) {
                         ));
                     }
                     lines.push(String::new());
-                    lines.push("--- 最近审计 ---".to_string());
+                    lines.push("--- Recent audit ---".to_string());
                     for entry in crate::permission::permission_manager().lock().unwrap().query_audit(Some(10))
                     {
                         lines.push(format!(
@@ -410,20 +422,31 @@ fn exec_lines() -> Vec<String> {
     ]
 }
 
+/// 后端状态文本可能含中文；GUI 字形只覆盖 ASCII，含非 ASCII 的行换成英文摘要。
+fn ascii_only_lines(raw: &str) -> Vec<String> {
+    raw.lines()
+        .take(8)
+        .map(|line| {
+            if line.chars().all(|c| c.is_ascii()) {
+                line.to_string()
+            } else {
+                "(details available in the shell)".to_string()
+            }
+        })
+        .collect()
+}
+
 fn agent_lines() -> Vec<String> {
-    let status = crate::agent::status();
-    let mut lines = vec![status];
-    let list = crate::agent::list();
-    for l in list.lines().take(4) {
-        lines.push(l.to_string());
-    }
+    let mut lines = ascii_only_lines(&crate::agent::status());
+    lines.extend(ascii_only_lines(&crate::agent::list()));
+    lines.truncate(8);
     lines
 }
 
 fn lease_lines() -> Vec<String> {
     let raw = crate::lease::status();
     // 字体只覆盖 ASCII：中文占位符会渲染成「豆腐块」，这里换成英文等价信息。
-    if raw.trim().is_empty() || raw.contains('（') {
+    if raw.trim().is_empty() {
         return vec![
             "channels   0".to_string(),
             "epoch      -".to_string(),
@@ -432,36 +455,31 @@ fn lease_lines() -> Vec<String> {
             "acquire -> commit -> release".to_string(),
         ];
     }
-    raw.lines().take(6).map(|s| s.to_string()).collect()
+    ascii_only_lines(&raw)
 }
 
 /// 把文本行画进一个纯像素窗口的客户端表面。
 ///
 /// 与终端一致：先按可用列数折行，再逐视觉行推进 y，避免长行互相覆盖。
 pub fn paint_lines(win: &mut Window, lines: &[String]) {
-    let bg = palette::BASE;
+    let bg = text_render::WINDOW_BG;
     win.client.fill(bg);
-    let pad = 10i32;
-    let lh = LINE_HEIGHT as i32 * win.scale.max(1) as i32;
-    let cols = Surface::cols_for_width(
-        win.client.width().saturating_sub(pad as u32 * 2),
-        win.scale,
-    )
-    .max(1);
+    let pad = text_render::PAD;
+    let lh = text_render::BODY_LINE_H;
+    let cols = text_render::body_cols(win.client.width());
     let max_x = win.client.width() as i32 - pad;
     let mut y = pad;
     'outer: for line in lines {
-        for visual in Surface::wrap_text(line, cols, win.scale) {
+        for visual in Surface::wrap_text(line, cols, text_render::BODY_SCALE) {
             if y + lh > win.client.height() as i32 {
                 break 'outer;
             }
             let color = if line.contains('=') || line.contains(':') {
-                palette::SUBTEXT0
+                text_render::MUTED
             } else {
-                palette::TEXT
+                text_render::FG
             };
-            win.client
-                .draw_text_clipped(pad, y, &visual, color, win.scale, max_x);
+            win.client.draw_ui_text(pad, y, &visual, color, max_x);
             y += lh;
         }
     }

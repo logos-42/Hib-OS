@@ -500,6 +500,57 @@ impl Surface {
         x + ADVANCE as i32 * s
     }
 
+    /// 用 8×12 UI 字形画一个字符（覆盖率抗锯齿，无需位图放大）。
+    pub fn draw_ui_char(&mut self, x: i32, y: i32, ch: char, color: u32) -> i32 {
+        use crate::gui::glyph12;
+        const SS: u32 = 3; // 3×3 超采样
+        let rows = glyph12::glyph(ch);
+        for oy in 0..glyph12::H as i32 {
+            for ox in 0..glyph12::W as i32 {
+                let mut covered = 0u32;
+                for j in 0..SS {
+                    let sy = oy * SS as i32 + j as i32;
+                    let row = (sy / SS as i32) as usize;
+                    if row >= glyph12::H {
+                        continue;
+                    }
+                    let bits = rows[row];
+                    for i in 0..SS {
+                        let sx = ox * SS as i32 + i as i32;
+                        let col = (sx / SS as i32) as usize;
+                        if col >= glyph12::W {
+                            continue;
+                        }
+                        if bits & (1u8 << (glyph12::W - 1 - col)) != 0 {
+                            covered += 1;
+                        }
+                    }
+                }
+                if covered > 0 {
+                    let a = covered * 255 / (SS * SS);
+                    let src = (a << 24) | (color & 0x00FF_FFFF);
+                    self.blend(x + ox, y + oy, src);
+                }
+            }
+        }
+        x + glyph12::ADVANCE as i32
+    }
+
+    /// 用 8×12 UI 字形画一行，限制右边界 `max_x`。
+    pub fn draw_ui_text(&mut self, x: i32, y: i32, text: &str, color: u32, max_x: i32) -> i32 {
+        let mut cx = x;
+        for ch in text.chars() {
+            if ch == '\n' {
+                break;
+            }
+            if cx + crate::gui::glyph12::ADVANCE as i32 > max_x {
+                break;
+            }
+            cx = self.draw_ui_char(cx, y, ch, color);
+        }
+        cx
+    }
+
     /// 抗锯齿文本行（不换行、超宽裁剪）。
     pub fn draw_text_aa(&mut self, x: i32, y: i32, text: &str, color: u32, scale: u32) -> i32 {
         let mut cx = x;
@@ -531,6 +582,31 @@ impl Surface {
                 break;
             }
             cx = self.draw_char(cx, y, ch, color, scale);
+        }
+        cx
+    }
+
+    /// 抗锯齿文本行，限制右边界 `max_x`（窗口客户端内绘制用）。
+    pub fn draw_text_clipped_aa(
+        &mut self,
+        x: i32,
+        y: i32,
+        text: &str,
+        color: u32,
+        scale: u32,
+        max_x: i32,
+    ) -> i32 {
+        let mut cx = x;
+        let s = scale.max(1) as i32;
+        let adv = ADVANCE as i32 * s;
+        for ch in text.chars() {
+            if ch == '\n' {
+                break;
+            }
+            if cx + adv > max_x || cx + FONT_WIDTH as i32 * s > self.width as i32 {
+                break;
+            }
+            cx = self.draw_char_aa(cx, y, ch, color, scale);
         }
         cx
     }

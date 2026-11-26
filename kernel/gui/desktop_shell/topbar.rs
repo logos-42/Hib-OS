@@ -66,11 +66,11 @@ pub fn draw(frame: &mut Surface) {
     // 右侧：真实 token 速率 / 联网 / 时钟 / 通知徽章。
     let right = w as i32 - 8;
     let rate = format!("{}t/s", token_rate());
-    frame.draw_text(right - 96, 6, &rate, TEXT, 1);
+    frame.draw_text(right - 96, 5, &rate, TEXT, 1);
     let (net_label, net_color) = if link_up() { ("~", ACCENT) } else { ("x", OFFLINE) };
-    frame.draw_text(right - 56, 6, net_label, net_color, 1);
+    frame.draw_text(right - 56, 5, net_label, net_color, 1);
     let clock = clock_hms();
-    frame.draw_text(right - 36, 6, &clock, TEXT, 1);
+    frame.draw_text(right - 48, 5, &clock, TEXT, 1);
     if super::super::notification::unread_notifications() > 0 {
         frame.fill_rect(right - 4, 9, 3, 3, 0xFFE08A63);
     }

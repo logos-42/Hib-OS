@@ -6,6 +6,7 @@
 //! 五种应用：终端 / 文件管理器 / 系统监视器 / 壁纸设置 / 记事本。
 
 use super::surface::{palette, Surface};
+use super::text_render;
 use super::wallpaper;
 
 /// 应用种类。
@@ -99,12 +100,12 @@ impl AppState {
         s.lines.push(format!("HIB OS / {}", kind.title()));
         match kind {
             AppKind::Terminal => {
-                s.lines.push("输入命令后回车，内核执行并回显结果".into());
-                s.lines.push("试试: sense gpu/vram".into());
+                s.lines.push("Type a command and press Enter.".into());
+                s.lines.push("Try: sense gpu/vram".into());
             }
-            AppKind::Notes => s.lines.push("直接打字，回车换行".into()),
-            AppKind::Wallpaper => s.lines.push("按 1-8 切换壁纸风格".into()),
-            _ => s.lines.push("上下方向键滚动".into()),
+            AppKind::Notes => s.lines.push("Just type; Enter adds a line.".into()),
+            AppKind::Wallpaper => s.lines.push("Press 1-8 to switch wallpaper.".into()),
+            _ => s.lines.push("Use Up/Down to scroll.".into()),
         }
         s
     }
@@ -141,7 +142,7 @@ impl AppState {
             }
             AppKind::Files => {
                 let v = crate::vfs::Vfs::new();
-                let mut r = vec!["HIB OS / FILES  (VFS 根目录)".into()];
+                let mut r = vec!["HIB OS / FILES".into()];
                 if let Ok(items) = v.ls(Some("/")) {
                     for (name, kind, mode, size) in items {
                         r.push(format!("{} {:04o} {:>6}B  {}", kind.type_char(), mode, size, name));
@@ -153,8 +154,8 @@ impl AppState {
                 let cur = wallpaper::bank().lock().unwrap().name.clone();
                 let mut r = vec![
                     "HIB OS / WALLPAPER".into(),
-                    format!("当前: {}", cur),
-                    "按数字键切换:".into(),
+                    format!("CURRENT: {}", cur),
+                    "PRESS 1-9 TO SWITCH".into(),
                 ];
                 for (i, name) in wallpaper::STYLES.iter().enumerate() {
                     r.push(format!("  {} {}", i + 1, name));
@@ -165,29 +166,29 @@ impl AppState {
             _ => {}
         }
 
-        let line_h = crate::gpu::framebuffer::LINE_HEIGHT as i32;
-        let max = ((s.height() as i32 - 16) / line_h).max(1) as usize;
+        let pad = text_render::PAD;
+        let line_h = text_render::BODY_LINE_H;
+        let max = ((s.height() as i32 - pad * 2) / line_h).max(1) as usize;
         let start = rows.len().saturating_sub(max);
         for (i, line) in rows[start..].iter().enumerate() {
             let color = if line.starts_with("HIB OS") {
-                palette::MAUVE
+                text_render::ACCENT
             } else {
-                palette::TEXT
+                text_render::FG
             };
-            s.draw_text_clipped(8, 8 + i as i32 * line_h, line, color, 1, s.width() as i32 - 8);
+            text_render::draw_body(s, pad, pad + i as i32 * line_h, line, color);
         }
         // 输入行（终端 / 记事本）
         if matches!(self.kind, AppKind::Terminal | AppKind::Notes | AppKind::Generated) {
-            let y = 8 + (rows.len() - start).min(max) as i32 * line_h;
+            let y = pad + (rows.len() - start).min(max) as i32 * line_h;
             if y + line_h < s.height() as i32 {
                 let prompt = if self.kind == AppKind::Terminal { "> " } else { "" };
-                s.draw_text_clipped(
-                    8,
+                text_render::draw_body(
+                    s,
+                    pad,
                     y,
                     &format!("{}{}_", prompt, self.input),
-                    palette::GREEN,
-                    1,
-                    s.width() as i32 - 8,
+                    text_render::PROMPT,
                 );
             }
         }
@@ -242,7 +243,7 @@ impl AppState {
                 if let Some(id) = self.spec_id.clone() {
                     match crate::appgen::invoke_by_id(&id, "echo", &line) {
                         Ok(text) => self.lines.push(text),
-                        Err(e) => self.lines.push(format!("调用失败: {}", e)),
+                        Err(e) => self.lines.push(format!("ERROR: {}", e)),
                     }
                 }
                 None

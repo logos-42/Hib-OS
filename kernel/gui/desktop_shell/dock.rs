@@ -135,7 +135,9 @@ pub fn draw(frame: &mut Surface, _windows: &[Window], _focused: Option<u64>) {
             continue;
         }
         frame.fill_rect(x, y + 12, 32, 32, 0xFF25282D);
-        frame.draw_text(x + 7, y + 24, icon.label(), 0xFFC8CCD4, 1);
+        // 标签过长时按 8×12 字形截断到图标宽度。
+        let label: String = icon.label().chars().take(3).collect();
+        frame.draw_ui_text(x + 4, y + 22, &label, 0xFFC8CCD4, x + 30);
         x += 48;
     }
 }

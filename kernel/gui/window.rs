@@ -11,7 +11,8 @@
 
 use super::apps::AppState;
 use super::surface::{argb, palette, Rect, Surface};
-use crate::gpu::framebuffer::{ADVANCE, LINE_HEIGHT};
+use super::text_render;
+use crate::gpu::framebuffer::ADVANCE;
 
 /// 窗口标识。
 pub type WindowId = u64;
@@ -305,31 +306,23 @@ impl Window {
         let Some(t) = self.terminal.clone() else {
             return;
         };
-        let bg = palette::BASE;
+        let bg = text_render::WINDOW_BG;
         self.client.fill(bg);
         let chh = self.client.height() as i32;
-        let line_h = LINE_HEIGHT as i32 * self.scale.max(1) as i32;
-        let pad = 8i32;
-        let cols = Surface::cols_for_width(
-            self.client.width().saturating_sub(pad as u32 * 2),
-            self.scale,
-        )
-        .max(1);
+        let line_h = text_render::BODY_LINE_H;
+        let pad = text_render::PAD;
+        let cols = text_render::body_cols(self.client.width());
         let max_lines = ((chh - pad * 2) / line_h).max(1) as usize;
 
-        // 头部提示
-        self.client
-            .draw_text(pad, pad, "HIB OS / REAL PIXEL WINDOW", palette::OVERLAY1, 1);
-
-        // 逻辑行 → 视觉行
+        // 逻辑行 → 视觉行（统一字号，留白由 BODY_LINE_H 控制）
         let mut all: Vec<String> = Vec::new();
         for line in &t.lines {
-            all.extend(Surface::wrap_text(line, cols, self.scale));
+            all.extend(Surface::wrap_text(line, cols, text_render::BODY_SCALE));
         }
         all.extend(Surface::wrap_text(
             &format!("{}{}_", t.prompt, t.input),
             cols,
-            self.scale,
+            text_render::BODY_SCALE,
         ));
         if all.is_empty() {
             all.push(String::new());
@@ -339,20 +332,19 @@ impl Window {
         let start = t.scroll.min(end).saturating_sub(max_lines);
         let visible = &all[start..end.min(start + max_lines)];
 
-        let mut y = pad + LINE_HEIGHT as i32 * 2;
+        let mut y = pad;
         for line in visible {
             if y + line_h > chh {
                 break;
             }
             let color = if line.starts_with(&t.prompt) {
-                palette::TEXT
+                text_render::PROMPT
             } else if line.contains("ERR") || line.contains("error") {
-                palette::RED
+                text_render::ERROR
             } else {
-                palette::SUBTEXT0
+                text_render::FG
             };
-            self.client
-                .draw_text_clipped(pad, y, line, color, self.scale, self.client.width() as i32 - pad);
+            text_render::draw_body(&mut self.client, pad, y, line, color);
             y += line_h;
         }
     }
@@ -380,7 +372,7 @@ impl Window {
         dst.fill_rect(tb.x, tb.y, 3, tb.h, self.accent);
         // 标题左侧对齐，右侧让出红绿灯区域
         let title_max = tb.right() - (CLOSE_BTN as i32 + TRAFFIC_GAP) * 3 - TRAFFIC_RIGHT_GAP;
-        dst.draw_text_clipped(tb.x + 12, tb.y + 6, &self.title, palette::TEXT, 2, title_max);
+        dst.draw_ui_text(tb.x + 12, tb.y + 7, &self.title, text_render::FG, title_max);
 
         // 4. Mac 红绿灯：焦点窗口才显示操作符号
         draw_traffic_light(dst, self.close_rect(), MAC_RED, LightGlyph::Close, focused);

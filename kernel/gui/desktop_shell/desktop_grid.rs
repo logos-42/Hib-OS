@@ -51,7 +51,8 @@ pub fn draw(frame: &mut Surface) {
             IconState::Normal => 0xFF23262B,
         };
         frame.fill_rect(x, y, 32, 32, bg);
-        frame.draw_text(x + 7, y + 12, &icon.label, 0xFFC8CCD4, 1);
+        let label: String = icon.label.chars().take(3).collect();
+        frame.draw_ui_text(x + 4, y + 10, &label, 0xFFC8CCD4, x + 30);
     }
 }
 
