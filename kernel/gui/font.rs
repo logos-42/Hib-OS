@@ -163,7 +163,16 @@ pub fn draw_text(
         return false;
     };
 
+    // y 是行顶：用字体全局 ascent 算出统一基线，同行所有字符共享它，
+    // 避免各字符按自身 ymin 上下浮动造成“一行里文字没对齐”。
+    let ascent = font
+        .horizontal_line_metrics(px)
+        .map(|m| m.ascent)
+        .unwrap_or(px * 0.8);
+    let baseline = y + ascent.ceil() as i32;
+
     let mut cx = x;
+    let mut prev: Option<char> = None;
     for ch in text.chars() {
         if ch == '\n' {
             break;
@@ -172,9 +181,14 @@ pub fn draw_text(
         if cx + metrics.advance_width as i32 > max_x {
             break;
         }
-        // ymin 是字形底边相对基线的偏移（通常为负），xmin 是左边相对原点的偏移。
+        // 字距微调：相邻字符按字体 kern 值靠拢，保持行内均匀。
+        if let Some(p) = prev {
+            if let Some(kern) = font.horizontal_kern(p, ch, px) {
+                cx += kern.round() as i32;
+            }
+        }
         let left = cx + metrics.xmin;
-        let top = y + metrics.ymin;
+        let top = baseline + metrics.ymin;
         for row in 0..metrics.height {
             for col in 0..metrics.width {
                 let cov = bitmap[row * metrics.width + col];
@@ -186,6 +200,7 @@ pub fn draw_text(
             }
         }
         cx += metrics.advance_width as i32;
+        prev = Some(ch);
     }
     true
 }
@@ -195,10 +210,17 @@ pub fn measure_text(text: &str, px: f32, family: FontFamily) -> Option<f32> {
     let fonts = fonts().lock().unwrap();
     let slot = &fonts[slot_index(family)];
     let font = slot.font.as_ref()?;
-    let width: f32 = text
-        .chars()
-        .map(|c| font.metrics(c, px).advance_width)
-        .sum();
+    let mut width = 0.0f32;
+    let mut prev: Option<char> = None;
+    for c in text.chars() {
+        if let Some(p) = prev {
+            if let Some(kern) = font.horizontal_kern(p, c, px) {
+                width += kern;
+            }
+        }
+        width += font.metrics(c, px).advance_width;
+        prev = Some(c);
+    }
     Some(width)
 }
 

@@ -238,7 +238,7 @@ impl Window {
             return Hit::TitleBar;
         }
         if self.flags.contains(WindowFlags::RESIZABLE) && self.resize_corner_rect().contains(px, py) {
-            return Hit::ResizeCorner;
+            return Hit::Resize(crate::gui::window::ResizeDir::SouthEast);
         }
         if self.client_rect().contains(px, py) {
             return Hit::Client;

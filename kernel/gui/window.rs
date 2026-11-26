@@ -32,6 +32,36 @@ pub const MAC_RED: (u8, u8, u8) = (0xff, 0x5f, 0x57);
 pub const MAC_YELLOW: (u8, u8, u8) = (0xfe, 0xbc, 0x2e);
 pub const MAC_GREEN: (u8, u8, u8) = (0x28, 0xc8, 0x40);
 
+/// 窗口拉伸方向：下边、左右边、下两角。
+/// 上边与标题栏重叠，保持“拖拽=移动”语义，不参与拉伸。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ResizeDir {
+    South,
+    East,
+    West,
+    SouthEast,
+    SouthWest,
+}
+
+impl ResizeDir {
+    /// 是否改变右边界。
+    pub fn east(self) -> bool {
+        matches!(self, Self::East | Self::SouthEast)
+    }
+    /// 是否改变左边界（同时移动窗口原点）。
+    pub fn west(self) -> bool {
+        matches!(self, Self::West | Self::SouthWest)
+    }
+    /// 是否改变下边界。
+    pub fn south(self) -> bool {
+        matches!(self, Self::South | Self::SouthEast | Self::SouthWest)
+    }
+    /// 上边不拉伸。
+    pub fn north(self) -> bool {
+        false
+    }
+}
+
 /// 鼠标命中窗口的哪个部位。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Hit {
@@ -40,7 +70,8 @@ pub enum Hit {
     CloseButton,
     MinimizeButton,
     MaximizeButton,
-    ResizeCorner,
+    /// 命中拉伸手柄（八向之一）。
+    Resize(ResizeDir),
     None,
 }
 
@@ -195,6 +226,39 @@ impl Window {
         r
     }
 
+    /// 拉伸命中：下两角优先（14px），其次左右边（6px）与下边（6px）。
+    /// 上边界属于标题栏（拖拽=移动），不参与拉伸。
+    fn resize_hit(&self, px: i32, py: i32) -> Option<ResizeDir> {
+        const EDGE: i32 = 6;
+        const CORNER: i32 = 14;
+        let r = self.rect();
+        let left = px - r.x;
+        let right = r.right() - px;
+        let bottom = r.bottom() - py;
+        if left < 0 || right < 0 || bottom < 0 || py < r.y {
+            return None;
+        }
+        let l = left <= CORNER;
+        let rr = right <= CORNER;
+        let b = bottom <= CORNER;
+        if l && b {
+            return Some(ResizeDir::SouthWest);
+        }
+        if rr && b {
+            return Some(ResizeDir::SouthEast);
+        }
+        if left <= EDGE {
+            return Some(ResizeDir::West);
+        }
+        if right <= EDGE {
+            return Some(ResizeDir::East);
+        }
+        if bottom <= EDGE {
+            return Some(ResizeDir::South);
+        }
+        None
+    }
+
     /// 命中测试。
     pub fn hit(&self, px: i32, py: i32) -> Hit {
         if !self.visible || self.minimized {
@@ -209,13 +273,11 @@ impl Window {
         if self.maximize_rect().contains(px, py) {
             return Hit::MaximizeButton;
         }
-        // 右下角缩放区必须早于 client 判断，否则永远命中 Client。
-        if self.resizable
-            && px >= self.x + self.w as i32 - 12
-            && py >= self.y + self.h as i32 - 12
-            && self.rect().contains(px, py)
-        {
-            return Hit::ResizeCorner;
+        // 拉伸手柄必须早于 client / titlebar 判断，否则会被内容区吞掉。
+        if self.resizable {
+            if let Some(dir) = self.resize_hit(px, py) {
+                return Hit::Resize(dir);
+            }
         }
         if self.titlebar_rect().contains(px, py) {
             return Hit::TitleBar;
@@ -525,6 +587,23 @@ mod tests {
         assert_eq!(win.hit(5, 5), Hit::None);
         let c = win.close_rect();
         assert_eq!(win.hit(c.x + 2, c.y + 2), Hit::CloseButton);
+    }
+
+    #[test]
+    fn resize_hits_on_edges_and_bottom_corners() {
+        let win = Window::new(1, "SZ", 20, 30, 200, 150, palette::BLUE);
+        let r = win.rect();
+        // 下两角
+        assert_eq!(win.hit(r.x + 2, r.bottom() - 2), Hit::Resize(ResizeDir::SouthWest));
+        assert_eq!(win.hit(r.right() - 2, r.bottom() - 2), Hit::Resize(ResizeDir::SouthEast));
+        // 左右边与下边（避开角）
+        assert_eq!(win.hit(r.x + 2, r.y + 75), Hit::Resize(ResizeDir::West));
+        assert_eq!(win.hit(r.right() - 2, r.y + 75), Hit::Resize(ResizeDir::East));
+        assert_eq!(win.hit(r.x + 100, r.bottom() - 2), Hit::Resize(ResizeDir::South));
+        // 上边仍属于标题栏（拖拽=移动）
+        assert_eq!(win.hit(r.x + 100, r.y + 2), Hit::TitleBar);
+        // 中心不是拉伸区
+        assert_eq!(win.hit(r.x + 100, r.y + 75), Hit::Client);
     }
 
     #[test]

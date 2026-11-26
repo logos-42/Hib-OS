@@ -146,11 +146,34 @@ pub fn dispatch(comp: &mut Compositor, ev: &Event) -> Vec<Effect> {
                         w.move_to(x - dx, y - dy);
                     }
                 }
-                DragMode::Resize { id, ox, oy } => {
+                DragMode::Resize { id, dir, x: sx, y: sy, w: sw, h: sh } => {
                     if let Some(w) = comp.window_mut(id) {
-                        let ww = (x - ox).max(120) as u32;
-                        let hh = (y - oy).max(60) as u32;
-                        w.resize(ww, hh);
+                        const MIN_W: i32 = 120;
+                        const MIN_H: i32 = 80;
+                        let dx = x - sx;
+                        let dy = y - sy;
+                        let mut nx = sx;
+                        let mut ny = sy;
+                        let mut nw = sw as i32;
+                        let mut nh = sh as i32;
+                        if dir.east() {
+                            nw = (sw as i32 + dx).max(MIN_W);
+                        }
+                        if dir.west() {
+                            let proposed_x = (sx + dx).min(sx + sw as i32 - MIN_W);
+                            nw = sw as i32 + sx - proposed_x;
+                            nx = proposed_x;
+                        }
+                        if dir.south() {
+                            nh = (sh as i32 + dy).max(MIN_H);
+                        }
+                        if dir.north() {
+                            let proposed_y = (sy + dy).min(sy + sh as i32 - MIN_H);
+                            nh = sh as i32 + sy - proposed_y;
+                            ny = proposed_y;
+                        }
+                        w.move_to(nx, ny);
+                        w.resize(nw as u32, nh as u32);
                     }
                 }
                 DragMode::None => {}
@@ -194,17 +217,17 @@ pub fn dispatch(comp: &mut Compositor, ev: &Event) -> Vec<Effect> {
                         dy: *y - wy,
                     });
                 }
-                Hit::ResizeCorner => {
-                    let (wx, wy) = comp
-                        .window(id)
-                        .map(|w| (w.x, w.y))
-                        .unwrap_or((0, 0));
-                    // 记录窗口原点，移动时用「鼠标 - 原点」算新尺寸。
-                    comp.set_drag(DragMode::Resize {
-                        id,
-                        ox: wx,
-                        oy: wy,
-                    });
+                Hit::Resize(dir) => {
+                    if let Some(w) = comp.window(id) {
+                        comp.set_drag(DragMode::Resize {
+                            id,
+                            dir,
+                            x: w.x,
+                            y: w.y,
+                            w: w.w,
+                            h: w.h,
+                        });
+                    }
                 }
                 Hit::Client | Hit::None => {}
             }

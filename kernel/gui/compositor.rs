@@ -32,7 +32,15 @@ pub enum Wallpaper {
 pub enum DragMode {
     None,
     Move { id: WindowId, dx: i32, dy: i32 },
-    Resize { id: WindowId, ox: i32, oy: i32 },
+    /// 八向拉伸：记录窗口初始位置/尺寸与方向。
+    Resize {
+        id: WindowId,
+        dir: super::window::ResizeDir,
+        x: i32,
+        y: i32,
+        w: u32,
+        h: u32,
+    },
 }
 
 /// 合成器 = 显示服务器 + 窗口管理器。
