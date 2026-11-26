@@ -626,6 +626,7 @@ impl TcpStack {
                     if let Some(sock) = self.conns.get(&key) {
                         if !sock.send_buf.is_empty() {
                             let seg_len = sock.send_buf.len().min(DEFAULT_MSS);
+                            // 重传不消费缓冲区，只复制一份重发。
                             let chunk: Vec<u8> = sock.send_buf.iter().take(seg_len).cloned().collect();
                             out.push(TcpSegment::new(sock.key.local_port, sock.remote_port, sock.snd_una,
                                                      sock.rcv_nxt, TCP_ACK | TCP_PSH,
@@ -837,7 +838,8 @@ impl TcpStack {
     pub fn active_count(&self) -> u64 {
         self.conns.values().filter(|c| c.state != TcpState::Closed && c.state != TcpState::Listen).count() as u64
     }
-    /// 状态快照（供 `sense net/tcp_stack`）。
+
+    /// 状态快照（供 `sense net/tcp_stack`）。
     pub fn status(&self) -> String {
         let mut lines: Vec<String> = self.conns.values().map(|c| {
             format!("  {} state={} cwnd={} ssthresh={} snd_una={} snd_nxt={} rcv_nxt={} rto={}ms retrans={}",
@@ -1036,7 +1038,7 @@ mod tests {
         let syn = st.connect(1, 50001, peer_ip(), 8080).unwrap();
         let syn_bytes = syn[0].serialize(peer_ip(), test_ip());
         let synack = st.process_segment(peer_ip(), test_ip(), &syn_bytes).unwrap();
-        let out = st.process_segment(test_ip(), peer_ip(), &synack[0].serialize(test_ip(), peer_ip())).unwrap();
+        let out = st.process_segment(peer_ip(), test_ip(), &synack[0].serialize(peer_ip(), test_ip())).unwrap();
         st.process_segment(peer_ip(), test_ip(), &out[0].serialize(test_ip(), peer_ip())).unwrap();
 
         let ck = client_key(50001);
@@ -1067,7 +1069,7 @@ mod tests {
         let syn = st.connect(1, 50001, peer_ip(), 8080).unwrap();
         let syn_bytes = syn[0].serialize(peer_ip(), test_ip());
         let synack = st.process_segment(peer_ip(), test_ip(), &syn_bytes).unwrap();
-        let out = st.process_segment(test_ip(), peer_ip(), &synack[0].serialize(test_ip(), peer_ip())).unwrap();
+        let out = st.process_segment(peer_ip(), test_ip(), &synack[0].serialize(peer_ip(), test_ip())).unwrap();
         st.process_segment(peer_ip(), test_ip(), &out[0].serialize(test_ip(), peer_ip())).unwrap();
 
         let ck = client_key(50001);
@@ -1104,7 +1106,7 @@ mod tests {
         let syn = st.connect(1, 50001, peer_ip(), 8080).unwrap();
         let syn_bytes = syn[0].serialize(peer_ip(), test_ip());
         let synack = st.process_segment(peer_ip(), test_ip(), &syn_bytes).unwrap();
-        let out = st.process_segment(test_ip(), peer_ip(), &synack[0].serialize(test_ip(), peer_ip())).unwrap();
+        let out = st.process_segment(peer_ip(), test_ip(), &synack[0].serialize(peer_ip(), test_ip())).unwrap();
         st.process_segment(peer_ip(), test_ip(), &out[0].serialize(test_ip(), peer_ip())).unwrap();
 
         let ck = client_key(50001);
@@ -1139,7 +1141,7 @@ mod tests {
         let syn = st.connect(1, 50001, peer_ip(), 8080).unwrap();
         let syn_bytes = syn[0].serialize(peer_ip(), test_ip());
         let synack = st.process_segment(peer_ip(), test_ip(), &syn_bytes).unwrap();
-        let out = st.process_segment(test_ip(), peer_ip(), &synack[0].serialize(test_ip(), peer_ip())).unwrap();
+        let out = st.process_segment(peer_ip(), test_ip(), &synack[0].serialize(peer_ip(), test_ip())).unwrap();
         st.process_segment(peer_ip(), test_ip(), &out[0].serialize(test_ip(), peer_ip())).unwrap();
 
         let ck = client_key(50001);
@@ -1170,7 +1172,7 @@ mod tests {
         let syn = st.connect(1, 50001, peer_ip(), 8080).unwrap();
         let syn_bytes = syn[0].serialize(peer_ip(), test_ip());
         let synack = st.process_segment(peer_ip(), test_ip(), &syn_bytes).unwrap();
-        let out = st.process_segment(test_ip(), peer_ip(), &synack[0].serialize(test_ip(), peer_ip())).unwrap();
+        let out = st.process_segment(peer_ip(), test_ip(), &synack[0].serialize(peer_ip(), test_ip())).unwrap();
         st.process_segment(peer_ip(), test_ip(), &out[0].serialize(test_ip(), peer_ip())).unwrap();
 
         let ck = child_key(8080);
@@ -1198,7 +1200,7 @@ mod tests {
         let syn = st.connect(1, 50001, peer_ip(), 8080).unwrap();
         let syn_bytes = syn[0].serialize(peer_ip(), test_ip());
         let synack = st.process_segment(peer_ip(), test_ip(), &syn_bytes).unwrap();
-        let out = st.process_segment(test_ip(), peer_ip(), &synack[0].serialize(test_ip(), peer_ip())).unwrap();
+        let out = st.process_segment(peer_ip(), test_ip(), &synack[0].serialize(peer_ip(), test_ip())).unwrap();
         st.process_segment(peer_ip(), test_ip(), &out[0].serialize(test_ip(), peer_ip())).unwrap();
 
         let (key, rip, rport) = st.accept(8080).unwrap();
@@ -1250,4 +1252,5 @@ mod tests {
     }
 
     fn mss_for_test() -> u32 { DEFAULT_MSS as u32 }
-}
+}
+

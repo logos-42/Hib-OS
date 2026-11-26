@@ -448,6 +448,10 @@ impl ElfLoader {
         let abi_version = data[8];
         let _pad = &data[9..16];
 
+        // 先校验 class/endian，再校验版本：非法类应优先报 UnsupportedClass。
+        if class != ELF_CLASS_32 && class != ELF_CLASS_64 {
+            return Err(ElfError::UnsupportedClass(class));
+        }
         if version != 1 {
             return Err(ElfError::UnsupportedVersion(version));
         }
@@ -830,7 +834,7 @@ mod tests {
         f.push(1); // version
         f.push(0); // os_abi
         f.push(0); // abi_version
-        f.extend_from_slice(&[0u8; 8]); // pad to 16
+        f.extend_from_slice(&[0u8; 7]); // 9 + 7 = 16，e_ident 恰好 16 字节
         // e_type=2(executable), e_machine=0x3e(x86-64), e_version=1
         f.extend_from_slice(&2u16.to_le_bytes());
         f.extend_from_slice(&0x3eu16.to_le_bytes());
@@ -937,7 +941,7 @@ mod tests {
         f.push(ELF_CLASS_64);
         f.push(ELF_DATA_LITTLE);
         f.push(1);
-        f.extend_from_slice(&[0u8; 8]); // 7+pad to 16 (os_abi, abi_version, pad)
+        f.extend_from_slice(&[0u8; 9]); // 7 + 9 = 16，e_ident 恰好 16 字节
         f.extend_from_slice(&2u16.to_le_bytes());
         f.extend_from_slice(&0x3eu16.to_le_bytes());
         f.extend_from_slice(&1u32.to_le_bytes());

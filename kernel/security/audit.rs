@@ -122,7 +122,7 @@ impl AuditRecord {
         let ts_secs = self.timestamp / 1_000_000_000;
         let ts_nanos = self.timestamp % 1_000_000_000;
         format!(
-            "{{\"ts_secs\":{},\"ts_nanos\":{},\"event_type\":\"{}\",\"subject_pid\":{},\"subject_uid\":{},\"object\":{},\"action\":{},\"result\":{},\"detail\":{}}}",
+            "{{\"ts_secs\":{},\"ts_nanos\":{},\"event_type\":{},\"subject_pid\":{},\"subject_uid\":{},\"object\":{},\"action\":{},\"result\":{},\"detail\":{}}}",
             ts_secs,
             ts_nanos,
             json_escape_str(&self.event_type.name()),

@@ -1784,13 +1784,21 @@ impl HTTPServer {
 
     pub fn handle_request(&mut self, request_id: u64) -> Option<u64> {
         if let Some(req) = self.requests.get(&request_id) {
-            if let Some(handler) = self.routes.get(&req.path) {
-                let resp = handler(req);
-                let resp_id = self.total_responses + 1;
-                self.total_responses += 1;
-                self.responses.insert(resp_id, resp);
-                return Some(resp_id);
-            }
+            // 无显式路由时返回 404 响应，保证请求总能得到回应。
+            let resp = match self.routes.get(&req.path) {
+                Some(handler) => handler(req),
+                None => HTTPResponse {
+                    request_id,
+                    status: HTTPStatus::NotFound,
+                    headers: BTreeMap::new(),
+                    body: b"not found".to_vec(),
+                    latency_ns: 0,
+                },
+            };
+            let resp_id = self.total_responses + 1;
+            self.total_responses += 1;
+            self.responses.insert(resp_id, resp);
+            return Some(resp_id);
         }
         None
     }
@@ -2199,6 +2207,8 @@ impl NetworkLoadBalancer {
     pub fn record_failure(&mut self, backend_id: u64) {
         if let Some(inst) = self.backends.get_mut(&backend_id) {
             inst.failed_requests += 1;
+            // 连续失败达到阈值即时标记不健康（无需等待下一轮健康检查）。
+            inst.healthy = inst.failed_requests < 5;
         }
         self.total_failures += 1;
     }

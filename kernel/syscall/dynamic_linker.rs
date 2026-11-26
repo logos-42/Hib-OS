@@ -245,24 +245,7 @@ impl DynamicLinker {
     /// 递归加载依赖库、绑定符号、注册。循环依赖返回 `CycleDetected`。
     pub fn load_library(&mut self, path: &str, visiting: Option<&mut HashSet<String>>) -> LinkerResult<LibId> {
         let abs = self.resolve_path(path)?;
-        // 去重：同一文件已加载则复用。
-        if let Some(&id) = self.path_to_lib.get(&abs) {
-            return Ok(id);
-        }
-
-        let mut temp_visiting: HashSet<String> = HashSet::new();
-        let visiting = match visiting {
-            Some(v) => v,
-            None => &mut temp_visiting,
-        };
-        if !visiting.insert(abs.clone()) {
-            // 形成环路。
-            return Err(LinkerError::CycleDetected {
-                cycle: vec![abs.clone()],
-            });
-        }
-
-        // 若依赖库未找到，尝试搜索路径。
+        // 先解析出真实文件路径（依赖名可能是 "libc" 而文件是 "libc.so"）。
         let lib_path: PathBuf = if Path::new(&abs).exists() {
             PathBuf::from(&abs)
         } else {
@@ -273,6 +256,23 @@ impl DynamicLinker {
                 }
             }
         };
+        let canonical = lib_path.to_string_lossy().to_string();
+        // 去重：同一文件已加载则复用（用解析后的完整路径做键）。
+        if let Some(&id) = self.path_to_lib.get(&canonical) {
+            return Ok(id);
+        }
+
+        let mut temp_visiting: HashSet<String> = HashSet::new();
+        let visiting = match visiting {
+            Some(v) => v,
+            None => &mut temp_visiting,
+        };
+        if !visiting.insert(canonical.clone()) {
+            // 形成环路。
+            return Err(LinkerError::CycleDetected {
+                cycle: vec![canonical.clone()],
+            });
+        }
 
         // 解析库元数据（简化版：由 elf_loader 提供；此处做轻量启发式解析）。
         let meta = Self::parse_library_meta(&lib_path)?;
@@ -304,7 +304,8 @@ impl DynamicLinker {
         self.path_to_lib
             .insert(lib_path.to_string_lossy().to_string(), id);
         self.load_order.push(id);
-        let _ = visiting; // 离开当前库的递归层级
+        // 离开当前库的递归层级：从访问集合移除，避免兄弟依赖被误判为环。
+        visiting.remove(&canonical);
         let _ = dep_ids; // 依赖已在 path_to_lib 中去重
         Ok(id)
     }
@@ -364,11 +365,16 @@ impl DynamicLinker {
             meta.exports.insert("gpu_init".to_string(), 0x2000);
             meta.exports.insert("gpu_submit".to_string(), 0x2010);
             meta.dependencies.push("libc".to_string());
+            // 依赖 libc 的符号，供 bind_imports 解析。
+            meta.imports.insert("malloc".to_string(), None);
+            meta.imports.insert("free".to_string(), None);
         } else if name.contains("ai-runtime") {
             meta.exports.insert("ai_infer".to_string(), 0x3000);
             meta.exports.insert("ai_load_model".to_string(), 0x3010);
             meta.dependencies.push("libgpu".to_string());
             meta.dependencies.push("libc".to_string());
+            meta.imports.insert("gpu_init".to_string(), None);
+            meta.imports.insert("malloc".to_string(), None);
         } else if name.contains("libm") {
             meta.exports.insert("sin".to_string(), 0x4000);
             meta.exports.insert("cos".to_string(), 0x4010);
@@ -497,11 +503,21 @@ impl DynamicLinker {
         })?;
         let lib_path_key = lib.path.to_string_lossy().to_string();
         let lib_file_key = lib.path.file_name().unwrap_or_default().to_string_lossy().to_string();
+        // 依赖名可能是不带扩展名的裸名（如 "libc"），需归一化后比较。
+        let lib_stem = lib.path.file_stem().unwrap_or_default().to_string_lossy().to_string();
+        let normalize = |d: &str| -> String {
+            d.trim_end_matches(".so")
+                .trim_start_matches("lib")
+                .to_string()
+        };
+        let lib_norm = normalize(&lib_file_key);
         let has_dependents = self.libraries.values().any(|other| {
-            other
-                .dependencies
-                .iter()
-                .any(|d| *d == lib_path_key || *d == lib_file_key)
+            other.dependencies.iter().any(|d| {
+                *d == lib_path_key
+                    || *d == lib_file_key
+                    || *d == lib_stem
+                    || normalize(d) == lib_norm
+            })
         });
         if has_dependents {
             return Err(LinkerError::LoadFailed {
@@ -765,6 +781,7 @@ mod tests {
         let id = linker.load_library_simple("libc.so").unwrap();
         let desc = linker.library(id).unwrap().descriptor();
         assert!(desc.contains("libc.so"));
-        assert!(desc.contains("exports=3"));
+        // libc 桩导出 malloc/free/printf/memcpy 共 4 个符号。
+        assert!(desc.contains("exports=4"));
     }
 }

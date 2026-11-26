@@ -90,14 +90,18 @@ impl Ipv4Packet {
     /// 按当前首部字段重算校验和并填充。
     pub fn finalize(&mut self) {
         self.header.total_len = (Self::header_len() + self.payload.len()) as u16;
+        // 计算前必须先把校验和字段清零，否则会把旧值算进去。
+        self.header.checksum = 0;
         let bytes = self.serialize_placeholder();
         let csum = compute_checksum(&[&bytes]);
         self.header.checksum = csum;
     }
 
-    /// 序列化首部（校验和字段按当前值写入，通常为 0 placeholder，由 finalize 填真值）。
+    /// 序列化为完整数据报（首部 + 负载）。
     pub fn serialize(&self) -> Vec<u8> {
-        self.serialize_placeholder()
+        let mut b = self.serialize_placeholder();
+        b.extend_from_slice(&self.payload);
+        b
     }
 
     fn serialize_placeholder(&self) -> Vec<u8> {
@@ -138,12 +142,9 @@ impl Ipv4Packet {
 
     /// 验证首部校验和。
     pub fn verify_checksum(&self) -> bool {
-        let bytes = self.serialize_placeholder();
-        // 校验和字段置零后再求 1 的补码和，应为 0xFFFF（即算入字段自身后为 0）。
-        let mut b = bytes;
-        b[10] = 0;
-        b[11] = 0;
-        compute_checksum(&[&b]) == 0xFFFF
+        // 含校验和字段一起求和，取反后应为 0（即 1 的补码和收敛到全 1）。
+        let b = self.serialize_placeholder();
+        compute_checksum(&[&b]) == 0
     }
 }
 
@@ -339,10 +340,9 @@ impl IcmpPacket {
     /// 验证 ICMP 校验和（checksum 字段为 0 时跳过）。
     pub fn verify_checksum(&self) -> bool {
         if self.checksum == 0 { return true; }
-        let mut b = self.serialize_placeholder();
-        b[2] = 0;
-        b[3] = 0;
-        compute_checksum(&[&b]) == 0xFFFF
+        // 含校验和字段一起求和，取反后应为 0。
+        let b = self.serialize_placeholder();
+        compute_checksum(&[&b]) == 0
     }
 }
 

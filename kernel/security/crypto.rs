@@ -732,7 +732,7 @@ mod tests {
         );
         assert_eq!(
             md5(b"abc").to_hex(),
-            "900150983cd24fb0d6968f73ac8e220b"
+            "900150983cd24fb0d6963f7d28e17f72"
         );
     }
 

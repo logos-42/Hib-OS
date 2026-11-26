@@ -642,12 +642,16 @@ impl PosixLayer {
         let np = normalize_path(path, &current_cwd())?;
         let (uid, gid) = current_cred();
         let oflags = OpenFlags::from_bits(flags);
+        // from_bits 只保留访问模式位，CREAT/TRUNC/EXCL 需从原始 flags 判断。
+        let creat = flags & OpenFlags::CREAT as i32 != 0;
+        let excl = flags & OpenFlags::EXCL as i32 != 0;
+        let trunc = flags & OpenFlags::TRUNC as i32 != 0;
 
         PosixState::with_mut(|s| {
             // 若文件不存在且要求 CREAT，则创建。
             let exists = s.fs.contains_key(&np);
             if !exists {
-                if oflags as i32 & OpenFlags::CREAT as i32 == 0 {
+                if !creat {
                     return Err(PosixError::ENOENT);
                 }
                 // 创建新文件。
@@ -665,7 +669,7 @@ impl PosixLayer {
                 s.fs.insert(np.clone(), (meta, Vec::new()));
             } else {
                 // 若同时指定 EXCL 且文件已存在 -> EEXIST（这里用 EINVAL 近似）。
-                if oflags as i32 & OpenFlags::EXCL as i32 != 0 {
+                if excl {
                     return Err(PosixError::EINVAL);
                 }
                 // 权限校验。
@@ -673,7 +677,7 @@ impl PosixLayer {
                 if !Self::may_access(meta, uid, gid, oflags) {
                     return Err(PosixError::EACCES);
                 }
-                if oflags as i32 & OpenFlags::TRUNC as i32 != 0 {
+                if trunc {
                     let (_, content) = s.fs.get_mut(&np).unwrap();
                     content.clear();
                     let m = s.fs.get_mut(&np).unwrap();
@@ -1513,7 +1517,8 @@ mod tests {
         let fd = PosixLayer::handle(
             PosixSyscall::Open {
                 path: "/dupf".into(),
-                flags: OpenFlags::CREAT as i32 | OpenFlags::WRONLY as i32,
+                // 需要读权限，dup 后的 fd 才能读。
+                flags: OpenFlags::CREAT as i32 | OpenFlags::RDWR as i32,
                 mode: 0o644,
             },
             &[],

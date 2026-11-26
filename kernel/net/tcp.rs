@@ -435,7 +435,9 @@ impl TcpLayer {
             let in_flight = sock.snd_nxt.wrapping_sub(sock.snd_una) as usize;
             if in_flight >= window { break; }
             let seg_len = sock.send_buf.len().min(DEFAULT_MSS).min(window - in_flight);
-            let chunk: Vec<u8> = sock.send_buf.iter().take(seg_len).cloned().collect();
+            if seg_len == 0 { break; }
+            // 从发送缓冲取出已发送字节（否则会无限重复发送）。
+            let chunk: Vec<u8> = sock.send_buf.drain(..seg_len).collect();
             let seg = TcpSegment::new(sock.local_port, sock.remote_port, sock.snd_nxt,
                                       sock.rcv_nxt, TCP_ACK | TCP_PSH,
                                       sock.rcv_window(), chunk);
@@ -550,9 +552,9 @@ mod tests {
         let ck = child_key(8080);
         assert_eq!(layer.state_of(&ck).unwrap(), TcpState::SynReceived);
 
-        // client 收到 SYN-ACK
+        // client 收到 SYN-ACK（源为 peer，目的为本机 test_ip）
         let synack = out[0].clone();
-        let out = layer.receive_segment(test_ip(), peer_ip(), &synack.serialize(test_ip(), peer_ip())).unwrap();
+        let out = layer.receive_segment(peer_ip(), test_ip(), &synack.serialize(peer_ip(), test_ip())).unwrap();
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].flags & TCP_ACK, TCP_ACK);
         assert_eq!(out[0].ack, synack.seq.wrapping_add(1));
@@ -574,7 +576,7 @@ mod tests {
         let syn = layer.connect(50001, peer_ip(), 8080).unwrap();
         let syn_bytes = syn[0].serialize(peer_ip(), test_ip());
         let synack = layer.receive_segment(peer_ip(), test_ip(), &syn_bytes).unwrap();
-        let out = layer.receive_segment(test_ip(), peer_ip(), &synack[0].serialize(test_ip(), peer_ip())).unwrap();
+        let out = layer.receive_segment(peer_ip(), test_ip(), &synack[0].serialize(peer_ip(), test_ip())).unwrap();
         layer.receive_segment(peer_ip(), test_ip(), &out[0].serialize(test_ip(), peer_ip())).unwrap();
 
         let ck = child_key(8080);
@@ -605,7 +607,7 @@ mod tests {
         let syn = layer.connect(50001, peer_ip(), 8080).unwrap();
         let syn_bytes = syn[0].serialize(peer_ip(), test_ip());
         let synack = layer.receive_segment(peer_ip(), test_ip(), &syn_bytes).unwrap();
-        let out = layer.receive_segment(test_ip(), peer_ip(), &synack[0].serialize(test_ip(), peer_ip())).unwrap();
+        let out = layer.receive_segment(peer_ip(), test_ip(), &synack[0].serialize(peer_ip(), test_ip())).unwrap();
         layer.receive_segment(peer_ip(), test_ip(), &out[0].serialize(test_ip(), peer_ip())).unwrap();
 
         let ck = client_key(50001);
@@ -643,7 +645,7 @@ mod tests {
         let syn = layer.connect(50001, peer_ip(), 8080).unwrap();
         let syn_bytes = syn[0].serialize(peer_ip(), test_ip());
         let synack = layer.receive_segment(peer_ip(), test_ip(), &syn_bytes).unwrap();
-        let out = layer.receive_segment(test_ip(), peer_ip(), &synack[0].serialize(test_ip(), peer_ip())).unwrap();
+        let out = layer.receive_segment(peer_ip(), test_ip(), &synack[0].serialize(peer_ip(), test_ip())).unwrap();
         layer.receive_segment(peer_ip(), test_ip(), &out[0].serialize(test_ip(), peer_ip())).unwrap();
 
         let ck = child_key(8080);

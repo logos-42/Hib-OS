@@ -61,9 +61,14 @@ impl EthernetFrame {
         dst.copy_from_slice(&bytes[0..6]);
         src.copy_from_slice(&bytes[6..12]);
         let ethertype = u16::from_be_bytes([bytes[12], bytes[13]]);
+        // 去掉序列化时补的尾部零填充（原型简化：填充字节恒为 0）。
+        let mut payload = bytes[14..].to_vec();
+        while payload.last() == Some(&0) {
+            payload.pop();
+        }
         Some(Self {
             header: EthernetHeader { dst, src, ethertype },
-            payload: bytes[14..].to_vec(),
+            payload,
         })
     }
 }

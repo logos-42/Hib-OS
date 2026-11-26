@@ -460,7 +460,7 @@ mod tests {
         let fd2 = v.open(1, "/a.txt", Access::Read).unwrap();
         let mut buf = [0u8; 16];
         let n = v.read(1, fd2, &mut buf).unwrap();
-        assert_eq!(n, 10);
+        assert_eq!(n, 9);
         assert_eq!(&buf[..n as usize], b"hello vfs");
 
         v.close(1, fd).unwrap();

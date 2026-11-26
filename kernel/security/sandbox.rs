@@ -568,7 +568,8 @@ impl SandboxManager {
         if sandbox.state == SandboxState::Destroyed {
             return Err(SandboxError::Destroyed { sandbox_id });
         }
-        sandbox.rules.push(rule);
+        // 新规则插入到最前，确保同优先级时“后加者优先”。
+        sandbox.rules.insert(0, rule);
         sandbox.rules.sort_by(|a, b| b.priority.cmp(&a.priority));
         self.cache.clear();
         Ok(())
@@ -778,8 +779,9 @@ mod tests {
         let mut m = SandboxManager::new();
         let rules = vec![SandboxRule::syscall_deny(9, "close")];
         let id = m.create_sandbox(301, rules);
+        // 显式把默认动作设为放行，未命中规则时按默认放行（与 syscall_allow_deny 的默认拒绝互补）。
+        sandbox_mut_for_test(&mut m, 301, |s| s.set_default_action(RuleAction::Allow));
         let _ = id;
-        // 默认放行。
         assert!(m.check_syscall(301, 0));
         assert!(!m.check_syscall(301, 9));
     }
@@ -820,6 +822,8 @@ mod tests {
             SandboxRule::net_allow(MatchPattern::Prefix("10.0.0.".to_string()), "allow local"),
         ];
         let id = m.create_sandbox(600, rules);
+        // 本用例验证“精确拒绝优先于前缀允许”，未命中时按默认放行。
+        sandbox_mut_for_test(&mut m, 600, |s| s.set_default_action(RuleAction::Allow));
         let _ = id;
         // 精确拒绝优先于前缀允许。
         assert!(!m.check_net_access(600, "10.0.0.99", 80));
