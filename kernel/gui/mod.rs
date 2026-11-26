@@ -20,6 +20,7 @@ pub mod compositor;
 pub mod compositor_ext;
 pub mod conversation;
 pub mod file_manager;
+pub mod font;
 pub mod gesture;
 pub mod glyph12;
 pub mod input;
@@ -61,6 +62,14 @@ use window::Window;
 
 use crate::exec;
 use crate::gpu::framebuffer::{ADVANCE, LINE_HEIGHT};
+
+/// 终端光标闪烁周期（毫秒）：亮 600ms / 灭 600ms。
+pub const CURSOR_BLINK_MS: u64 = 600;
+
+/// 当前光标是否可见（基于系统时间的相位，纯函数便于测试）。
+pub fn terminal_cursor_visible() -> bool {
+    (crate::monitor::get_time_ns() / (CURSOR_BLINK_MS * 1_000_000)) % 2 == 0
+}
 
 /// 默认显示分辨率。
 pub const DEFAULT_WIDTH: u32 = 960;
@@ -424,6 +433,9 @@ fn exec_lines() -> Vec<String> {
 
 /// 后端状态文本可能含中文；GUI 字形只覆盖 ASCII，含非 ASCII 的行换成英文摘要。
 fn ascii_only_lines(raw: &str) -> Vec<String> {
+    if raw.is_empty() {
+        return vec![String::new()];
+    }
     raw.lines()
         .take(8)
         .map(|line| {
@@ -468,8 +480,13 @@ pub fn paint_lines(win: &mut Window, lines: &[String]) {
     let lh = text_render::BODY_LINE_H;
     let cols = text_render::body_cols(win.client.width());
     let max_x = win.client.width() as i32 - pad;
+    // 统一 ASCII 清洗：后端状态里的中文在 GUI 字形下会显示成乱码。
+    let clean: Vec<String> = lines
+        .iter()
+        .flat_map(|line| ascii_only_lines(line))
+        .collect();
     let mut y = pad;
-    'outer: for line in lines {
+    'outer: for line in &clean {
         for visual in Surface::wrap_text(line, cols, text_render::BODY_SCALE) {
             if y + lh > win.client.height() as i32 {
                 break 'outer;

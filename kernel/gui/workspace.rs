@@ -10,6 +10,7 @@ use std::sync::{Mutex, OnceLock};
 
 use super::intent::{Intent, PageKind};
 use super::surface::Surface;
+use super::text_render;
 
 #[derive(Clone, Debug)]
 pub struct Workspace {
@@ -77,15 +78,31 @@ impl WorkspaceManager {
 
         // 顶部：页面标题 + 强调色细线。
         let title = page.kind.label_en();
-        frame.draw_ui_text(40, 34, title, 0xFFE6E8EC, frame.width() as i32 - 40);
+        text_render::draw_text(
+            frame,
+            40,
+            30,
+            title,
+            20.0,
+            0xFFE6E8EC,
+            frame.width() as i32 - 40,
+        );
         frame.fill_rect(40, 58, 140, 2, 0xFF7FB3A0);
 
         // 内容区：真实数据行，逐行绘制（行距 16px，适配 5x7 字形）。
         let lines = page_lines(page.kind);
-        let mut y = 84;
+        let mut y = 76;
         for line in lines {
-            frame.draw_ui_text(40, y, &line, 0xFFB9BCC4, frame.width() as i32 - 40);
-            y += 20;
+            text_render::draw_text(
+                frame,
+                40,
+                y,
+                &line,
+                12.0,
+                0xFFB9BCC4,
+                frame.width() as i32 - 40,
+            );
+            y += 19;
         }
     }
 }

@@ -178,18 +178,27 @@ impl AppState {
             };
             text_render::draw_body(s, pad, pad + i as i32 * line_h, line, color);
         }
-        // 输入行（终端 / 记事本）
+        // 输入行（终端 / 记事本）+ 闪烁光标。
         if matches!(self.kind, AppKind::Terminal | AppKind::Notes | AppKind::Generated) {
             let y = pad + (rows.len() - start).min(max) as i32 * line_h;
             if y + line_h < s.height() as i32 {
                 let prompt = if self.kind == AppKind::Terminal { "> " } else { "" };
-                text_render::draw_body(
-                    s,
-                    pad,
-                    y,
-                    &format!("{}{}_", prompt, self.input),
-                    text_render::PROMPT,
-                );
+                let line = format!("{}{}", prompt, self.input);
+                text_render::draw_body(s, pad, y, &line, text_render::PROMPT);
+                if super::terminal_cursor_visible() {
+                    let w = super::font::measure_text(
+                        &line,
+                        text_render::BODY_PX,
+                        super::font::FontFamily::YaHei,
+                    )
+                    .map(|v| v as i32)
+                    .unwrap_or(line.chars().count() as i32 * text_render::ADVANCE as i32);
+                    let cw = text_render::BODY_PX as i32 / 2 + 2;
+                    let ch = line_h - 4;
+                    if pad + w + cw < s.width() as i32 && y + ch < s.height() as i32 {
+                        s.fill_rect(pad + w, y + 2, cw as u32, ch as u32, text_render::PROMPT);
+                    }
+                }
             }
         }
     }

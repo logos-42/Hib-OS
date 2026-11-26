@@ -320,7 +320,7 @@ impl Window {
             all.extend(Surface::wrap_text(line, cols, text_render::BODY_SCALE));
         }
         all.extend(Surface::wrap_text(
-            &format!("{}{}_", t.prompt, t.input),
+            &format!("{}{}", t.prompt, t.input),
             cols,
             text_render::BODY_SCALE,
         ));
@@ -347,6 +347,25 @@ impl Window {
             text_render::draw_body(&mut self.client, pad, y, line, color);
             y += line_h;
         }
+        // 终端光标：在输入行末尾画闪烁块（仅最后一行、且当前可见）。
+        if super::terminal_cursor_visible() {
+            if let Some(last) = visible.last() {
+                let cursor_y = y - line_h;
+                let text_x = Self::text_width(last);
+                let cw = text_render::BODY_PX as i32 / 2 + 2;
+                let ch = text_render::BODY_LINE_H - 4;
+                if pad + text_x + cw < self.client.width() as i32 && cursor_y + ch < chh {
+                    self.client.fill_rect(pad + text_x, cursor_y + 2, cw as u32, ch as u32, text_render::PROMPT);
+                }
+            }
+        }
+    }
+
+    /// 估算一行文本宽度（真实字体优先，回退内置字形）。
+    fn text_width(text: &str) -> i32 {
+        super::font::measure_text(text, text_render::BODY_PX, super::font::FontFamily::YaHei)
+            .map(|w| w as i32)
+            .unwrap_or_else(|| text.chars().count() as i32 * text_render::ADVANCE as i32)
     }
 
     /// 窗口渲染：阴影 + 边框 + 标题栏 + 客户端。
@@ -372,7 +391,7 @@ impl Window {
         dst.fill_rect(tb.x, tb.y, 3, tb.h, self.accent);
         // 标题左侧对齐，右侧让出红绿灯区域
         let title_max = tb.right() - (CLOSE_BTN as i32 + TRAFFIC_GAP) * 3 - TRAFFIC_RIGHT_GAP;
-        dst.draw_ui_text(tb.x + 12, tb.y + 7, &self.title, text_render::FG, title_max);
+        text_render::draw_text(dst, tb.x + 12, tb.y + 4, &self.title, 13.0, text_render::FG, title_max);
 
         // 4. Mac 红绿灯：焦点窗口才显示操作符号
         draw_traffic_light(dst, self.close_rect(), MAC_RED, LightGlyph::Close, focused);

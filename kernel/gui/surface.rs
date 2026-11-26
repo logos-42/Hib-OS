@@ -536,8 +536,22 @@ impl Surface {
         x + glyph12::ADVANCE as i32
     }
 
-    /// 用 8×12 UI 字形画一行，限制右边界 `max_x`。
+    /// 用真实字体（雅黑风格）画一行，失败回退 8×12，限制右边界 `max_x`。
     pub fn draw_ui_text(&mut self, x: i32, y: i32, text: &str, color: u32, max_x: i32) -> i32 {
+        if super::font::draw_text(
+            self,
+            x,
+            y,
+            text,
+            10.0,
+            color,
+            super::font::FontFamily::YaHei,
+            max_x,
+        ) {
+            return super::font::measure_text(text, 10.0, super::font::FontFamily::YaHei)
+                .map(|w| x + w as i32)
+                .unwrap_or(x);
+        }
         let mut cx = x;
         for ch in text.chars() {
             if ch == '\n' {

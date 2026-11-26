@@ -33,6 +33,8 @@ struct App {
     cursor_px: (f64, f64),
     size_px: (u32, u32),
     last_error: Option<String>,
+    /// 上一帧的光标闪烁相位（用于检测变化触发重绘）。
+    last_cursor_phase: bool,
 }
 
 impl App {
@@ -44,6 +46,7 @@ impl App {
             cursor_px: (0.0, 0.0),
             size_px: (super::DEFAULT_WIDTH, super::DEFAULT_HEIGHT),
             last_error: None,
+            last_cursor_phase: super::terminal_cursor_visible(),
         }
     }
 
@@ -268,6 +271,13 @@ impl ApplicationHandler for App {
         // 事件驱动刷新：只有 EventBus 上出现新事件（由能力层 / Agent 发布）
         // 时才重画实时视图，不再每 400ms 无条件全量刷新。
         if super::refresh_live_if_dirty() {
+            if let Some(w) = &self.window {
+                w.request_redraw();
+            }
+        }
+        // 终端光标闪烁：相位变化时请求重绘（默认 600ms 周期）。
+        if super::terminal_cursor_visible() != self.last_cursor_phase {
+            self.last_cursor_phase = !self.last_cursor_phase;
             if let Some(w) = &self.window {
                 w.request_redraw();
             }

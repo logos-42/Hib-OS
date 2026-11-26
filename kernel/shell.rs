@@ -1356,6 +1356,22 @@ impl Shell {
                 Ok(msg) => sh_println!("{}", msg),
                 Err(e) => sh_println!("gui wallpaper 失败: {}", e),
             },
+            "font" | "fnt" => {
+                match rest.trim().to_ascii_lowercase().as_str() {
+                    "serif" | "song" | "宋体" => gui::text_render::set_family(0),
+                    "sans" | "hei" | "黑体" => gui::text_render::set_family(1),
+                    "yahei" | "雅黑" | "" => gui::text_render::set_family(2),
+                    "mono" | "terminal" | "等宽" => gui::text_render::set_family(3),
+                    _ => {
+                        sh_println!("用法: gui font serif|sans|yahei|mono");
+                        return;
+                    }
+                }
+                sh_println!(
+                    "界面字体已切换为 {}（宋体/黑体/雅黑/等宽）",
+                    gui::text_render::family_name()
+                );
+            }
             "app" | "launch" => match gui::open_app(&rest) {
                 Ok(id) => sh_println!("已启动应用 {} -> win#{}", rest, id),
                 Err(e) => sh_println!("{}", e),
