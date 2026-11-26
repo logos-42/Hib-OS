@@ -1140,15 +1140,16 @@ impl WordEmbedding {
     }
 
     pub fn closest(&self, word: &str, top_k: usize) -> Vec<(String, f32)> {
-        let _v = match self.get(word) {
-            Some(v) => v,
+        let base = match self.get(word) {
+            Some(v) => v.clone(),
             None => return Vec::new(),
         };
         let mut results: Vec<(String, f32)> = self.vectors.iter()
             .filter(|(w, _)| *w != word)
             .map(|(w, v)| {
-                let dot: f32 = v.iter().zip(v.iter()).map(|(a, b)| a * b).sum();
-                let n1: f32 = v.iter().map(|x| x * x).sum::<f32>().sqrt();
+                // 与目标词做余弦相似度（之前误用自身点积，导致所有词相似度=1）。
+                let dot: f32 = base.iter().zip(v.iter()).map(|(a, b)| a * b).sum();
+                let n1: f32 = base.iter().map(|x| x * x).sum::<f32>().sqrt();
                 let n2: f32 = v.iter().map(|x| x * x).sum::<f32>().sqrt();
                 let sim = if n1 == 0.0 || n2 == 0.0 { 0.0 } else { dot / (n1 * n2) };
                 (w.clone(), sim)

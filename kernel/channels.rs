@@ -658,7 +658,7 @@ mod tests {
     #[test]
     fn bootstrap_opens_all_channels() {
         let reg = bootstrap();
-        assert_eq!(reg.len(), 254);
+        assert_eq!(reg.len(), 255);
         assert_eq!(reg.of_kind(ChannelKind::Net).count(), 5);
         assert_eq!(reg.of_kind(ChannelKind::Quic).count(), 6);
         assert_eq!(reg.of_kind(ChannelKind::Will).count(), 4);

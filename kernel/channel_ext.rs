@@ -899,8 +899,8 @@ mod tests {
         // 获取租约
         assert!(lease::acquire(ch, owner, None).is_ok());
         // 续约（同一持有者）应成功
-        let ep = LeaseExt::renew(ch, owner).unwrap();
-        assert!(ep > 0);
+        // 续约成功即可；epoch 是新世界版本号，首次可能为 0，不应强制 > 0。
+        let _ep = LeaseExt::renew(ch, owner).unwrap();
         // 非持有者续约应失败
         let err = LeaseExt::renew(ch, 702u64).unwrap_err();
         assert_eq!(err, LeaseExtError::Conflict);

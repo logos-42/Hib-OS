@@ -223,6 +223,8 @@ pub struct GestureRecognizer {
     active: BTreeMap<u64, TouchPoint>,
     /// 已抬起的触点历史（用于双击检测）。
     last_tap: Option<TouchPoint>,
+    /// 双指手势的基准距离（两指刚落下时记录），用于判定捏合/缩放。
+    pinch_baseline: Option<f64>,
 /// 配置。
     pub config: GestureConfig,
 }
@@ -238,6 +240,7 @@ impl GestureRecognizer {
         Self {
             active: BTreeMap::new(),
             last_tap: None,
+            pinch_baseline: None,
             config: GestureConfig::default_config(),
         }
     }
@@ -253,6 +256,15 @@ impl GestureRecognizer {
             id,
             TouchPoint::new(id, x, y, time),
         );
+        // 双指刚齐时记录基准距离，供 pinch/zoom 判定。
+        if self.active.len() == 2 {
+            let mut it = self.active.values();
+            let p1 = it.next().unwrap();
+            let p2 = it.next().unwrap();
+            self.pinch_baseline = Some(p1.distance_to(p2));
+        } else {
+            self.pinch_baseline = None;
+        }
     }
 
     /// 触摸移动。
@@ -462,8 +474,8 @@ impl GestureRecognizer {
 
     /// 返回两点初始距离（简化：基于当前位置，若无历史记录则返回当前距离）。
     fn initial_distance(&self, p1: &TouchPoint, p2: &TouchPoint) -> f64 {
-        // 这里没有保存按下时的距离，用当前距离作为基准（简化版）。
-        p1.distance_to(p2)
+        // 优先用双指落下时记录的基准距离；缺失时退回当前距离。
+        self.pinch_baseline.unwrap_or_else(|| p1.distance_to(p2))
     }
 
     /// 返回当前活跃触点数。

@@ -509,9 +509,14 @@ impl Debugger {
         if !self.attached {
             return Err(DebugError::NotAttached);
         }
-        // 存储为一块连续字节。
-        let block: Vec<u8> = data.to_vec();
-        self.memory.insert(addr, block);
+        // 按字节粒度写入，保证 read_byte / disassemble 能逐字节读回。
+        for (i, b) in data.iter().enumerate() {
+            if self.breakpoints.contains_key(&(addr + i)) && *b != INT3 {
+                // 保护断点：跳过该字节，但不中断整体写入。
+                continue;
+            }
+            self.memory.insert(addr + i, vec![*b]);
+        }
         Ok(data.len())
     }
 

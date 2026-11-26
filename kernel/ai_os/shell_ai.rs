@@ -38,9 +38,9 @@ pub enum CommandIntent {
     SystemInfo,      // 系统信息
     ProcessList,     // 进程列表
     NetworkInfo,     // 网络信息
-    Help,            // 帮助
     Exit,            // 退出
     Unknown,         // 未知
+    Help,            // 帮助
 }
 
 /// 解析结果。
@@ -613,9 +613,13 @@ pub fn shell_ai_act(payload: &str) -> Result<String, String> {
         }
         Some("alias") => {
             let alias = it.next().ok_or("缺少别名")?;
-            let command = it.next().ok_or("缺少命令")?;
+            // 命令可能包含空格（如 "ls -la"），收集剩余全部 token。
+            let command = it.collect::<Vec<&str>>().join(" ");
+            if command.is_empty() {
+                return Err("缺少命令".into());
+            }
             let mut eng = shell_ai().lock().unwrap();
-            eng.set_alias(alias, command);
+            eng.set_alias(alias, &command);
             // 注入：同步别名到 L1 VFS。
             let _ = write_file(0, &format!("/shell_ai/alias/{}", alias), command.as_bytes());
             Ok(format!("已设置别名 {} -> {}", alias, command))

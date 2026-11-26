@@ -432,7 +432,8 @@ impl DreamEngine {
     }
 
     pub fn cycle_count(&self) -> u64 {
-        self.cycle.cycle_count()
+        // 引擎层以 start_cycle 次数为准；内层 cycle_count 仅在 Wake 时累加，会与启动后语义不一致。
+        self.total_cycles
     }
 
     pub fn current_stage(&self) -> DreamStage {

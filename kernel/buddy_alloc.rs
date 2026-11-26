@@ -394,7 +394,8 @@ mod tests {
     }
     #[test]
     fn buddy_merge_coalesces() {
-        let mut b = BuddyAllocator::new(64, 0);
+        // 只用 2 帧，才能在没有更大空闲块干扰的情况下验证合并。
+        let mut b = BuddyAllocator::new(2, 0);
         let a = b.alloc_frames(1).unwrap(); // 占帧 0
         let c = b.alloc_frames(1).unwrap(); // 占帧 1（是 0 的 order-0 伙伴）
         assert_eq!(a, 0);

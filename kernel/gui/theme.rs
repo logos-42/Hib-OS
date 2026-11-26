@@ -620,7 +620,14 @@ fn parse_color(s: &str) -> Option<u32> {
     if s.starts_with('#') {
         let hex = s.trim_start_matches('#');
         if hex.len() == 8 {
-            u32::from_str_radix(hex, 16).ok()
+            // #RRGGBBAA → argb(aa, rr, gg, bb)
+            let v = u32::from_str_radix(hex, 16).ok()?;
+            Some(argb(
+                (v & 0xff) as u8,
+                (v >> 24) as u8,
+                (v >> 16) as u8,
+                (v >> 8) as u8,
+            ))
         } else if hex.len() == 6 {
             let v = u32::from_str_radix(hex, 16).ok()?;
             Some(argb(255, (v >> 16) as u8, (v >> 8) as u8, v as u8))

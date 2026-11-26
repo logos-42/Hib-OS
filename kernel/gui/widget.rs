@@ -712,11 +712,12 @@ impl WidgetManager {
         if focusable.is_empty() {
             return None;
         }
-        let idx = self
-            .focused
-            .and_then(|id| focusable.iter().position(|&x| x == id))
-            .unwrap_or(usize::MAX);
-        let next = (idx + 1) % focusable.len();
+        let idx = self.focused.and_then(|id| focusable.iter().position(|&x| x == id));
+        // 无焦点或焦点不在集合内时从第一个开始，避免 usize::MAX + 1 溢出。
+        let next = match idx {
+            Some(i) => (i + 1) % focusable.len(),
+            None => 0,
+        };
         let id = focusable[next];
         self.focus(id);
         Some(id)
@@ -786,11 +787,13 @@ impl WidgetManager {
             .find(|(_, w)| w.hit_test(x, y))
             .map(|(id, _)| *id);
         if let Some(id) = hit {
+            let focusable = self.widgets.get(&id).map(|w| w.focusable).unwrap_or(false);
+            // 先聚焦（会改 state），再置 Pressed，避免被 focus 覆盖导致 mouse_up 不触发回调。
+            if focusable {
+                let _ = self.focus(id);
+            }
             if let Some(w) = self.widgets.get_mut(&id) {
                 w.state = WidgetState::Pressed;
-                if w.focusable {
-                    let _ = self.focus(id);
-                }
             }
             // 复选框翻转。
             if let Some(w) = self.widgets.get_mut(&id) {

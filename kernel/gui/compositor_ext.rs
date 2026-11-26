@@ -342,6 +342,8 @@ pub struct CompositorExt {
     pub vsync_interval_ns: u64,
     /// 上一次 vsync 时间。
     last_vsync_ns: u64,
+    /// 是否已经历过第一次 vsync（首次无条件放行）。
+    vsync_started: bool,
 }
 
 impl CompositorExt {
@@ -367,6 +369,7 @@ impl CompositorExt {
             tear_free: true,
             vsync_interval_ns: 16_666_667,
             last_vsync_ns: 0,
+            vsync_started: false,
         }
     }
 
@@ -479,7 +482,13 @@ impl CompositorExt {
 
     /// 等待下一次 vsync（模拟：如果未到时间则返回 false，调用方可稍后重试）。
     pub fn vsync(&mut self, now: u64) -> bool {
-        if now - self.last_vsync_ns >= self.vsync_interval_ns {
+        // 首次调用放行；之后按间隔放行。用 saturating 防止无符号下溢 panic。
+        if !self.vsync_started {
+            self.vsync_started = true;
+            self.last_vsync_ns = now;
+            return true;
+        }
+        if now.saturating_sub(self.last_vsync_ns) >= self.vsync_interval_ns {
             self.last_vsync_ns = now;
             true
         } else {

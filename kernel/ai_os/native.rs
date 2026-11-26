@@ -1057,6 +1057,8 @@ mod tests {
     #[test]
     fn native_act_inject_semantic() {
         init();
+        // 质原注入要求现象状态已建立，先 tick 一次。
+        let _ = native_act("tick");
         let res = native_act("inject-semantic 你好世界").unwrap();
         assert!(res.contains("语义质原"));
     }
@@ -1064,6 +1066,7 @@ mod tests {
     #[test]
     fn native_act_inject_emotion() {
         init();
+        let _ = native_act("tick");
         let res = native_act("inject-emotion 0.5 0.7").unwrap();
         assert!(res.contains("情感质原"));
     }

@@ -658,7 +658,8 @@ mod tests {
     #[test]
     fn runtime_task_state_new_ready() {
         let rt = Runtime::new();
-        let id = rt.spawn("state-t", CounterFuture::new("state-t", 1));
+        // n=0 的 CounterFuture 首次 poll 即 Ready。
+        let id = rt.spawn("state-t", CounterFuture::new("state-t", 0));
         assert_eq!(rt.task_state(id), Some(TaskState::New));
         rt.poll();
         assert_eq!(rt.task_state(id), Some(TaskState::Completed));
@@ -682,8 +683,9 @@ mod tests {
     #[test]
     fn run_until_stalled_completes_all() {
         let rt = Runtime::new();
-        let _ = rt.spawn("a", CounterFuture::new("a", 1));
-        let _ = rt.spawn("b", CounterFuture::new("b", 2));
+        // 无外部唤醒时，只有首次即就绪的任务能在 run_until_stalled 内完成。
+        let _ = rt.spawn("a", CounterFuture::new("a", 0));
+        let _ = rt.spawn("b", CounterFuture::new("b", 0));
         let total = rt.run_until_stalled();
         assert_eq!(total, 2);
         assert_eq!(rt.completed_count(), 2);
@@ -712,8 +714,8 @@ mod tests {
     fn runtime_ext_spawn_many() {
         let mut ext = RuntimeExt::new();
         let ids = ext.spawn_many(vec![
-            ("a", CounterFuture::new("a", 1)),
-            ("b", CounterFuture::new("b", 2)),
+            ("a", CounterFuture::new("a", 0)),
+            ("b", CounterFuture::new("b", 0)),
         ]);
         assert_eq!(ids.len(), 2);
         let total = ext.run_all();

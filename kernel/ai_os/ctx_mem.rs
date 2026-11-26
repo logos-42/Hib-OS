@@ -349,7 +349,8 @@ mod tests {
 
     #[test]
     fn fault_in_and_pinned() {
-        let mut w = CtxWindow::new(1, 1, 20);
+        // 容量需容纳 10 + 15，pinned 页不会被换出。
+        let mut w = CtxWindow::new(1, 1, 30);
         let a = w.alloc_page("a", 10).unwrap();
         w.pages.get_mut(&a).unwrap().pinned = true;
         w.fault_in("b", 15).unwrap();

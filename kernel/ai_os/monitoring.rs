@@ -1449,7 +1449,8 @@ mod monitoring_tests {
         assert_eq!(id, 1);
         let values = vec![50.0, 60.0, 70.0, 80.0, 90.0];
         let result = agg.aggregate(id, &values, 0).unwrap();
-        assert!((result - 60.0).abs() < 1e-6);
+        // (50+60+70+80+90)/5 = 70
+        assert!((result - 70.0).abs() < 1e-6);
         assert_eq!(agg.rule_count(), 1);
     }
 

@@ -37,8 +37,8 @@ pub enum DeviceType {
     Audio,      // 音频
     GPU,        // 图形处理
     AIAccelerator, // AI 加速器
-    Sensor,     // 传感器
     Unknown,    // 未知
+    Sensor,     // 传感器
 }
 
 /// AI 设备：带语义能力的设备抽象。
@@ -2041,7 +2041,8 @@ mod driver_extension_tests {
         assert_eq!(dev.width, 3840);
         assert_eq!(dev.height, 2160);
         assert_eq!(dev.refresh_rate, 120);
-        assert_eq!(dm.total_pixels(), 1920 * 1080 + 3840 * 2160);
+        // 设备1 已改为 3840×2160，设备2 为 2560×1440。
+        assert_eq!(dm.total_pixels(), 3840 * 2160 + 2560 * 1440);
     }
 
     #[test]

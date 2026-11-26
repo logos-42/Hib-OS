@@ -301,10 +301,12 @@ impl DmaEngine {
         };
         self.transfers.insert(id, transfer);
         let ch = self.channels.get_mut(&channel).unwrap();
-        ch.queue.push_back(id);
         if ch.state == DmaChannelState::Idle {
+            // 通道空闲：直接作为当前传输，不进队列（避免完成后又把自己取出）。
             ch.state = DmaChannelState::Busy;
             ch.current = Some(id);
+        } else {
+            ch.queue.push_back(id);
         }
         self.stats.submissions += 1;
         self.stats.active_transfers = self.transfers.values().filter(|t| matches!(t.state, DmaTransferState::Active | DmaTransferState::Queued)).count() as u64;

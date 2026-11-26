@@ -455,7 +455,7 @@ mod tests {
         let fd = v.open(1, "/a.txt", Access::Write).unwrap();
         assert!(v.has_fd(1, fd));
         let written = v.write(1, fd, b"hello vfs").unwrap();
-        assert_eq!(written, 10);
+        assert_eq!(written, 9);
 
         let fd2 = v.open(1, "/a.txt", Access::Read).unwrap();
         let mut buf = [0u8; 16];

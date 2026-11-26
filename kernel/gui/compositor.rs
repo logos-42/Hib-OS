@@ -537,7 +537,8 @@ mod tests {
         let mut c = comp();
         c.set_wallpaper(Wallpaper::Solid(palette::CRUST));
         let f = c.compose();
-        assert_eq!(f.get(0, 0), Some(palette::CRUST));
+        // 角点被顶栏、中心被光标覆盖，取左中区域仍是纯色壁纸。
+        assert_eq!(f.get(200, 150), Some(palette::CRUST));
     }
 
     #[test]

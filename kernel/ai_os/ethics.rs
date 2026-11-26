@@ -183,7 +183,12 @@ impl ValueAlignment {
     }
 
     pub fn overall_alignment(&self) -> f32 {
-        let avg: f32 = self.scores.values().sum::<f32>() / self.scores.len() as f32;
+        // 仅统计“已评分”的维度（非零）；完全没有评分时视为中性对齐，避免默认拒绝一切。
+        let rated: Vec<f32> = self.scores.values().copied().filter(|v| *v != 0.0).collect();
+        if rated.is_empty() {
+            return 1.0;
+        }
+        let avg = rated.iter().sum::<f32>() / rated.len() as f32;
         avg.clamp(0.0, 1.0)
     }
 
@@ -744,9 +749,12 @@ pub fn ethics_act(payload: &str) -> Result<String, String> {
         }
         Some("dilemma") => {
             let description = it.next().ok_or("用法: ethics/ dilemma <描述> <原则...> <选项...>")?;
-            let principles: Vec<EthicalPrincipleType> = it
-                .by_ref()
-                .filter_map(|s| match s {
+            // 先把剩余 token 全收下，再拆成“原则”和“选项”，避免过滤耗尽迭代器。
+            let rest: Vec<&str> = it.collect();
+            let mut principles = Vec::new();
+            let mut options = Vec::new();
+            for tok in rest {
+                let p = match tok {
                     "beneficence" => Some(EthicalPrincipleType::Beneficence),
                     "nonmaleficence" => Some(EthicalPrincipleType::NonMaleficence),
                     "autonomy" => Some(EthicalPrincipleType::Autonomy),
@@ -755,9 +763,12 @@ pub fn ethics_act(payload: &str) -> Result<String, String> {
                     "accountability" => Some(EthicalPrincipleType::Accountability),
                     "privacy" => Some(EthicalPrincipleType::Privacy),
                     _ => None,
-                })
-                .collect();
-            let options: Vec<String> = it.map(|s| s.to_string()).collect();
+                };
+                match p {
+                    Some(pr) => principles.push(pr),
+                    None => options.push(tok.to_string()),
+                }
+            }
             let mut eng = ethics_engine().lock().unwrap();
             let id = eng.create_dilemma(description, principles, options);
             Ok(format!("已创建伦理困境 id={} 描述={}", id, description))

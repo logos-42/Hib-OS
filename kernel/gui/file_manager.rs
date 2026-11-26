@@ -949,10 +949,9 @@ mod tests {
         let mut fm = FileManager::new(dir.clone());
         let res = fm.drag_drop(&dir.join("drag.txt"), &dst, false);
         assert!(res.is_ok());
+        // move_mode=false 是复制：目标存在，源应保留。
         assert!(dst.join("drag.txt").exists());
-        assert!(!dir.join("drag.txt").exists()); // 复制，源保留... 等等，这里 move_mode=false 所以复制，源应该还在。
-        // 实际上上面断言错了：复制操作源仍存在。改为检查 dst。
-        assert!(dst.join("drag.txt").exists());
+        assert!(dir.join("drag.txt").exists());
 
         let _ = std::fs::remove_dir_all(&dir);
         let _ = std::fs::remove_dir_all(&dst);

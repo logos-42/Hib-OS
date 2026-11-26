@@ -244,20 +244,34 @@ impl TerminalBuffer {
 
     /// 在当前光标处写入一个字符（按当前属性）。
     pub fn put_char(&mut self, ch: char) {
-        let row = self.cursor.row;
-        let col = self.cursor.col;
+        // 控制字符：换行 / 回车单独处理，不写入单元格。
+        if ch == '\n' {
+            self.cursor.col = 0;
+            self.cursor.row += 1;
+            if self.cursor.row >= self.rows {
+                self.scroll(1);
+                self.cursor.row = self.rows.saturating_sub(1);
+            }
+            return;
+        }
+        if ch == '\r' {
+            self.cursor.col = 0;
+            return;
+        }
+        // 延迟换行：光标可停在行尾（col == cols），下一个字符才折行。
+        if self.cursor.col >= self.cols {
+            self.cursor.col = 0;
+            self.cursor.row += 1;
+            if self.cursor.row >= self.rows {
+                self.scroll(1);
+                self.cursor.row = self.rows.saturating_sub(1);
+            }
+        }
+        let (row, col) = (self.cursor.row, self.cursor.col);
         if let Some(cell) = self.get_mut(row, col) {
             cell.ch = ch;
         }
         self.cursor.col += 1;
-        if self.cursor.col >= self.cols {
-            self.cursor.col = 0;
-            self.cursor.row += 1;
-        }
-        if self.cursor.row >= self.rows {
-            self.scroll(1);
-            self.cursor.row = self.rows.saturating_sub(1);
-        }
     }
 
     /// 写入字符串。
@@ -483,11 +497,13 @@ impl AnsiParser {
             AnsiState::CsiParam => {
                 match byte {
                     b'0'..=b'9' => {
-                        if let Some(last) = self.params.last_mut() {
-                            match last {
-                                CsiParam::Numeric(Some(v)) => *v = *v * 10 + (byte - b'0') as u16,
-                                _ => {}
-                            }
+                        let d = (byte - b'0') as u16;
+                        match self.params.last_mut() {
+                            Some(CsiParam::Numeric(Some(v))) => *v = *v * 10 + d,
+                            // 分号后的空参数（None）应被首个子节填入，否则 "1;31" 会丢掉 31。
+                            Some(p @ CsiParam::Numeric(None)) => *p = CsiParam::Numeric(Some(d)),
+                            Some(_) => {}
+                            None => self.params.push(CsiParam::Numeric(Some(d))),
                         }
                     }
                     b';' => self.params.push(CsiParam::Numeric(None)),
@@ -1140,11 +1156,12 @@ mod tests {
         let mut t = Terminal::new(10, 20);
         t.write_str("\x1b[5;10H");
         let (r, c) = t.cursor_pos();
-        assert_eq!(r, 5);
-        assert_eq!(c, 10);
+        // 内部光标为 0-based：ANSI 5;10 → (4, 9)。
+        assert_eq!(r, 4);
+        assert_eq!(c, 9);
         t.write_str("\x1b[3A");
         let (r, _) = t.cursor_pos();
-        assert_eq!(r, 2);
+        assert_eq!(r, 1);
     }
 
     #[test]

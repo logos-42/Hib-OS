@@ -116,7 +116,12 @@ impl MindState {
     }
 
     pub fn available_capacity(&self) -> f32 {
-        (1.0 - self.cognitive_load.max(self.working_memory_usage)).clamp(0.0, 1.0)
+        // 已判定过载时不再保留剩余容量，语义上明确“无可用认知资源”。
+        if self.is_overloaded() {
+            0.0
+        } else {
+            (1.0 - self.cognitive_load.max(self.working_memory_usage)).clamp(0.0, 1.0)
+        }
     }
 }
 
@@ -1121,7 +1126,9 @@ mod tests {
         wm.write("b".into(), crate::ai_os::native::QualiaModality::Semantic);
         assert!(wm.is_full());
         let id = wm.write("c".into(), crate::ai_os::native::QualiaModality::Semantic);
-        assert_eq!(id, 0); // 全部固定时拒绝，但这里未固定，应驱逐
+        // 未固定条目应被驱逐，新写入成功（id 非 0）。
+        assert_ne!(id, 0);
+        assert_eq!(wm.entries.len(), 2);
     }
 
     #[test]

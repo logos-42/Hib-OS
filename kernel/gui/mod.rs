@@ -870,7 +870,8 @@ mod tests {
     fn demo_builds_four_windows_and_composes() {
         let mut c = Compositor::new(960, 600);
         build_demo(&mut c);
-        assert_eq!(c.windows().len(), 4);
+        // build_demo 会铺设控制台/执行体/Agent/租约及三个工作区，共 7 扇窗。
+        assert_eq!(c.windows().len(), 7);
         let frame = c.compose();
         assert!(frame.lit_pixels() > 10_000);
         assert_eq!(frame.width(), 960);

@@ -91,7 +91,7 @@ impl SensoryBuffer {
     pub fn decay(&mut self, now_ns: u128) {
         let mut to_remove = Vec::new();
         for (i, e) in self.entries.iter().enumerate() {
-            if now_ns - e.timestamp_ns > e.decay_ns {
+            if now_ns.saturating_sub(e.timestamp_ns) > e.decay_ns {
                 to_remove.push(i);
             }
         }
@@ -188,7 +188,7 @@ impl WorkingMemory {
     pub fn decay(&mut self, now_ns: u128) {
         let mut to_remove = Vec::new();
         for (id, e) in self.chunks.iter_mut() {
-            let elapsed = now_ns - e.last_access_ns;
+            let elapsed = now_ns.saturating_sub(e.last_access_ns);
             let decay = (elapsed as f64 * self.decay_rate as f64 / 1_000_000_000.0) as f32;
             e.activation = (e.activation - decay).max(0.0);
             if e.activation < 0.05 {
@@ -1684,7 +1684,8 @@ mod advanced_tests {
         let joy_entries = em.recall_by_emotion(EmotionType::Joy);
         assert_eq!(joy_entries.len(), 1);
         let strongest = em.strongest_emotion().unwrap();
-        assert_eq!(strongest, EmotionType::Anger); // 0.9 * 0.4 > 0.8 * 0.5
+        // 强度 × 权重：Joy 0.8×0.5=0.40 > Anger 0.9×0.4=0.36。
+        assert_eq!(strongest, EmotionType::Joy);
     }
 
     #[test]

@@ -509,8 +509,10 @@ impl KvCacheManager {
     }
 
     pub fn release(&mut self, id: u64) -> Result<(), String> {
-        if self.blocks.remove(&id).is_some() {
-            self.used_blocks = self.used_blocks.saturating_sub(1);
+        if let Some(block) = self.blocks.remove(&id) {
+            // 分配时按 slots 折算成多块，释放也必须减去同样的块数。
+            let needed = (block.slot_count + self.block_size - 1) / self.block_size;
+            self.used_blocks = self.used_blocks.saturating_sub(needed);
             Ok(())
         } else {
             Err(format!("KV 块 {} 不存在", id))
@@ -1409,18 +1411,23 @@ pub fn init() {
 
 /// 状态摘要，供 `sense model/status` 使用。
 pub fn status() -> String {
-    let reg = model_registry().lock().unwrap();
-    format!(
-        "models={} instances={} vram={}/{}MiB loads={} insts={} destroys={} optimizer_passes={}",
-        reg.model_count(),
-        reg.instance_count(),
-        reg.vram_used >> 20,
-        reg.vram_budget >> 20,
-        reg.total_loads,
-        reg.total_instantiations,
-        reg.total_destroys,
-        reg.optimizer.optimized_count()
-    )
+    let base = {
+        let reg = model_registry().lock().unwrap();
+        format!(
+            "models={} instances={} vram={}/{}MiB loads={} insts={} destroys={} optimizer_passes={}",
+            reg.model_count(),
+            reg.instance_count(),
+            reg.vram_used >> 20,
+            reg.vram_budget >> 20,
+            reg.total_loads,
+            reg.total_instantiations,
+            reg.total_destroys,
+            reg.optimizer.optimized_count()
+        )
+    };
+    // 附带服务引擎摘要，便于一处看到推理队列/缓存/后端状态。
+    let serving = model_serving_engine().lock().unwrap().stats();
+    format!("{} | {}", base, serving)
 }
 
 /// 加载器视角摘要。
@@ -1765,7 +1772,8 @@ mod tests {
 
     #[test]
     fn kv_cache_exhausted() {
-        let mut mgr = KvCacheManager::new(16, 1);
+        // 64 slots / block_size 16 = 4 块，故上限设为 4：第一次刚好占满，第二次应失败。
+        let mut mgr = KvCacheManager::new(16, 4);
         assert!(mgr.allocate(0, 64).is_ok());
         assert!(mgr.allocate(0, 64).is_err());
     }
@@ -1818,6 +1826,7 @@ mod tests {
     #[test]
     fn load_with_spec() {
         let mut reg = ModelRegistry::new();
+        reg.vram_budget = 64 << 30; // 该 MoE 需要 50GiB，默认 8GiB 预算放不下。
         let spec = ModelSpec { arch: ModelArch::MoE, params: 100_000_000_000, num_layers: 80, hidden_size: 8192, num_heads: 64, head_dim: 128, intermediate_size: 24576, vocab_size: 100000, max_position_embeddings: 131072, router: Some(RouterType::TopK), num_experts: Some(8), num_experts_per_tok: Some(2), ..Default::default() };
         let _ = reg.load_with_spec("/moe.bin", ModelFormat::SafeTensors, spec, QuantFormat::Int4, 50 << 30).unwrap();
         assert_eq!(reg.model_count(), 1);
@@ -3308,6 +3317,8 @@ impl ModelServingEngine {
     }
 
     pub fn process_batch(&mut self) -> Vec<u64> {
+        // 只负责把排队请求移入处理队列（确定性、不依赖外部服务）。
+        // 真正的推理完成由调用方显式调用 complete_inference / fail_inference。
         let started = self.inference_server.start_processing();
         if !started.is_empty() {
             let total_tokens: u64 = started.iter()
@@ -3316,37 +3327,34 @@ impl ModelServingEngine {
                 .sum();
             self.batch_processor.create_batch(started.clone(), total_tokens);
             self.metrics.increment_counter("model_batches_total", 1.0, &[]);
+        }
+        started
+    }
 
-            // 通过 Ollama 处理每个请求
-            for id in started.clone() {
-                if let Some(req) = self.inference_server.processing.get(&id) {
-                    let model_name = &req.model_name;
-                    let prompt_tokens_str: String = req.input_tokens.iter()
-                        .map(|t| t.to_string())
-                        .collect::<Vec<_>>()
-                        .join(" ");
-                    match self.ollama_client.chat(
-                        model_name,
-                        &prompt_tokens_str,
-                        req.temperature,
-                        req.top_p,
-                        req.top_k,
-                        req.max_new_tokens,
-                    ) {
-                        Ok(text) => {
-                            let output_tokens: Vec<u32> = text.chars()
-                                .filter_map(|c| c.to_digit(10))
-                                .collect();
-                            let prefill_ns = req.input_tokens.len() as u128 * 1000;
-                            let decode_ns = output_tokens.len() as u128 * 100;
-                            let _ = self.complete_inference(
-                                id, output_tokens, text, prefill_ns, decode_ns
-                            );
-                        }
-                        Err(e) => {
-                            let _ = self.fail_inference(id, &format!("Ollama error: {}", e));
-                        }
-                    }
+    /// 通过 Ollama 实际推理并完成批内请求（网络相关，测试不依赖）。
+    pub fn process_batch_via_ollama(&mut self) -> Vec<u64> {
+        let started = self.process_batch();
+        for id in started.clone() {
+            let (model_name, prompt, temp, top_p, top_k, max_new, prefill_ns) = match self.inference_server.processing.get(&id) {
+                Some(req) => (
+                    req.model_name.clone(),
+                    req.input_tokens.iter().map(|t| t.to_string()).collect::<Vec<_>>().join(" "),
+                    req.temperature,
+                    req.top_p,
+                    req.top_k,
+                    req.max_new_tokens,
+                    req.input_tokens.len() as u128 * 1000,
+                ),
+                None => continue,
+            };
+            match self.ollama_client.chat(&model_name, &prompt, temp, top_p, top_k, max_new) {
+                Ok(text) => {
+                    let output_tokens: Vec<u32> = text.chars().filter_map(|c| c.to_digit(10)).collect();
+                    let decode_ns = output_tokens.len() as u128 * 100;
+                    let _ = self.complete_inference(id, output_tokens, text, prefill_ns, decode_ns);
+                }
+                Err(e) => {
+                    let _ = self.fail_inference(id, &format!("Ollama error: {}", e));
                 }
             }
         }

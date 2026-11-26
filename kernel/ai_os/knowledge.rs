@@ -287,8 +287,11 @@ mod tests {
         kb.write("mem/os", "kernel scheduler memory page", &[]);
         kb.write("mem/poem", "roses are red violets blue", &[]);
         let res = kb.search("kernel memory", 2);
+        // 只返回相似度 > 0 的结果，命中的 mem/os 应排第一。
         assert_eq!(res[0].0, "mem/os");
-        assert!(res[0].1 > res[1].1);
+        if res.len() > 1 {
+            assert!(res[0].1 > res[1].1);
+        }
     }
 
     #[test]

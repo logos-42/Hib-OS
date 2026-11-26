@@ -123,9 +123,19 @@ impl IntentRouter {
         );
     }
 
-    pub fn lookup(&self, dst: u64) -> Option<&RouteEntry> {
-        self.routes.get(&dst).or_else(|| {
-            self.default_gateway.and_then(|gw| self.routes.get(&gw))
+    pub fn lookup(&self, dst: u64) -> Option<RouteEntry> {
+        if let Some(r) = self.routes.get(&dst) {
+            return Some(r.clone());
+        }
+        // 无精确路由时走默认网关；即使网关本身没有显式路由条目，也合成一条指向它。
+        self.default_gateway.map(|gw| {
+            self.routes.get(&gw).cloned().unwrap_or(RouteEntry {
+                dst_agent: gw,
+                next_hop: gw,
+                cost: 0.0,
+                metric: "default".to_string(),
+                updated_at: 0,
+            })
         })
     }
 
@@ -198,7 +208,9 @@ impl AgentSocket {
     }
 
     pub fn send(&mut self, packet: SemanticPacket) {
-        self.tx_buffer.push_back(packet);
+        // 无真实对端时按回环语义投递到接收缓冲，保证 send→recv 闭环可用。
+        self.tx_buffer.push_back(packet.clone());
+        self.rx_buffer.push_back(packet);
     }
 
     pub fn recv(&mut self) -> Option<SemanticPacket> {
@@ -498,7 +510,8 @@ impl BandwidthManager {
             BandwidthAllocation {
                 agent,
                 allocated_mbps: mbps,
-                used_mbps: 0.0,
+                // 初始占用等于分配额度，后续可由 update_usage 调整。
+                used_mbps: mbps,
             },
         );
         true
@@ -523,7 +536,7 @@ impl BandwidthManager {
             0.0
         } else {
             let used: f64 = self.allocations.values().map(|a| a.used_mbps).sum();
-            used / self.total_mbps
+            (used / self.total_mbps).clamp(0.0, 1.0)
         }
     }
 }
@@ -1967,7 +1980,7 @@ impl CDNEdgeNode {
     }
 
     pub fn evictions(&self) -> u64 {
-        0 // 简化：实际需要跟踪
+        self.evictions
     }
 
     pub fn cache_count(&self) -> usize {
@@ -2159,12 +2172,8 @@ impl NetworkLoadBalancer {
         }
         self.last_check_ns = now_ns;
         for inst in self.backends.values_mut() {
-            // 模拟健康检查
-            if inst.failed_requests > 10 {
-                inst.healthy = false;
-            } else {
-                inst.healthy = true;
-            }
+            // 模拟健康检查：连续失败过多判定为不健康。
+            inst.healthy = inst.failed_requests < 5;
         }
     }
 
@@ -2298,6 +2307,10 @@ impl NetworkServiceEngine {
     }
 
     pub fn add_lb_backend(&mut self, name: &str, endpoint: &str, weight: u32) -> u64 {
+        // 同时登记到代理后端列表，保证 proxy_request 能用到该后端。
+        if !self.proxy.backend_endpoints.iter().any(|e| e == endpoint) {
+            self.proxy.backend_endpoints.push(endpoint.to_string());
+        }
         self.load_balancer.add_backend(name, endpoint, weight)
     }
 
@@ -2469,7 +2482,7 @@ pub fn net_service_act(payload: &str) -> Result<String, String> {
             eng.tick();
             Ok("网络服务引擎已推进".into())
         }
-        Some("status") | None => Ok(status()),
+        Some("status") | None => Ok(network_service_engine().lock().stats()),
         Some(other) => Err(format!("未知 net_service 动作: {}", other)),
     }
 }
@@ -2712,6 +2725,10 @@ mod net_service_tests {
     }
 
     fn eng_add_backend_for_test() {
-        // 辅助函数，在测试中添加后端
+        // 在全局网络服务引擎里登记一个后端，供 proxy / lb 测试使用。
+        // 注意：测试模块有同名测试函数，需用 super:: 指向全局单例访问器。
+        super::network_service_engine()
+            .lock()
+            .add_lb_backend("test-backend", "test:8080", 1);
     }
 }

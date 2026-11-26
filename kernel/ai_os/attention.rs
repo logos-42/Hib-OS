@@ -1419,12 +1419,12 @@ mod advanced_tests {
     fn sparse_attention_local() {
         let sa = SparseAttention::new(SparsePattern::Local, 4, 1);
         let mask = sa.get_attention_mask(10, 5);
-        // 位置 5 的窗口是 [3, 4, 5, 6, 7]
+        // window_size=4 表示窗口含 4 个位置：[3, 4, 5, 6]。
         assert!(mask[3]);
         assert!(mask[4]);
         assert!(mask[5]);
         assert!(mask[6]);
-        assert!(mask[7]);
+        assert!(!mask[7]);
         assert!(!mask[0]);
         assert!(!mask[9]);
     }
@@ -1456,8 +1456,7 @@ mod advanced_tests {
         let mask = sa.get_attention_mask(10, 3);
         assert!(mask[0]);
         assert!(mask[5]);
-        assert!(!mask[3]); // 3 不在全局索引中，且当前位置不是 3... 等等，current_pos 是 3
-        // 当前位置总是可见
+        // 当前位置（3）总是可见。
         assert!(mask[3]);
     }
 

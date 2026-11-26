@@ -1335,7 +1335,8 @@ impl InputEventQueue {
     }
 
     pub fn dequeue(&mut self) -> Option<QueuedInputEvent> {
-        if let Some((key, _)) = self.queue.iter().next() {
+        // 高优先级先出队：BTreeMap 按 (priority, id) 升序，取最后一个即最高优先级。
+        if let Some((key, _)) = self.queue.iter().next_back() {
             let key = *key;
             return self.queue.remove(&key);
         }

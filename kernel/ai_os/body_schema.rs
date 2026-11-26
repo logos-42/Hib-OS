@@ -1168,6 +1168,9 @@ impl MotionController {
     pub fn add_trajectory(&mut self, body_part_id: u64, points: Vec<TrajectoryPoint>) -> u64 {
         let id = body_part_id;
         self.trajectories.insert(id, points);
+        // 新轨迹成为当前执行目标，并从头开始。
+        self.current_trajectory = Some(id);
+        self.execution_index = 0;
         id
     }
 

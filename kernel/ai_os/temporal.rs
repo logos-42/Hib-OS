@@ -93,7 +93,7 @@ impl CircadianRhythm {
     pub fn new() -> Self {
         Self {
             period_ns: 24 * 60 * 60 * 1_000_000_000,
-            phase_offset_ns: 6 * 60 * 60 * 1_000_000_000, // 早上 6 点开始
+            phase_offset_ns: 0, // 以 now_ns 的绝对小时计算，6 点即 Morning。
             current_phase: CircadianPhase::Morning,
             cycle_count: 0,
         }
@@ -183,14 +183,14 @@ impl UltradianRhythm {
     }
 
     pub fn update(&mut self, now_ns: u128) {
-        let phase = self.phase_at(now_ns);
-        if phase != self.current_phase {
-            self.current_phase = phase;
-            if phase == UltradianPhase::Peak {
-                self.cycle_count += 1;
-                self.cycle_start_ns = now_ns;
-            }
+        // 显式检测是否跨越了一个完整周期（即使回到 Peak 相位也应计为新周期）。
+        let elapsed = now_ns.saturating_sub(self.cycle_start_ns);
+        if self.period_ns > 0 && elapsed >= self.period_ns {
+            let cycles = elapsed / self.period_ns;
+            self.cycle_count = self.cycle_count.saturating_add(cycles as u64);
+            self.cycle_start_ns += self.period_ns * cycles;
         }
+        self.current_phase = self.phase_at(now_ns);
     }
 
     pub fn focus_capacity(&self) -> f32 {
@@ -381,13 +381,14 @@ impl TemporalScheduler {
 
     pub fn mark_executed(&mut self, id: u64) -> bool {
         if let Some(task) = self.tasks.get_mut(&id) {
-            task.executed = true;
             if let Some(interval) = task.interval_ns {
-                // 重新调度周期性任务
+                // 周期性任务：推进触发时间并重置执行标记，使其下次仍会被 due_tasks 命中。
                 let new_time = task.trigger_time_ns + interval;
+                task.trigger_time_ns = new_time;
+                task.executed = false;
                 self.time_index.entry(new_time).or_default().push(id);
-                // 更新任务触发时间
-                // 简化：不修改原任务的 trigger_time_ns，依赖 time_index
+            } else {
+                task.executed = true;
             }
             true
         } else {
@@ -446,8 +447,9 @@ impl TemporalMemory {
                 self.entries.remove(&oldest);
             }
         }
+        let id = self.next_id;
         self.next_id += 1;
-        self.next_id
+        id
     }
 
     pub fn query_range(&self, start_ns: u128, end_ns: u128) -> Vec<&TemporalMemoryEntry> {
@@ -864,10 +866,11 @@ mod tests {
     #[test]
     fn clock_offset() {
         let mut clock = TemporalClock::new(ClockType::WallClock);
+        let before = crate::ai_os::native::now_ns();
         clock.set_offset(1_000_000_000);
         let now = clock.now();
-        let base = crate::ai_os::native::now_ns();
-        assert!(now >= base + 1_000_000_000 || now < base); // 可能溢出，简单检查
+        // now 应约为“当前原生时间 + 偏移”，且一定大于偏移量本身。
+        assert!(now >= before + 1_000_000_000);
     }
 
     #[test]
@@ -1247,14 +1250,16 @@ impl TimeSeriesPredictor {
                 if window.len() < 2 {
                     return vec![window[0].value; steps_ahead];
                 }
-                let n = window.len() as f32;
-                let sum_x: f32 = (0..window.len()).map(|i| i as f32).sum();
-                let sum_y: f32 = window.iter().map(|p| p.value).sum();
-                let sum_xy: f32 = window.iter().enumerate().map(|(i, p)| i as f32 * p.value).sum();
-                let sum_x2: f32 = (0..window.len()).map(|i| (i as f32) * (i as f32)).sum();
+                // window 是时间倒序（最新在前），线性拟合需按时间正序。
+                let chrono: Vec<f32> = window.iter().rev().map(|p| p.value).collect();
+                let n = chrono.len() as f32;
+                let sum_x: f32 = (0..chrono.len()).map(|i| i as f32).sum();
+                let sum_y: f32 = chrono.iter().sum();
+                let sum_xy: f32 = chrono.iter().enumerate().map(|(i, v)| i as f32 * v).sum();
+                let sum_x2: f32 = (0..chrono.len()).map(|i| (i as f32) * (i as f32)).sum();
                 let slope = (n * sum_xy - sum_x * sum_y) / (n * sum_x2 - sum_x * sum_x);
                 let intercept = (sum_y - slope * sum_x) / n;
-                (0..steps_ahead).map(|i| slope * (window.len() as f32 + i as f32) + intercept).collect()
+                (0..steps_ahead).map(|i| slope * (chrono.len() as f32 + i as f32) + intercept).collect()
             }
             PredictionModelType::Seasonal => {
                 let avg: f32 = window.iter().map(|p| p.value).sum::<f32>() / window.len() as f32;
@@ -1375,7 +1380,7 @@ impl TimeAligner {
     pub fn new() -> Self {
         Self {
             mode: AlignmentMode::Nearest,
-            max_tolerance_ns: 100_000_000, // 100ms
+            max_tolerance_ns: 500_000_000, // 500ms，覆盖常见的跨源对齐抖动
             alignment_count: 0,
         }
     }

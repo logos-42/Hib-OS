@@ -169,8 +169,19 @@ impl MessageBus {
             }
         }
 
-        self.messages.push_back(msg);
-        if self.messages.len() > self.max_queue_size {
+        if msg.to.is_none() {
+            // 广播：为每个订阅者各投递一份，避免 poll 删除后其他订阅者收不到。
+            for (agent_id, types) in &self.subscriptions {
+                if types.contains(&msg.r#type) {
+                    let mut copy = msg.clone();
+                    copy.to = Some(*agent_id);
+                    self.messages.push_back(copy);
+                }
+            }
+        } else {
+            self.messages.push_back(msg);
+        }
+        while self.messages.len() > self.max_queue_size {
             self.messages.pop_front();
             self.total_dropped += 1;
         }
@@ -1335,8 +1346,8 @@ impl SwarmIntelligence {
 pub enum ElectionState {
     Idle,
     Candidate,
-    Leader,
     Follower,
+    Leader,
 }
 
 /// 领导力选举：选举群体领导者。

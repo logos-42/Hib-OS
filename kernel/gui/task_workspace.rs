@@ -335,7 +335,8 @@ mod tests {
 
     #[test]
     fn truncate_long_string() {
-        assert_eq!(truncate("hello world", 5), "hel...");
+        // max=5 时保留 2 个字符 + "..."（总长 5），与实现一致。
+        assert_eq!(truncate("hello world", 5), "he...");
     }
 
     #[test]

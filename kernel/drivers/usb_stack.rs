@@ -411,11 +411,16 @@ impl UsbBus {
         let bytes = data.len().min(mps as usize);
         // 入队。
         dev.queues.entry(ep_addr).or_insert_with(VecDeque::new).push_back(data[..bytes].to_vec());
-        match ep.transfer_type() {
+        let dev_transfer_type = ep.transfer_type();
+        match dev_transfer_type {
             TransferType::Bulk => { dev.stats.bulk_transfers += 1; }
             TransferType::Interrupt => { dev.stats.interrupt_transfers += 1; }
             TransferType::Isochronous => { dev.stats.isochronous_transfers += 1; }
             TransferType::Control => { dev.stats.control_transfers += 1; }
+        }
+        // 同步总线级统计。
+        if dev_transfer_type == TransferType::Bulk {
+            self.stats.bulk_transfers += 1;
         }
         self.stats.transfers_total += 1;
         self.stats.transfers_success += 1;

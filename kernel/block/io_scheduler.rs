@@ -1,6 +1,6 @@
 //! 块 I/O 调度器 —— P0-4 子模块。
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 
 /// I/O 调度算法。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -16,6 +16,8 @@ pub struct IoScheduler {
     alg: IoSchedulerAlg,
     current_pos: u64,
     pending: BTreeMap<u64, u64>, // block -> 请求数
+    /// FIFO 的插入顺序（BTreeMap 按键排序，不能体现先来先服务）。
+    fifo_order: VecDeque<u64>,
 }
 
 impl IoScheduler {
@@ -24,12 +26,14 @@ impl IoScheduler {
             alg,
             current_pos: 0,
             pending: BTreeMap::new(),
+            fifo_order: VecDeque::new(),
         }
     }
 
     /// 添加请求。
     pub fn add_request(&mut self, block: u64) {
         *self.pending.entry(block).or_insert(0) += 1;
+        self.fifo_order.push_back(block);
     }
 
     /// 选择下一个请求块。
@@ -38,7 +42,16 @@ impl IoScheduler {
             return None;
         }
         let block = match self.alg {
-            IoSchedulerAlg::Fifo => *self.pending.keys().next().unwrap(),
+            IoSchedulerAlg::Fifo => {
+                // 取最早插入且仍有待处理请求的块。
+                while let Some(front) = self.fifo_order.pop_front() {
+                    if self.pending.contains_key(&front) {
+                        self.fifo_order.push_front(front);
+                        break;
+                    }
+                }
+                *self.fifo_order.front().unwrap_or_else(|| self.pending.keys().next().unwrap())
+            }
             IoSchedulerAlg::Sstf => {
                 self.pending
                     .keys()
@@ -68,8 +81,20 @@ impl IoScheduler {
         let count = self.pending.get(&block).unwrap();
         if *count > 1 {
             self.pending.insert(block, count - 1);
+            // 同块还有剩余请求，把插入顺序也保留到下一位。
+            if self.alg == IoSchedulerAlg::Fifo {
+                if let Some(pos) = self.fifo_order.iter().position(|b| *b == block) {
+                    let b = self.fifo_order.remove(pos).unwrap();
+                    self.fifo_order.push_back(b);
+                }
+            }
         } else {
             self.pending.remove(&block);
+            if self.alg == IoSchedulerAlg::Fifo {
+                if let Some(pos) = self.fifo_order.iter().position(|b| *b == block) {
+                    self.fifo_order.remove(pos);
+                }
+            }
         }
         Some(block)
     }
