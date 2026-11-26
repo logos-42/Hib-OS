@@ -641,9 +641,11 @@ impl InferenceEngine {
 
     pub fn tick(&mut self, ns_delta: u128) {
         let mut finished = Vec::new();
+        let mut generated = 0u64;
         for (id, req) in self.requests.iter_mut() {
             if !req.completed && req.generated_tokens.len() < req.max_new_tokens as usize {
                 req.generated_tokens.push(0); // 占位 token
+                generated += 1;
             }
             if req.completed {
                 finished.push(*id);
@@ -652,7 +654,11 @@ impl InferenceEngine {
         for id in finished {
             self.requests.remove(&id);
         }
+        self.total_tokens_generated = self.total_tokens_generated.saturating_add(generated);
         self.total_inference_ns = self.total_inference_ns.saturating_add(ns_delta);
+        if generated > 0 {
+            crate::gui::desktop_shell::topbar::record_tokens(generated);
+        }
     }
 
     pub fn completed_count(&self) -> u64 {

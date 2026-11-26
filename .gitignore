@@ -34,3 +34,5 @@ Cargo.lock
 
 # 内部 wiki（含敏感记录，不推送）
 .wiki/
+
+docs/plans/

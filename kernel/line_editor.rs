@@ -4,7 +4,9 @@
 //!   `←`/`→` 光标移动、`Backspace`/`Delete` 编辑、`Ctrl+C` 取消、`Ctrl+D` 退出。
 //! * 非控制台 (管道 / 重定向) 下自动降级为逐行读取，保证脚本化可用。
 
-use std::io::{self, BufRead, Read, Write};
+use std::io::{self, BufRead, Write};
+#[cfg(windows)]
+use std::io::Read;
 
 /// 历史记录上限。
 pub const MAX_HISTORY: usize = 200;
@@ -288,6 +290,7 @@ impl Default for LineEditor {
     }
 }
 
+#[cfg(windows)]
 fn read_byte<R: Read>(input: &mut R) -> io::Result<Option<u8>> {
     let mut b = [0u8; 1];
     match input.read(&mut b)? {
@@ -296,6 +299,7 @@ fn read_byte<R: Read>(input: &mut R) -> io::Result<Option<u8>> {
     }
 }
 
+#[cfg(windows)]
 fn read_utf8_char<R: Read>(input: &mut R, first: u8) -> io::Result<Option<char>> {
     let need = if first >> 5 == 0b110 {
         1
@@ -317,6 +321,7 @@ fn read_utf8_char<R: Read>(input: &mut R, first: u8) -> io::Result<Option<char>>
 }
 
 /// 重绘：回到行首、清除到行尾、输出提示符与缓冲、再把光标左移回去。
+#[cfg(windows)]
 fn render(out: &mut io::Stdout, prompt: &str, buf: &[char], cursor: usize) -> io::Result<()> {
     let text: String = buf.iter().collect();
     write!(out, "\r\x1b[K{}{}", prompt, text)?;

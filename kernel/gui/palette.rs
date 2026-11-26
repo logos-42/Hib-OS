@@ -27,8 +27,8 @@ pub const PANEL_MAX_W: u32 = 620;
 pub const ROW_H: i32 = 24;
 /// 最多同时显示的结果行数。
 pub const MAX_ROWS: usize = 8;
-/// 顶栏高度（与 `statusbar` 共用，点击顶栏打开命令板）。
-pub const TOPBAR_H: i32 = 22;
+/// 顶栏高度（统一指向新外壳常量；不再用「点顶栏打开命令板」）。
+pub const TOPBAR_H: i32 = super::desktop_shell::TOPBAR_H;
 
 const HEADER_H: i32 = 38;
 const FOOTER_H: i32 = 20;
@@ -411,10 +411,9 @@ pub fn render(dst: &mut Surface, windows: &[Window]) {
 pub fn intercept(comp: &mut Compositor, ev: &Event) -> Option<Vec<Effect>> {
     let mut p = palette().lock().unwrap();
     if !p.open {
-        // 关闭态只认两个入口：⌘K（真实窗口后端翻译）和点击顶栏。
+        // 隐藏入口：只认 ⌘K / Ctrl+K；不再有「点顶栏打开」（顶栏左图标是回桌面）。
         let open_it = match ev {
             Event::KeyDown(Key::Other(s)) => matches!(s.as_str(), "cmd+k" | "cmd+space" | "ctrl+k"),
-            Event::MouseDown { y, .. } => *y < TOPBAR_H,
             _ => false,
         };
         if open_it {
@@ -565,16 +564,17 @@ mod tests {
     use super::*;
     use crate::gui::compositor::Compositor;
 
-    fn fresh() -> (Compositor, std::sync::MutexGuard<'static, Palette>) {
+    fn fresh() -> Compositor {
         let mut c = Compositor::new(960, 600);
         let id = c.open("TERMINAL", 320, 220, pal::BLUE);
         c.focus(id);
-        // 每个测试从干净的打开态开始。
+        // 重置后立即释放锁：intercept 内部会再次 lock，持有 guard 会死锁。
         let mut p = palette().lock().unwrap();
         p.open = false;
         p.query.clear();
         p.selected = 0;
-        (c, p)
+        drop(p);
+        c
     }
 
     #[test]
@@ -603,41 +603,47 @@ mod tests {
 
     #[test]
     fn keyboard_opens_filters_and_runs() {
-        let (mut c, mut p) = fresh();
-        p.open();
-        assert!(p.open);
+        let mut c = fresh();
+        palette().lock().unwrap().open();
+        assert!(palette().lock().unwrap().open);
         // 模拟键入 "screenshot"
         for ch in "screenshot".chars() {
             let eff = intercept(&mut c, &Event::KeyDown(Key::Char(ch))).unwrap();
             assert_eq!(eff, vec![Effect::Redraw]);
         }
-        assert_eq!(p.query, "screenshot");
+        assert_eq!(palette().lock().unwrap().query, "screenshot");
         let eff = intercept(&mut c, &Event::KeyDown(Key::Enter)).unwrap();
         assert!(eff.iter().any(|e| matches!(e, Effect::Command { line, .. } if line == "gui shot gui-output.bmp")));
-        assert!(!p.open, "执行后命令板应关闭");
-        assert!(p.last_result.contains("gui shot"));
+        assert!(!palette().lock().unwrap().open, "执行后命令板应关闭");
+        assert!(palette().lock().unwrap().last_result.contains("gui shot"));
     }
 
     #[test]
-    fn escape_closes_and_topbar_click_opens() {
-        let (mut c, mut p) = fresh();
-        // 点击顶栏（y < TOPBAR_H）应打开
-        let eff = intercept(&mut c, &Event::MouseDown { x: 400, y: 8, button: MouseButton::Left }).unwrap();
+    fn topbar_click_does_not_open_palette_shortcut_does() {
+        let mut c = fresh();
+        // 顶栏点击不再打开命令板（左图标由 IntentRouter 处理为回桌面）。
+        assert_eq!(intercept(&mut c, &Event::MouseDown { x: 400, y: 8, button: MouseButton::Left }), None);
+        assert!(!palette().lock().unwrap().open);
+        // 隐藏入口 ⌘K 仍可打开。
+        let eff = intercept(&mut c, &Event::KeyDown(Key::Other("cmd+k".into()))).unwrap();
         assert_eq!(eff, vec![Effect::Redraw]);
-        assert!(p.open);
+        assert!(palette().lock().unwrap().open);
         intercept(&mut c, &Event::KeyDown(Key::Escape)).unwrap();
-        assert!(!p.open);
+        assert!(!palette().lock().unwrap().open);
     }
 
     #[test]
     fn opening_app_action_really_opens_window() {
-        let (mut c, mut p) = fresh();
+        let mut c = fresh();
         let before = c.windows().len();
-        p.open();
-        p.query = "files".into();
+        {
+            let mut p = palette().lock().unwrap();
+            p.open();
+            p.query = "files".into();
+        }
         intercept(&mut c, &Event::KeyDown(Key::Enter)).unwrap();
         assert!(c.windows().len() > before, "FILES 应用应真的开窗");
-        assert!(p.last_result.contains("opened files"));
+        assert!(palette().lock().unwrap().last_result.contains("opened files"));
     }
 
     #[test]

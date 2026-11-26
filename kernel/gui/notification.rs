@@ -100,6 +100,11 @@ fn notification_center() -> &'static Mutex<NotificationCenter> {
     NOTIFICATION_CENTER.get_or_init(|| Mutex::new(NotificationCenter::new(500)))
 }
 
+/// 未读通知数（供 GUI 顶栏 / Dock 徽章读取真实状态）。
+pub fn unread_notifications() -> u64 {
+    notification_center().lock().unwrap().unread_count()
+}
+
 /// 发送一条通知。
 pub fn notify(title: &str, body: &str, r#type: NotificationType) {
     let nc = notification_center();

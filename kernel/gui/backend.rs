@@ -11,7 +11,9 @@ use std::num::NonZeroU32;
 use std::sync::Arc;
 
 use winit::application::ApplicationHandler;
-use winit::event::{ElementState, MouseButton as WinitMouseButton, MouseScrollDelta, WindowEvent};
+use winit::event::{
+    ElementState, MouseButton as WinitMouseButton, MouseScrollDelta, TouchPhase, WindowEvent,
+};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::keyboard::{Key as WinitKey, NamedKey};
 use winit::window::{Window as WinitWindow, WindowId};
@@ -187,6 +189,22 @@ impl ApplicationHandler for App {
                 let eff = inject(ev);
                 let redraw = Self::handle_effects(eff);
                 if redraw {
+                    if let Some(w) = &self.window {
+                        w.request_redraw();
+                    }
+                }
+            }
+            WindowEvent::Touch(touch) => {
+                let (x, y) = self.to_comp(touch.location.x, touch.location.y);
+                let ev = match touch.phase {
+                    TouchPhase::Started => Event::TouchDown { id: touch.id, x, y },
+                    TouchPhase::Moved => Event::TouchMove { id: touch.id, x, y },
+                    TouchPhase::Ended | TouchPhase::Cancelled => {
+                        Event::TouchUp { id: touch.id, x, y }
+                    }
+                };
+                let eff = inject(ev);
+                if Self::handle_effects(eff) {
                     if let Some(w) = &self.window {
                         w.request_redraw();
                     }

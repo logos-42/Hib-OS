@@ -391,6 +391,11 @@ impl NetDriver {
 
     /// 注册驱动数量。
     pub fn registered_driver_count(&self) -> usize { self.drivers.len() }
+
+    /// 是否存在链路已启用的网卡（供 GUI 顶栏联网符号读取真实状态）。
+    pub fn any_link_up(&self) -> bool {
+        self.devices.values().any(|d| d.link_state == LinkState::Up)
+    }
 }
 
 // =======================================================================

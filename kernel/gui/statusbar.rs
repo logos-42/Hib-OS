@@ -7,12 +7,11 @@
 //!
 //! 顶栏本身也是入口：点击任意位置打开命令板（与 ⌘K 等价）。
 
-use super::palette;
-use super::surface::{argb, palette as pal, Rect, Surface};
+use super::surface::{palette as pal, Rect, Surface};
 use super::window::Window;
 
-/// 顶栏高度（像素）。与 `palette::TOPBAR_H` 保持一致。
-pub const HEIGHT: u32 = palette::TOPBAR_H as u32;
+/// 顶栏高度（像素）。统一指向新外壳常量，避免与 palette / desktop_shell 打架。
+pub const HEIGHT: u32 = super::desktop_shell::TOPBAR_H as u32;
 
 /// 画顶栏。调用时机：窗口与任务栏之后、命令板之前。
 pub fn draw(
@@ -64,7 +63,7 @@ pub fn draw(
     let hint = "⌘K";
     let hw = Surface::text_width(hint, 1) as i32;
     let hx = w - cw - hw - 22;
-    dst.fill_round_rect(Rect::new(hx, 4, hw + 12, 14), 4, pal::SURFACE0);
+    dst.fill_round_rect(Rect::new(hx, 4, (hw + 12) as u32, 14), 4, pal::SURFACE0);
     dst.draw_text(hx + 6, 8, hint, pal::SUBTEXT0, 1);
 
     let stats = format!("win {}  frame {}", windows.len(), frames);
@@ -89,7 +88,7 @@ pub fn hit(y: i32) -> bool {
     (0..HEIGHT as i32).contains(&y)
 }
 
-fn clock_hms() -> String {
+pub fn clock_hms() -> String {
     let secs = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
@@ -136,7 +135,6 @@ mod tests {
 
     #[test]
     fn bg_matches_palette() {
-        let _ = argb(255, 0, 0, 0);
         assert_eq!(BG, pal::MANTLE);
     }
 }

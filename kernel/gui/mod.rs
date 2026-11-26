@@ -18,22 +18,31 @@ pub mod agent_workspace;
 pub mod bmp;
 pub mod compositor;
 pub mod compositor_ext;
+pub mod conversation;
 pub mod file_manager;
 pub mod gesture;
 pub mod input;
+pub mod intent;
 pub mod notification;
+#[path = "palette.rs"]
+pub mod command_palette;
 pub mod permission_center;
 pub mod png;
 pub mod shell;
+pub mod statusbar;
 pub mod system_monitor;
 pub mod task_workspace;
 pub mod taskbar;
 pub mod terminal;
+pub mod text_render;
 pub mod theme;
 pub mod settings;
+pub mod semantic_runtime;
+pub mod desktop_shell;
 pub mod surface;
 pub mod wallpaper;
 pub mod widget;
+pub mod workspace;
 pub mod window;
 pub mod wm;
 
@@ -47,7 +56,7 @@ use crate::event::{
     event_bus, EventFilter, EventSubscriber, SystemEvent, SystemEventType,
 };
 
-use compositor::{Compositor, Wallpaper};
+use compositor::Compositor;
 use surface::{argb, palette, Surface};
 use window::Window;
 
@@ -126,7 +135,8 @@ pub fn ensure_demo() {
 ///
 /// 布局按 960×600 屏幕手工排过：四扇窗全部落在可视区域内且互不压边。
 pub fn build_demo(comp: &mut Compositor) {
-    comp.set_wallpaper(Wallpaper::Nebula);
+    // 极简干净风：默认使用深色冷调壁纸，而不是红色 sunset/nebula。
+    let _ = comp.use_named_wallpaper("circuit");
     let (sw, sh) = (comp.width() as i32, comp.height() as i32);
 
     // 1. 控制台（键盘输入闭环）

@@ -474,10 +474,13 @@ mod tests {
 mod win_fiber {
     use std::ffi::c_void;
 
+    // 保持 Win32 原名以便与 windows 分支的 extern 声明一一对应。
+    #[allow(non_snake_case)]
     pub unsafe fn ConvertThreadToFiber(_lp: *mut c_void) -> *mut c_void {
         std::ptr::null_mut()
     }
 
+    #[allow(non_snake_case)]
     pub unsafe fn CreateFiberEx(
         _commit: usize,
         _reserve: usize,
@@ -488,6 +491,7 @@ mod win_fiber {
         std::ptr::null_mut()
     }
 
+    #[allow(non_snake_case)]
     pub unsafe fn SwitchToFiber(_handle: *mut c_void) {}
 }
 

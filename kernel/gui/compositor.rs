@@ -304,12 +304,13 @@ impl Compositor {
             let is_focused = focused == Some(self.windows[idx].id);
             self.windows[idx].render(&mut frame, is_focused);
         }
+        // 全屏工作区覆盖窗口层（桌面入口 → 全屏页面）。
+        super::workspace::workspaces().lock().unwrap().draw(&mut frame);
         draw_cursor(&mut frame, self.cursor.0, self.cursor.1);
-        // 任务栏在最上层，且能反映当前窗口与壁纸状态。
-        let wp = super::wallpaper::bank().lock().unwrap().name.clone();
-        let bar_status = format!("win={} wp={}", self.windows.len(), wp);
-        self.taskbar
-            .draw(&mut frame, &self.windows, focused, &bar_status);
+        // 高级工具：命令板（隐藏入口 ⌘K）画在最上层。
+        super::command_palette::render(&mut frame, &self.windows);
+        // 桌面外壳（极简顶栏 + 网格图标 + 三态 Dock）在最上层。
+        super::desktop_shell::draw_shell(&mut frame, &self.windows, focused);
         self.frame = frame;
         self.frames += 1;
         self.last_compose_ns = get_time_ns().saturating_sub(began);

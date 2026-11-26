@@ -40,6 +40,10 @@ pub enum Event {
     MouseUp { x: i32, y: i32, button: MouseButton },
     Wheel { x: i32, y: i32, delta: i32 },
     KeyDown(Key),
+    /// 触摸按下 / 移动 / 抬起（触摸屏 / 触控板）。
+    TouchDown { id: u64, x: i32, y: i32 },
+    TouchMove { id: u64, x: i32, y: i32 },
+    TouchUp { id: u64, x: i32, y: i32 },
     /// 窗口关闭请求（真实窗口后端用）。
     CloseRequested,
     /// 需要重绘（后端在 Resized / 定时器里发）。
@@ -119,6 +123,20 @@ impl InputQueue {
 
 /// 把事件应用到合成器，返回副作用列表。
 pub fn dispatch(comp: &mut Compositor, ev: &Event) -> Vec<Effect> {
+    // 命令板已打开时，它优先消费所有按键（含 Esc 关闭），避免被工作区快捷键抢走。
+    if super::command_palette::is_open() {
+        if let Some(effects) = super::command_palette::intercept(comp, ev) {
+            return effects;
+        }
+    }
+    // 优先级 1：工作区 / 意图路由（Esc 回桌面、⌘K 高级工具、⌘Tab 切页、快捷键）。
+    if let Some(effects) = dispatch_intent_first(comp, ev) {
+        return effects;
+    }
+    // 优先级 2：命令板隐藏入口（⌘K 打开）。
+    if let Some(effects) = super::command_palette::intercept(comp, ev) {
+        return effects;
+    }
     match ev {
         Event::MouseMove { x, y } => {
             comp.set_cursor(*x, *y);
@@ -249,8 +267,165 @@ pub fn dispatch(comp: &mut Compositor, ev: &Event) -> Vec<Effect> {
                 Key::Left | Key::Right | Key::Escape | Key::Other(_) => vec![],
             }
         }
+        Event::TouchDown { id, x, y } => {
+            let now = now_ms();
+            super::gesture::gesture_recognizer()
+                .lock()
+                .unwrap()
+                .touch_down(*id, *x, *y, now);
+            vec![Effect::Redraw]
+        }
+        Event::TouchMove { id, x, y } => {
+            let now = now_ms();
+            let mut gr = super::gesture::gesture_recognizer().lock().unwrap();
+            gr.touch_move(*id, *x, *y, now);
+            let gesture = gr.recognize();
+            drop(gr);
+            apply_gesture_intent(gesture);
+            vec![Effect::Redraw]
+        }
+        Event::TouchUp { id, x, y } => {
+            let now = now_ms();
+            let down = touch_down_time(*id).unwrap_or(now);
+            let mut gr = super::gesture::gesture_recognizer().lock().unwrap();
+            gr.touch_up(*id, *x, *y, now);
+            let gesture = gr.recognize_after_up(*id, *x, *y, down, now);
+            drop(gr);
+            clear_touch_down_time(*id);
+            apply_gesture_intent(gesture);
+            vec![Effect::Redraw]
+        }
         Event::CloseRequested => vec![],
         Event::Redraw => vec![Effect::Redraw],
+    }
+}
+
+/// 意图优先分发：只处理明确的工作区级意图，返回 `Some` 表示事件已被消费。
+fn dispatch_intent_first(comp: &mut Compositor, ev: &Event) -> Option<Vec<Effect>> {
+    let key_name = match ev {
+        Event::KeyDown(Key::Escape) => Some("Escape"),
+        Event::KeyDown(Key::Tab) => None,
+        Event::KeyDown(Key::Other(s)) if s.eq_ignore_ascii_case("cmdk") => Some("CmdK"),
+        Event::KeyDown(Key::Other(s)) if s.eq_ignore_ascii_case("cmdtab") => Some("CmdTab"),
+        Event::KeyDown(Key::Other(s)) if s.eq_ignore_ascii_case("cmdshift tab") => Some("CmdShiftTab"),
+        _ => None,
+    };
+    if let Some(name) = key_name {
+        if let Some(intent) = super::intent::IntentRouter::resolve_key(name) {
+            let mut ws = super::workspace::workspaces().lock().unwrap();
+            if ws.handle_intent(intent.clone()) {
+                // ⌘K 进「高级工具」全屏页，同时打开命令板（保留 CHANNEL / Effect::Command 能力）。
+                if name == "CmdK" {
+                    if let Ok(mut p) = super::command_palette::palette().lock() {
+                        p.open();
+                    }
+                }
+                return Some(vec![Effect::Redraw]);
+            }
+        }
+    }
+    if let Event::MouseDown { x, y, button: MouseButton::Left } = ev {
+        // 顶栏左图标（x<24 且 y<TOPBAR_H）点击 → 回桌面；顶栏其余区域不再打开命令板。
+        if *y < super::desktop_shell::TOPBAR_H && *x < 24 {
+            super::workspace::workspaces()
+                .lock()
+                .unwrap()
+                .handle_intent(super::intent::Intent::ReturnDesktop);
+            return Some(vec![Effect::Redraw]);
+        }
+        // Dock 图标命中 → 打开对应全屏工作区页面；优先于旧任务栏命中。
+        if let Some(page) = super::desktop_shell::dock::hit_page(*x, *y, comp.width(), comp.height()) {
+            super::workspace::workspaces()
+                .lock()
+                .unwrap()
+                .handle_intent(super::intent::Intent::OpenPage(page));
+            return Some(vec![Effect::Redraw]);
+        }
+    }
+    let _ = comp;
+    None
+}
+
+fn now_ms() -> u64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+fn touch_times() -> &'static std::sync::Mutex<std::collections::BTreeMap<u64, u64>> {
+    static TIMES: std::sync::OnceLock<std::sync::Mutex<std::collections::BTreeMap<u64, u64>>> =
+        std::sync::OnceLock::new();
+    TIMES.get_or_init(|| std::sync::Mutex::new(std::collections::BTreeMap::new()))
+}
+
+fn touch_down_time(id: u64) -> Option<u64> {
+    touch_times().lock().unwrap().get(&id).copied()
+}
+
+fn clear_touch_down_time(id: u64) {
+    touch_times().lock().unwrap().remove(&id);
+}
+
+fn apply_gesture_intent(gesture: Option<super::gesture::Gesture>) {
+    if let Some(g) = gesture {
+        if let Some(intent) = super::intent::IntentRouter::resolve_gesture(g) {
+            super::workspace::workspaces().lock().unwrap().handle_intent(intent);
+        }
+    }
+}
+
+/// 把一串触摸事件路由成意图列表（供测试与无 GUI 环境验证）。
+pub fn route_touch_events(events: &[Event]) -> Vec<super::intent::Intent> {
+    let mut recognizer = super::gesture::GestureRecognizer::new();
+    let mut intents = Vec::new();
+    let mut downs: std::collections::BTreeMap<u64, u64> = std::collections::BTreeMap::new();
+    for ev in events {
+        match ev {
+            Event::TouchDown { id, x, y } => {
+                let t = recognizer.active_count() as u64 * 10;
+                recognizer.touch_down(*id, *x, *y, t);
+                downs.insert(*id, t);
+            }
+            Event::TouchMove { id, x, y } => {
+                let t = downs.get(id).copied().unwrap_or(0) + 50;
+                recognizer.touch_move(*id, *x, *y, t);
+                if let Some(g) = recognizer.recognize() {
+                    if let Some(i) = super::intent::IntentRouter::resolve_gesture(g) {
+                        intents.push(i);
+                    }
+                }
+            }
+            Event::TouchUp { id, x, y } => {
+                let down = downs.remove(id).unwrap_or(0);
+                let t = down + 100;
+                recognizer.touch_up(*id, *x, *y, t);
+                if let Some(g) = recognizer.recognize_after_up(*id, *x, *y, down, t) {
+                    if let Some(i) = super::intent::IntentRouter::resolve_gesture(g) {
+                        intents.push(i);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    intents
+}
+
+#[cfg(test)]
+mod touch_tests {
+    use super::*;
+
+    #[test]
+    fn touch_event_dispatches_to_gesture() {
+        let events = vec![
+            Event::TouchDown { id: 1, x: 300, y: 100 },
+            Event::TouchMove { id: 1, x: 100, y: 100 },
+            Event::TouchUp { id: 1, x: 100, y: 100 },
+        ];
+        let intents = route_touch_events(&events);
+        assert!(intents.contains(&super::super::intent::Intent::NextPage));
     }
 }
 
