@@ -313,6 +313,9 @@ impl TcpLayer {
                     // 对端 SYN-ACK 确认了我们的 SYN
                     new_state = TcpState::Established;
                     let sock = self.sockets.get_mut(&key).unwrap();
+                    // SYN 已被确认：推进 snd_una，否则 ACK 计算会把它
+                    // 误当作未确认数据，多弹发送缓冲字节、多占窗口。
+                    sock.snd_una = seg.ack;
                     sock.rcv_nxt = seg.seq.wrapping_add(1);
                     sock.snd_wnd = seg.window;
                     out.push(TcpSegment::new(seg.dst_port, seg.src_port, sock.snd_nxt,
@@ -330,6 +333,9 @@ impl TcpLayer {
             TcpState::SynReceived => {
                 if is_ack && seg.ack == self.snd_nxt_of(&key) {
                     new_state = TcpState::Established;
+                    if let Some(s) = self.sockets.get_mut(&key) {
+                        s.snd_una = seg.ack; // 客户端 ACK 确认了服务端的 SYN
+                    }
                 }
             }
             TcpState::Established => {
@@ -417,9 +423,10 @@ impl TcpLayer {
         };
         sock.snd_wnd = window;
         let newly = ack.wrapping_sub(sock.snd_una) as usize;
-        if newly > 0 && newly <= sock.send_buf.len() {
+        if newly > 0 {
+            // send() 发送时已从 send_buf 取走数据，ACK 只推进 snd_una；
+            // 再弹缓冲区会二次丢弃已发字节（如 ABC 被确认却丢掉 DEF）。
             sock.snd_una = ack;
-            for _ in 0..newly { sock.send_buf.pop_front(); }
         }
     }
 
@@ -613,16 +620,15 @@ mod tests {
         layer.receive_segment(peer_ip(), test_ip(), &out[0].serialize(test_ip(), peer_ip())).unwrap();
 
         let ck = client_key(50001);
-        // 白箱：把对端通告窗口压到 3 字节
+        // 白箱：把对端通告窗口压到 3 字节，验证滑动窗口限制。
         if let Some(s) = layer.sockets.get_mut(&ck) {
             s.snd_wnd = 3;
         }
 
         let segs = layer.send(&ck, b"abcdefghij").unwrap();
-        // 未被 ACK 的 SYN 占一个序号，3 字节窗口只剩 2 字节可用。
         assert_eq!(segs.len(), 1);
-        assert_eq!(segs[0].payload.len(), 2);
-        assert_eq!(&segs[0].payload, b"ab");
+        assert_eq!(segs[0].payload.len(), 3);
+        assert_eq!(&segs[0].payload, b"abc");
         // 窗口耗尽，再发应不再出段
         let segs2 = layer.send(&ck, b"more").unwrap();
         assert_eq!(segs2.len(), 0);

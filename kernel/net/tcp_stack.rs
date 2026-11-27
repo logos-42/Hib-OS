@@ -681,9 +681,10 @@ impl TcpStack {
         };
         sock.snd_wnd = window;
         let newly = ack.wrapping_sub(sock.snd_una) as usize;
-        if newly > 0 && newly <= sock.send_buf.len() {
+        if newly > 0 {
+            // send() 发送时已从 send_buf 取走数据，ACK 只推进 snd_una；
+            // 再弹缓冲区会二次丢弃已发字节。
             sock.snd_una = ack;
-            for _ in 0..newly { sock.send_buf.pop_front(); }
             *new_ack = true;
             *newly_acked_bytes = newly as u32;
             // RTT 测量：若被确认序号覆盖了 rtt_seq，则采样 RTT。
@@ -713,10 +714,12 @@ impl TcpStack {
         sock.send_buf.extend(data.iter().cloned());
 
         let mut out = Vec::new();
-        let window = sock.sendable();
+        let mut window = sock.sendable();
         while !sock.send_buf.is_empty() && window > 0 {
             let seg_len = sock.send_buf.len().min(DEFAULT_MSS).min(window);
-            let chunk: Vec<u8> = sock.send_buf.iter().take(seg_len).cloned().collect();
+            // 必须真正取走已发送字节，并在每轮重算可用窗口；
+            // 否则缓冲区永不缩短，循环会无限分配直到 OOM。
+            let chunk: Vec<u8> = sock.send_buf.drain(..seg_len).collect();
             let seg = TcpSegment::new(sock.key.local_port, sock.remote_port, sock.snd_nxt,
                                       sock.rcv_nxt, TCP_ACK | TCP_PSH,
                                       sock.rcv_window(), chunk);
@@ -726,6 +729,7 @@ impl TcpStack {
             sock.rtt_start = Some(Instant::now());
             out.push(seg);
             self.stats.segments_sent += 1;
+            window = sock.sendable();
         }
         Ok(out)
     }
@@ -1016,7 +1020,8 @@ mod tests {
 
         // client 收到 SYN-ACK -> 回 ACK，进入 Established。
         let synack = out[0].clone();
-        let out = st.process_segment(test_ip(), peer_ip(), &synack.serialize(test_ip(), peer_ip())).unwrap();
+        // SYN-ACK 由对端发来：src=peer_ip, dst=test_ip，否则无法命中客户端连接键。
+        let out = st.process_segment(peer_ip(), test_ip(), &synack.serialize(peer_ip(), test_ip())).unwrap();
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].flags & TCP_ACK, TCP_ACK);
         assert_eq!(out[0].ack, synack.seq.wrapping_add(1));
@@ -1121,12 +1126,17 @@ mod tests {
         // server 只收到第一段，重复 ACK 三次（对 s1_seq+4）。
         let d1 = segs1[0].serialize(test_ip(), peer_ip());
         st.process_segment(peer_ip(), test_ip(), &d1).unwrap();
-        let ack_of_s1 = TcpSegment::new(8080, 50001, s1_seq.wrapping_add(4), s1_seq.wrapping_add(4), TCP_ACK, 65535, Vec::new());
+        // 重复 ACK 由客户端发往服务端子连接（src=50001 → dst=8080）；
+        // 确认号必须等于服务端 snd_una（未前进）才会被计为 dup ACK。
+        // 服务端子连接 ISS = 1000 + 8080，SYN 占一个序号，snd_una = ISS+1。
+        let server_una = 1000 + 8080 + 1;
+        let ack_of_s1 = TcpSegment::new(50001, 8080, s1_seq.wrapping_add(4), server_una, TCP_ACK, 65535, Vec::new());
         let ack_bytes = ack_of_s1.serialize(peer_ip(), test_ip());
         for _ in 0..3 {
             let _ = st.process_segment(peer_ip(), test_ip(), &ack_bytes).unwrap();
         }
-        let conn = st.conns.get(&ck).unwrap();
+        // 重复 ACK 打在服务端子连接（local 8080）上，检查它的拥塞状态。
+        let conn = st.conns.get(&child_key(8080)).unwrap();
         assert!(conn.congest.dup_acks >= 3);
         assert_eq!(conn.congest.state, CongestState::FastRecovery);
     }
@@ -1183,7 +1193,9 @@ mod tests {
 
         // 对端 ACK 我们的 FIN。
         let fin_seq = fin_segs[0].seq;
-        let ack_of_fin = TcpSegment::new(8080, 50001, (1000 + 8080) + 1,
+        // ACK 由客户端发出（src=50001 → dst=8080），否则会命中错误的 socket
+        // 而使被关闭的子连接停留在 FinWait1。
+        let ack_of_fin = TcpSegment::new(50001, 8080, (1000 + 8080) + 1,
                                          fin_seq.wrapping_add(1), TCP_ACK, 65535, Vec::new());
         let out = st.process_segment(peer_ip(), test_ip(), &ack_of_fin.serialize(peer_ip(), test_ip())).unwrap();
         assert_eq!(st.state_of(&ck).unwrap(), TcpState::FinWait2);
@@ -1215,6 +1227,7 @@ mod tests {
         let mut st = make_stack();
         st.bind(1, 8080).unwrap();
         st.listen(8080).unwrap();
+        st.bind(1, 50002).unwrap(); // connect 要求本地端口先绑定
 
         let syn = st.connect(1, 50002, peer_ip(), 8080).unwrap();
         let mut bytes = syn[0].serialize(peer_ip(), test_ip());
