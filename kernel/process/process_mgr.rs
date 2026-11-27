@@ -105,7 +105,9 @@ mod tests {
     #[test]
     fn spawn_and_exit() {
         let pid = spawn_process("test", 10, "perception");
-        assert_eq!(ProcessManager::count(), 1);
+        // 全局注册表被同进程内其它并行测试共享，count 只增不减，
+        // 这里只断言可见性，不断言精确数量。
+        assert!(ProcessManager::count() >= 1);
         assert!(ProcessManager::get(pid).is_some());
         assert!(exit_process(pid));
         assert!(wait_process(pid));

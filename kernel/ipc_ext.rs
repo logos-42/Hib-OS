@@ -165,6 +165,9 @@ impl SharedMemoryManager {
     }
 
     /// 销毁共享内存段。
+    ///
+    /// 只解除命名映射并置销毁标记，段本身保留：
+    /// 后续按 id 的 read/write/attach 必须报告「已销毁」而不是「不存在」。
     pub fn destroy(&mut self, id: ShmId) -> Result<(), String> {
         let name = self
             .segments
@@ -175,7 +178,6 @@ impl SharedMemoryManager {
         let shm = self.segments.get_mut(&name).unwrap();
         shm.destroyed = true;
         self.name_to_id.remove(&name);
-        self.segments.remove(&name);
         Ok(())
     }
 
@@ -655,9 +657,10 @@ impl UnixSocketPair {
         }
     }
 
-    /// 从 fd1 的对端接收数据（即从 buf2 读取，对应从 fd2 发送来的）。
+    /// 从 fd 读取对端发来的数据：fd1 读 buf1（fd2 发送写入的），
+    /// fd2 读 buf2（fd1 发送写入的）—— 与 sendto 的写入方向一致。
     pub fn recvfrom(&mut self, to: SockFd, buf: &mut [u8]) -> Result<usize, String> {
-        let src = if to == self.fd1 { &mut self.buf2 } else if to == self.fd2 { &mut self.buf1 } else { return Err("未知的套接字 fd".to_string()); };
+        let src = if to == self.fd1 { &mut self.buf1 } else if to == self.fd2 { &mut self.buf2 } else { return Err("未知的套接字 fd".to_string()); };
         let n = buf.len().min(src.len());
         for i in 0..n {
             buf[i] = src.pop_front().unwrap();
@@ -947,8 +950,9 @@ impl SemaphoreManager {
         if let Some(s) = self.semaphores.get_mut(&name) {
             s.destroy();
         }
+        // 只解除命名映射：段保留销毁标记，
+        // 后续 wait/post 按 id 查询时报告「已销毁」而不是「不存在」。
         self.name_to_id.remove(&name);
-        self.semaphores.remove(&name);
         Ok(())
     }
 

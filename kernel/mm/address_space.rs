@@ -248,8 +248,9 @@ mod tests {
     fn create_and_translate() {
         let pid: ExecId = 200;
         let _space = create_address_space(pid).unwrap();
-        // 先映射再翻译。
-        map_vaddr(pid, 0x1000, 0x5000, PteFlags::PRESENT | PteFlags::READ_WRITE | PteFlags::USER)
+        // map_vaddr 的第三个参数是页框号（paddr = pfn << PAGE_SHIFT）。
+        // pfn=0x5 → paddr=0x5000；页内偏移 0x100 → paddr=0x5100。
+        map_vaddr(pid, 0x1000, 0x5, PteFlags::PRESENT | PteFlags::READ_WRITE | PteFlags::USER)
             .unwrap();
         let (paddr, offset) = translate_vaddr(pid, 0x1000 + 0x100).unwrap();
         assert_eq!(paddr, 0x5000 + 0x100);
