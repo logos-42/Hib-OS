@@ -128,6 +128,9 @@ impl AgentTable {
     }
 
     /// 状态迁移（校验合法性）。
+    ///
+    /// 迁移表是唯一真相：`exit`/`kill` 也必须走这里，
+    /// 终态（Completed/Failed）不可再迁出 —— 重复退出会被拒绝。
     pub fn set_state(&mut self, pid: Pid, to: AgentPcbState) -> Result<(), AgentError> {
         let p = self.pcb.get_mut(&pid).ok_or(AgentError::NotFound { pid })?;
         let ok = matches!(
@@ -136,9 +139,16 @@ impl AgentTable {
                 | (AgentPcbState::Ready, AgentPcbState::Running)
                 | (AgentPcbState::Running, AgentPcbState::Ready)
                 | (AgentPcbState::Running, AgentPcbState::Blocked)
+                | (AgentPcbState::Blocked, AgentPcbState::Ready)
+                // 活跃态 → 终态：exit / kill 的唯一入口。
+                | (AgentPcbState::Created, AgentPcbState::Completed)
+                | (AgentPcbState::Created, AgentPcbState::Failed)
+                | (AgentPcbState::Ready, AgentPcbState::Completed)
+                | (AgentPcbState::Ready, AgentPcbState::Failed)
                 | (AgentPcbState::Running, AgentPcbState::Completed)
                 | (AgentPcbState::Running, AgentPcbState::Failed)
-                | (AgentPcbState::Blocked, AgentPcbState::Ready)
+                | (AgentPcbState::Blocked, AgentPcbState::Completed)
+                | (AgentPcbState::Blocked, AgentPcbState::Failed)
         );
         if !ok {
             return Err(AgentError::BadState { from: p.state, to });
@@ -165,22 +175,21 @@ impl AgentTable {
         Ok(())
     }
 
-    /// 正常退出。
+    /// 正常退出。任何活跃态都可退出；已终态再退出被拒绝（走 `set_state` 校验）。
     pub fn exit(&mut self, pid: Pid, success: bool) -> Result<(), AgentError> {
-        let p = self.pcb.get_mut(&pid).ok_or(AgentError::NotFound { pid })?;
-        p.state = if success {
+        let to = if success {
             AgentPcbState::Completed
         } else {
             AgentPcbState::Failed
         };
+        self.set_state(pid, to)?;
         self.exit_count += 1;
         Ok(())
     }
 
-    /// 强制终止（等价于 SIGKILL，不校验状态）。
+    /// 强制终止（等价于 SIGKILL）。任何活跃态都可终止；已终态再终止被拒绝。
     pub fn kill(&mut self, pid: Pid) -> Result<(), AgentError> {
-        let p = self.pcb.get_mut(&pid).ok_or(AgentError::NotFound { pid })?;
-        p.state = AgentPcbState::Failed;
+        self.set_state(pid, AgentPcbState::Failed)?;
         self.kill_count += 1;
         Ok(())
     }
@@ -331,6 +340,24 @@ mod tests {
         assert_eq!(t.pcb(pid).unwrap().state, AgentPcbState::Failed);
         assert_eq!(t.kill_count, 1);
         assert!(t.spawn("worker-b", "x", CpuPriority::Low, None).is_err());
+    }
+
+    #[test]
+    fn terminal_state_is_absorbing() {
+        let mut t = AgentTable::new();
+        let pid = t.spawn("worker-c", "coder", CpuPriority::Low, None).unwrap();
+        t.exit(pid, true).unwrap();
+        assert_eq!(t.exit_count, 1);
+        // 终态不可迁出：重复 exit / kill 都必须被拒绝。
+        assert!(matches!(
+            t.exit(pid, true),
+            Err(AgentError::BadState { .. })
+        ));
+        assert!(matches!(t.kill(pid), Err(AgentError::BadState { .. })));
+        assert_eq!(t.exit_count, 1, "拒绝的迁移不得计数");
+        assert_eq!(t.kill_count, 0);
+        // exit 成功且 unblock 等 set_state 路径不再动它。
+        assert_eq!(t.pcb(pid).unwrap().state, AgentPcbState::Completed);
     }
 
     #[test]
