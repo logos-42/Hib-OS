@@ -31,15 +31,18 @@ pub fn block_submit(device: &str, block: u64, count: u64, write: bool, data: Vec
 }
 
 /// 完成一个请求。
+///
+/// 完成后请求立即从队列移除：同一 id 不可能被 `complete` 两次
+/// （第二次返回 `false`），队列长度也只统计未完成请求。
 pub fn block_complete(id: u64) -> bool {
     let mut g = rq_state().lock().unwrap();
-    if let Some(pos) = g.queue.iter().position(|r| r.id == id) {
-        if let Some(req) = g.queue.get_mut(pos) {
-            req.completed = true;
-            return true;
-        }
+    let before = g.queue.len();
+    g.queue.retain(|r| !(r.id == id && !r.completed));
+    // 没有这个 id，或它已被完成过 → 返回 false。
+    if g.queue.len() == before {
+        return false;
     }
-    false
+    true
 }
 
 /// 查询请求状态。

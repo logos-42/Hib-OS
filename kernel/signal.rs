@@ -760,24 +760,29 @@ mod tests {
 
     #[test]
     fn send_and_pending() {
-        let h = SignalHandler::new();
         signal_send(11, Signal::SIGINT);
         signal_send(11, Signal::SIGTERM);
         let pending = signal_pending(11);
         assert!(pending.contains(&Signal::SIGINT));
         assert!(pending.contains(&Signal::SIGTERM));
-        assert_eq!(h.sent_count(11, Signal::SIGINT), 1);
+        // 全局 API 与全局单例状态一致（不要混用本地 SignalHandler::new()）。
+        assert_eq!(
+            signal_handler().lock().unwrap().sent_count(11, Signal::SIGINT),
+            1
+        );
     }
 
     #[test]
     fn masked_signal_not_pending() {
-        let h = SignalHandler::new();
         signal_mask_add(12, Signal::SIGINT);
         signal_send(12, Signal::SIGINT);
         let pending = signal_pending(12);
         assert!(!pending.contains(&Signal::SIGINT));
         // 但 sent_count 仍记录
-        assert_eq!(h.sent_count(12, Signal::SIGINT), 1);
+        assert_eq!(
+            signal_handler().lock().unwrap().sent_count(12, Signal::SIGINT),
+            1
+        );
     }
 
     #[test]
@@ -800,13 +805,12 @@ mod tests {
 
     #[test]
     fn sigkill_always_default_terminates() {
-        let h = SignalHandler::new();
         // 即使注册了自定义处理，SIGKILL 也应终止进程
         signal_register_handler_fn(14, Signal::SIGKILL, |_| true);
         signal_send(14, Signal::SIGKILL);
         signal_deliver(14);
         assert!(signal_is_terminated(14));
-        assert_eq!(h.term_signal(14), Some(Signal::SIGKILL));
+        assert_eq!(signal_term_signal_of(14), Some(Signal::SIGKILL));
     }
 
     #[test]
@@ -839,12 +843,11 @@ mod tests {
 
     #[test]
     fn handler_return_false_terminates() {
-        let h = SignalHandler::new();
         signal_register_handler_fn(16, Signal::SIGUSR2, |_| false);
         signal_send(16, Signal::SIGUSR2);
         signal_deliver(16);
         assert!(signal_is_terminated(16));
-        assert_eq!(h.term_signal(16), Some(Signal::SIGUSR2));
+        assert_eq!(signal_term_signal_of(16), Some(Signal::SIGUSR2));
     }
 
     #[test]

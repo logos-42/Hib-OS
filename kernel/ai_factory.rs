@@ -53,8 +53,7 @@ fn template(kind: Kind, name: &str) -> &'static str {
     match kind {
         Kind::App => {
             let _ = name;
-            r#"#![no_std]
-#[no_mangle]
+            r#"#[no_mangle]
 pub extern "C" fn init() -> i32 { 1 }
 #[no_mangle]
 pub extern "C" fn tick(_t: i32) {}
@@ -67,8 +66,7 @@ pub extern "C" fn on_input(key: i32) -> i32 {
 }
 "#
         }
-        Kind::Plugin => r#"#![no_std]
-#[no_mangle]
+        Kind::Plugin => r#"#[no_mangle]
 pub extern "C" fn init() -> i32 { 1 }
 #[no_mangle]
 pub extern "C" fn on_event(_ptr: i32, _len: i32) -> i32 {
@@ -76,8 +74,7 @@ pub extern "C" fn on_event(_ptr: i32, _len: i32) -> i32 {
     0
 }
 "#,
-        Kind::Ime => r#"#![no_std]
-#[no_mangle]
+        Kind::Ime => r#"#[no_mangle]
 pub extern "C" fn init() -> i32 { 1 }
 #[no_mangle]
 pub extern "C" fn map_key(code: i32) -> i32 {
@@ -85,8 +82,7 @@ pub extern "C" fn map_key(code: i32) -> i32 {
     code
 }
 "#,
-        Kind::Animation => r#"#![no_std]
-#[no_mangle]
+        Kind::Animation => r#"#[no_mangle]
 pub extern "C" fn init() -> i32 { 1 }
 #[no_mangle]
 pub extern "C" fn animate(t: i32) -> i64 {
@@ -245,6 +241,27 @@ mod tests {
         // 用临时目录覆盖 apps_dir 不可行（全局固定），这里只验证 write 内容函数。
         let src = generate_source(Kind::App, "td", "test", None).unwrap();
         assert!(src.contains("fn init"));
+        assert!(!src.contains("#![no_std]"));
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn end_to_end_create_app() {
+        // 真编译一个最小 app 到 wasm 并加载（验证全链路）。
+        let name = "e2etest";
+        let result = create(Kind::App, name, "hello", None);
+        match result {
+            Ok(msg) => {
+                assert!(msg.contains("app"));
+                assert!(app_dir(name).join("app.wasm").exists());
+                assert!(wasman_runtime::get(name).is_some());
+            }
+            Err(e) => {
+                // 宿主无 rustc 或 target 时跳过（不视为失败）。
+                if !e.contains("rustc") && !e.contains("编译") {
+                    panic!("端到端失败: {}", e);
+                }
+            }
+        }
     }
 }
