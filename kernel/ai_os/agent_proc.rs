@@ -396,8 +396,20 @@ mod tests {
     fn bad_transition_rejected() {
         let mut t = AgentTable::new();
         let pid = t.spawn("a", "x", CpuPriority::Low, None).unwrap();
+        // 迁移表之外的非法路径：Ready 不能直接 Blocked（必须经 Running）。
+        t.set_state(pid, AgentPcbState::Ready).unwrap();
         assert!(matches!(
-            t.set_state(pid, AgentPcbState::Completed),
+            t.set_state(pid, AgentPcbState::Blocked),
+            Err(AgentError::BadState { .. })
+        ));
+        // 终态不可迁出。
+        t.kill(pid).unwrap();
+        assert!(matches!(
+            t.set_state(pid, AgentPcbState::Running),
+            Err(AgentError::BadState { .. })
+        ));
+        assert!(matches!(
+            t.set_state(pid, AgentPcbState::Ready),
             Err(AgentError::BadState { .. })
         ));
     }

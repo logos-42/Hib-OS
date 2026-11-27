@@ -55,10 +55,16 @@ pub fn block_complete(id: u64) -> bool {
     true
 }
 
-/// 查询请求状态。
+/// 查询请求状态：队列中 = `Some(false)`，已完成 = `Some(true)`，不存在 = `None`。
 pub fn block_request_status(id: u64) -> Option<bool> {
     let g = rq_state().lock().unwrap();
-    g.queue.iter().find(|r| r.id == id).map(|r| r.completed)
+    if g.queue.iter().any(|r| r.id == id) {
+        return Some(false);
+    }
+    if g.finished.contains(&id) {
+        return Some(true);
+    }
+    None
 }
 
 /// 队列长度。

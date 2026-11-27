@@ -116,7 +116,7 @@ pub enum SignalAction {
     /// 忽略该信号。
     Ignore,
     /// 自定义处理函数：(signal) -> 是否继续运行。
-    Handler(Box<dyn Fn(Signal) -> bool + Send + Sync>),
+    Handler(std::sync::Arc<dyn Fn(Signal) -> bool + Send + Sync>),
 }
 
 impl Clone for SignalAction {
@@ -124,7 +124,9 @@ impl Clone for SignalAction {
         match self {
             SignalAction::Default => SignalAction::Default,
             SignalAction::Ignore => SignalAction::Ignore,
-            SignalAction::Handler(_) => SignalAction::Default, // 闭包不可克隆，降级为默认
+            // Arc 共享闭包：克隆必须保留 Handler 语义，
+            // 降级为 Default 会让注册的处理函数永远不被调用。
+            SignalAction::Handler(f) => SignalAction::Handler(std::sync::Arc::clone(f)),
         }
     }
 }
@@ -424,7 +426,7 @@ impl SignalHandler {
         F: Fn(Signal) -> bool + Send + Sync + 'static,
     {
         self.process_state_mut(pid)
-            .register_action(signal, SignalAction::Handler(Box::new(handler)));
+            .register_action(signal, SignalAction::Handler(std::sync::Arc::new(handler)));
     }
 
     /// 返回进程对某信号的处理方式（未注册则返回默认）。
@@ -914,16 +916,18 @@ mod tests {
     #[test]
     fn signal_send_set_delivers() {
         let _h = SignalHandler::new();
+        // 批量投递用非致命信号（SIGCHLD/SIGPIPE 默认 Ignore）：
+        // SIGUSR1/SIGUSR2 的默认动作是终止，第一个就会中断本轮投递。
         let mut set = SigSet::empty();
-        set.add(Signal::SIGUSR1);
-        set.add(Signal::SIGUSR2);
+        set.add(Signal::SIGCHLD);
+        set.add(Signal::SIGPIPE);
         signal_send_set(18, &set);
         let pending = signal_pending(18);
-        assert!(pending.contains(&Signal::SIGUSR1));
-        assert!(pending.contains(&Signal::SIGUSR2));
+        assert!(pending.contains(&Signal::SIGCHLD));
+        assert!(pending.contains(&Signal::SIGPIPE));
         let delivered = signal_deliver(18);
-        assert!(delivered.contains(&Signal::SIGUSR1));
-        assert!(delivered.contains(&Signal::SIGUSR2));
+        assert!(delivered.contains(&Signal::SIGCHLD));
+        assert!(delivered.contains(&Signal::SIGPIPE));
     }
 
     #[test]
