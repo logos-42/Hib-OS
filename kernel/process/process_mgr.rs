@@ -41,15 +41,25 @@ impl ProcessManager {
         g.processes.get(&pid).cloned()
     }
 
-    /// 设置进程状态。
+    /// 设置进程状态（非法迁移返回 false，状态保持不变）。
     pub fn set_state(pid: ProcessId, state: ProcessState) -> bool {
         let mut g = pm_state().lock().unwrap();
         match g.processes.get_mut(&pid) {
-            Some(pcb) => {
-                pcb.state = state;
-                true
-            }
+            Some(pcb) => crate::process::transition(pcb, state).is_ok(),
             None => false,
+        }
+    }
+
+    /// 回收僵尸进程：Zombie → Terminated，对应 TLA+ 中的 Reap(p) 公平动作。
+    pub fn reap(pid: ProcessId) -> bool {
+        Self::set_state_if(pid, ProcessState::Zombie, ProcessState::Terminated)
+    }
+
+    fn set_state_if(pid: ProcessId, from: ProcessState, to: ProcessState) -> bool {
+        let mut g = pm_state().lock().unwrap();
+        match g.processes.get_mut(&pid) {
+            Some(pcb) if pcb.state == from => crate::process::transition(pcb, to).is_ok(),
+            _ => false,
         }
     }
 
@@ -107,5 +117,27 @@ mod tests {
         assert!(ProcessManager::set_state(pid, ProcessState::Running));
         let pcb = ProcessManager::get(pid).unwrap();
         assert_eq!(pcb.state, ProcessState::Running);
+    }
+
+    #[test]
+    fn terminal_state_cannot_be_resurrected() {
+        // 对应 model/ProcLifeCurrent.tla 的 Zombie -> Created 反例。
+        let pid = spawn_process("z", 5, "memory");
+        assert!(exit_process(pid));
+        assert_eq!(ProcessManager::get(pid).unwrap().state, ProcessState::Zombie);
+        assert!(!ProcessManager::set_state(pid, ProcessState::Created));
+        assert!(!ProcessManager::set_state(pid, ProcessState::Running));
+        assert!(!crate::process::process_sched::make_ready(pid));
+        assert_eq!(ProcessManager::get(pid).unwrap().state, ProcessState::Zombie);
+    }
+
+    #[test]
+    fn zombie_is_reaped_then_absorbing() {
+        let pid = spawn_process("r", 5, "memory");
+        assert!(exit_process(pid));
+        assert!(ProcessManager::reap(pid));
+        assert_eq!(ProcessManager::get(pid).unwrap().state, ProcessState::Terminated);
+        assert!(!ProcessManager::set_state(pid, ProcessState::Ready));
+        assert!(!ProcessManager::reap(pid));
     }
 }

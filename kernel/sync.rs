@@ -287,16 +287,18 @@ struct PmState<T> {
     owner: Option<std::thread::ThreadId>,
     owner_exec: Option<ExecId>,
     owner_prio: CpuPriority,
+    /// 重入深度：只有归零才真正释放锁。TLA+ 反例证明单一 owner 字段不够。
+    depth: usize,
+    /// 本锁曾替谁抬升过优先级；最终释放时恢复的是它，而非最后一个 guard 的持有者。
+    boosted_exec: Option<ExecId>,
     contention: u64,
     boosts: u64,
 }
 
-/// 持锁守卫。drop 时清 owner + 恢复优先级 + 唤醒下一个。
+/// 持锁守卫。drop 时递减深度；归零时清 owner + 恢复被抬升者 + 唤醒下一个。
 pub struct PmGuard<'a, T> {
     mutex: &'a PriorityMutex<T>,
     thread: std::thread::ThreadId,
-    exec: Option<ExecId>,
-    boosted: bool,
 }
 
 impl<T> PriorityMutex<T> {
@@ -307,6 +309,8 @@ impl<T> PriorityMutex<T> {
                 owner: None,
                 owner_exec: None,
                 owner_prio: CpuPriority::Medium,
+                depth: 0,
+                boosted_exec: None,
                 contention: 0,
                 boosts: 0,
             }),
@@ -317,9 +321,7 @@ impl<T> PriorityMutex<T> {
     /// 加锁（阻塞 + 优先级继承）。
     pub fn lock(&self, priority: CpuPriority) -> PmGuard<'_, T> {
         let me_thread = std::thread::current().id();
-        let me_exec = exec::current();
         let mut g = self.inner.lock().unwrap();
-        let mut boosted = false;
 
         loop {
             match g.owner {
@@ -332,7 +334,10 @@ impl<T> PriorityMutex<T> {
                         g.boosts += 1;
                         if let Some(o) = g.owner_exec {
                             exec::boost_priority(o, priority);
-                            boosted = true;
+                            // 记录被抬升的是「当前持有者」，最终由它释放时恢复。
+                            // 旧实现把 boosted 记在等待者自己的 guard 上，导致
+                            // boost/restore 主体错位。
+                            g.boosted_exec = Some(o);
                         }
                     }
                     g = self.cv.wait(g).unwrap();
@@ -340,43 +345,45 @@ impl<T> PriorityMutex<T> {
             }
         }
 
-        g.owner = Some(me_thread);
-        g.owner_exec = me_exec;
-        g.owner_prio = priority;
+        if g.owner == Some(me_thread) {
+            // 重入：只加深层级，不得覆盖 owner/owner_exec/owner_prio，
+            // 否则内层守卫 drop 会提前释放锁。
+            g.depth += 1;
+        } else {
+            g.owner = Some(me_thread);
+            g.owner_exec = exec::current();
+            g.owner_prio = priority;
+            g.depth = 1;
+        }
         drop(g);
         PmGuard {
             mutex: self,
             thread: me_thread,
-            exec: me_exec,
-            boosted,
         }
     }
 
     /// 不阻塞尝试。
     pub fn try_lock(&self, priority: CpuPriority) -> Option<PmGuard<'_, T>> {
         let me_thread = std::thread::current().id();
-        let me_exec = exec::current();
         let mut g = self.inner.lock().unwrap();
         match g.owner {
             None => {
                 g.owner = Some(me_thread);
-                g.owner_exec = me_exec;
+                g.owner_exec = exec::current();
                 g.owner_prio = priority;
+                g.depth = 1;
                 drop(g);
                 Some(PmGuard {
                     mutex: self,
                     thread: me_thread,
-                    exec: me_exec,
-                    boosted: false,
                 })
             }
             Some(o) if o == me_thread => {
+                g.depth += 1;
                 drop(g);
                 Some(PmGuard {
                     mutex: self,
                     thread: me_thread,
-                    exec: me_exec,
-                    boosted: false,
                 })
             }
             Some(_) => None,
@@ -386,8 +393,9 @@ impl<T> PriorityMutex<T> {
     pub fn status(&self) -> String {
         let g = self.inner.lock().unwrap();
         format!(
-            "pmutex held={} prio={} contention={} boosts={}",
+            "pmutex held={} depth={} prio={} contention={} boosts={}",
             g.owner.is_some(),
+            g.depth,
             g.owner_prio.name(),
             g.contention,
             g.boosts
@@ -409,21 +417,26 @@ impl<T> PmGuard<'_, T> {
 impl<T> Drop for PmGuard<'_, T> {
     fn drop(&mut self) {
         let mut g = self.mutex.inner.lock().unwrap();
-        if g.owner == Some(self.thread) {
-            g.owner = None;
-            g.owner_exec = None;
-            g.owner_prio = CpuPriority::Medium;
-            drop(g);
-            if self.boosted {
-                if let Some(o) = self.exec {
-                    exec::restore_priority(o);
-                }
-            }
-            // 互斥锁释放即通道事件：唤醒等待该锁的调度域令牌。
-            let key = format!("pmutex/{:p}", self.mutex);
-            exec::signal(&key);
-            self.mutex.cv.notify_one();
+        if g.owner != Some(self.thread) {
+            return;
         }
+        g.depth -= 1;
+        if g.depth > 0 {
+            // 外层守卫仍持有：锁不得释放，优先级也不得恢复。
+            return;
+        }
+        let boosted = g.boosted_exec.take();
+        g.owner = None;
+        g.owner_exec = None;
+        g.owner_prio = CpuPriority::Medium;
+        drop(g);
+        if let Some(o) = boosted {
+            exec::restore_priority(o);
+        }
+        // 互斥锁释放即通道事件：唤醒等待该锁的调度域令牌。
+        let key = format!("pmutex/{:p}", self.mutex);
+        exec::signal(&key);
+        self.mutex.cv.notify_one();
     }
 }
 
@@ -594,6 +607,38 @@ mod tests {
         t.join().unwrap();
         let total = m.lock(CpuPriority::Low).with(|d| *d);
         assert_eq!(total, 2);
+    }
+
+    #[test]
+    fn priority_mutex_reentrant_drop_does_not_release_early() {
+        // 对应 model/PmutexCurrent.tla 的 L1a → L1b → U1b 反例：
+        // 旧实现在 drop 内层守卫时把 owner 清空，外层守卫仍持有却已可被他人加锁。
+        let m = Arc::new(PriorityMutex::new(0usize));
+        let outer = m.lock(CpuPriority::High);
+        {
+            let inner = m.lock(CpuPriority::Low);
+            assert!(m.status().contains("depth=2"));
+            drop(inner);
+        }
+        assert!(m.status().contains("depth=1"));
+
+        let m2 = m.clone();
+        let got = Arc::new(AtomicUsize::new(0));
+        let g2 = got.clone();
+        let t = std::thread::spawn(move || {
+            let g = m2.lock(CpuPriority::Critical);
+            g2.store(1, O::SeqCst);
+            drop(g);
+        });
+        std::thread::sleep(Duration::from_millis(30));
+        assert_eq!(
+            got.load(O::SeqCst),
+            0,
+            "外层守卫仍持有时其他线程不得获得锁"
+        );
+        drop(outer);
+        t.join().unwrap();
+        assert_eq!(got.load(O::SeqCst), 1);
     }
 
     #[test]

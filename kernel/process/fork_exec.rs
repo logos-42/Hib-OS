@@ -12,11 +12,15 @@ pub fn fork(parent_pid: ProcessId) -> Result<ProcessId, String> {
         .processes
         .get(&parent_pid)
         .ok_or("父进程不存在")?;
+    if parent.is_terminal() {
+        return Err("父进程已终止，不能 fork".to_string());
+    }
     let mut child = parent.clone();
     child.pid = child_id;
     child.parent = Some(parent_pid);
-    child.state = ProcessState::Ready;
+    child.state = ProcessState::Created;
     child.token_used = 0;
+    crate::process::transition(&mut child, ProcessState::Ready)?;
     g.processes.insert(child_id, child);
     if let Some(p) = g.processes.get_mut(&parent_pid) {
         p.children.push(child_id);
@@ -32,7 +36,7 @@ pub fn exec(pid: ProcessId, model_instance: u64) -> Result<(), String> {
         .get_mut(&pid)
         .ok_or("进程不存在")?;
     pcb.model_instance = Some(model_instance);
-    pcb.state = ProcessState::Ready;
+    crate::process::transition(pcb, ProcessState::Ready)?;
     Ok(())
 }
 
@@ -73,5 +77,14 @@ mod tests {
     #[test]
     fn exec_nonexistent_process() {
         assert!(exec(ProcessId::new(999), 42).is_err());
+    }
+
+    #[test]
+    fn fork_and_exec_reject_terminal_process() {
+        let parent = crate::process::process_mgr::spawn_process("p", 10, "governance");
+        let child = fork(parent).unwrap();
+        crate::process::process_mgr::exit_process(child);
+        assert!(exec(child, 99).is_err(), "exec 不得复活僵尸进程");
+        assert!(fork(child).is_err(), "不得从僵尸进程 fork");
     }
 }

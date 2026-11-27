@@ -37,6 +37,38 @@ pub enum ProcessState {
     Terminated,
 }
 
+impl ProcessState {
+    /// 合法迁移表，与 model/ProcLifeFixed.tla 的 Transit 集合一一对应。
+    /// 终态是吸收态，唯一例外是 Zombie → Terminated（回收）。
+    pub fn can_transit(self, next: ProcessState) -> bool {
+        use ProcessState::*;
+        match (self, next) {
+            (Terminated, Terminated) | (Zombie, Zombie) | (Zombie, Terminated) => true,
+            (Terminated, _) | (Zombie, _) => false,
+            (_, Zombie) | (_, Terminated) => true,
+            (Created, Ready) | (Created, Running) | (Created, Blocked) => true,
+            (Ready, Ready) | (Ready, Running) | (Ready, Blocked) => true,
+            (Running, Ready) | (Running, Running) | (Running, Blocked) => true,
+            (Blocked, Ready) | (Blocked, Blocked) => true,
+            _ => false,
+        }
+    }
+}
+
+/// 唯一的状态写入口。所有对 `Pcb.state` 的修改都要经过这里，
+/// 非法迁移被拒绝且**不修改状态**（与 exec.rs::transition 同一不变式）。
+pub(crate) fn transition(pcb: &mut Pcb, next: ProcessState) -> Result<(), String> {
+    if pcb.state.can_transit(next) {
+        pcb.state = next;
+        Ok(())
+    } else {
+        Err(format!(
+            "process: 非法迁移 {:?} -> {:?}（已拒绝）",
+            pcb.state, next
+        ))
+    }
+}
+
 /// PCB：进程控制块，独立上下文与可调度单元。
 #[derive(Clone, Debug)]
 pub struct Pcb {
