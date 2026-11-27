@@ -57,7 +57,7 @@ impl Fit {
 
 /// 内置风格名（后两个直接读本机 `.wiki` 里的真实壁纸图）。
 pub const STYLES: &[&str] = &[
-    "sunset", "aurora", "circuit", "nebula", "grid", "solid", "wiki1", "wiki2",
+    "mist", "sunset", "aurora", "circuit", "nebula", "grid", "solid", "wiki1", "wiki2",
 ];
 
 /// 本机 wiki 里的两张壁纸图（PNG；`壁纸2.jpg` 已转换为同名 PNG）。
@@ -227,7 +227,7 @@ pub fn bank() -> &'static Mutex<WallpaperBank> {
 /// 供 shell 的 `wallpaper` 命令同步像素桌面：把老名字映射到新风格。
 pub fn set_named(name: &str) -> Result<String, String> {
     let mapped = match name {
-        "default" | "hibos" => "circuit",
+        "default" | "hibos" => "mist",
         "deepseek" | "ai" | "consciousness" => "aurora",
         other => other,
     };
@@ -301,6 +301,14 @@ fn make_style(name: &str, w: u32, h: u32) -> Surface {
     for y in 0..h {
         for x in 0..w {
             let c = match name {
+                "mist" => {
+                    // 极淡蓝灰垂直渐变：干净、无网格、无纹样。
+                    let t = y as f32 / h as f32;
+                    let r = (22.0 + t * 6.0) as u8;
+                    let g = (26.0 + t * 8.0) as u8;
+                    let b = (38.0 + t * 12.0) as u8;
+                    argb(255, r, g, b)
+                }
                 "sunset" => {
                     let t = y as i32 * 255 / h as i32;
                     let (r, g, b) = if y < h * 2 / 3 {

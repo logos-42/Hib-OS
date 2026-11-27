@@ -40,6 +40,41 @@ fn link_up() -> bool {
     crate::drivers::net_driver::NetDriver::driver().lock().any_link_up()
 }
 
+/// 画状态图标：网络 / 输入法 / 音量 / 设置（12×12 几何图形，零字体依赖）。
+fn draw_status_icons(frame: &mut Surface, right: i32) {
+    let y = 4;
+    let x0 = right - 110;
+    let on = link_up();
+    let color = if on { ACCENT } else { OFFLINE };
+
+    // 1. 网络：三段递增信号条 + 圆点。
+    for (i, h) in [3, 5, 7].iter().enumerate() {
+        frame.fill_rect(x0 + i as i32 * 3, y + 9 - *h, 2, *h as u32, color);
+    }
+    frame.fill_rect(x0 + 9, y + 8, 2, 2, color);
+
+    // 2. 输入法：首字母 "A" 的几何笔画（英文态）；中文态用方块标记。
+    let ime_x = x0 + 18;
+    frame.draw_rect(ime_x, y + 2, 8, 8, TEXT, 1);
+    frame.fill_rect(ime_x + 2, y + 6, 4, 1, TEXT); // 中/英切换指示横线
+
+    // 3. 音量：梯形喇叭 + 两道声波。
+    let vol_x = x0 + 34;
+    frame.fill_rect(vol_x, y + 5, 2, 3, TEXT);
+    frame.fill_rect(vol_x + 2, y + 4, 2, 5, TEXT);
+    frame.fill_rect(vol_x + 4, y + 3, 1, 7, TEXT);
+    frame.fill_rect(vol_x + 6, y + 5, 2, 1, TEXT);
+    frame.fill_rect(vol_x + 6, y + 7, 2, 1, TEXT);
+
+    // 4. 设置：齿轮（圆环 + 四个齿）。
+    let set_x = x0 + 50;
+    frame.draw_rect(set_x + 1, y + 3, 6, 6, TEXT, 1);
+    frame.fill_rect(set_x + 3, y + 1, 2, 2, TEXT);
+    frame.fill_rect(set_x + 3, y + 9, 2, 2, TEXT);
+    frame.fill_rect(set_x, y + 5, 2, 2, TEXT);
+    frame.fill_rect(set_x + 7, y + 5, 2, 2, TEXT);
+}
+
 /// 本地时钟 HH:MM:SS。
 pub fn clock_hms() -> String {
     let secs = std::time::SystemTime::now()
@@ -63,18 +98,19 @@ pub fn draw(frame: &mut Surface) {
     frame.draw_rect(8, 6, 8, 8, ACCENT, 1);
     frame.fill_rect(11, 9, 2, 2, ACCENT);
 
-    // 右侧：真实 token 速率 / 联网 / 时钟 / 通知徽章。
-    // 顶栏仅 20px：用 9px 字号并将行顶对齐到 y=2，避免文字视觉偏下。
-    use super::super::text_render;
+    // 右侧状态栏：draw_text 的 y 是“行顶”，内部会加字体 ascent（约 9px），
+    // 因此传 -6 让 9px 字形实际落在 row 3..10，垂直居中于 20px 顶栏。
+    use crate::gui::text_render;
     let right = w as i32 - 8;
+    const TEXT_Y: i32 = -6;
     let rate = format!("{}t/s", token_rate());
-    text_render::draw_text(frame, right - 110, 2, &rate, 9.0, TEXT, right);
-    let (net_label, net_color) = if link_up() { ("~", ACCENT) } else { ("x", OFFLINE) };
-    text_render::draw_text(frame, right - 70, 2, net_label, 9.0, net_color, right);
+    text_render::draw_text(frame, right - 150, TEXT_Y, &rate, 9.0, TEXT, right);
+    // 状态图标：网络 / 输入法 / 音量 / 设置（用几何图形，零字体依赖）。
+    draw_status_icons(frame, right);
     let clock = clock_hms();
-    text_render::draw_text(frame, right - 56, 2, &clock, 9.0, TEXT, right);
+    text_render::draw_text(frame, right - 44, TEXT_Y, &clock, 9.0, TEXT, right);
     if super::super::notification::unread_notifications() > 0 {
-        frame.fill_rect(right - 4, 7, 3, 3, 0xFFE8C07A);
+        frame.fill_rect(right - 2, 5, 2, 2, 0xFFE8C07A);
     }
 }
 
@@ -98,5 +134,24 @@ mod tests {
     fn token_rate_starts_without_fake_value() {
         // 速率来自真实计数器；至少不应是写死的 12。
         assert!(token_rate() < u64::MAX);
+    }
+
+    #[test]
+    fn status_text_is_vertically_centered() {
+        // 文字应落在顶栏上半区（row 2..11），不能贴底边（row 18）。
+        let mut s = Surface::filled(200, TOPBAR_H as u32, BG);
+        crate::gui::text_render::draw_text(&mut s, 90, -6, "23:45", 9.0, TEXT, 196);
+        let mut min_y = TOPBAR_H;
+        let mut max_y = 0;
+        for y in 0..TOPBAR_H {
+            for x in 88..196 {
+                if s.get(x, y) != Some(BG) {
+                    min_y = min_y.min(y);
+                    max_y = max_y.max(y);
+                }
+            }
+        }
+        assert!(min_y >= 2, "文字顶部不应贴边: {}", min_y);
+        assert!(max_y <= TOPBAR_H / 2 + 2, "文字应居中偏上: {}", max_y);
     }
 }

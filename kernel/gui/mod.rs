@@ -143,7 +143,7 @@ pub fn ensure_demo() {
 /// 默认桌面：干净空桌面，只保留壁纸 + 外壳，不预开任何窗口。
 /// 终端由 Ctrl+Alt+T 打开；状态页由桌面图标 / Dock 打开。
 pub fn build_desktop(comp: &mut Compositor) {
-    let _ = comp.use_named_wallpaper("circuit");
+    let _ = comp.use_named_wallpaper("mist");
 }
 
 /// 构建一套能证明各子系统都在跑的演示桌面。
@@ -151,7 +151,7 @@ pub fn build_desktop(comp: &mut Compositor) {
 /// 布局按 960×600 屏幕手工排过：四扇窗全部落在可视区域内且互不压边。
 pub fn build_demo(comp: &mut Compositor) {
     // 极简干净风：默认使用深色冷调壁纸，而不是红色 sunset/nebula。
-    let _ = comp.use_named_wallpaper("circuit");
+    let _ = comp.use_named_wallpaper("mist");
     let (sw, sh) = (comp.width() as i32, comp.height() as i32);
 
     // 1. 控制台（键盘输入闭环）
