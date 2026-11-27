@@ -123,6 +123,22 @@ impl InputQueue {
 
 /// 把事件应用到合成器，返回副作用列表。
 pub fn dispatch(comp: &mut Compositor, ev: &Event) -> Vec<Effect> {
+    // 最高优先级：AI 浮层打开时，所有键盘输入归它（流式输入框）。
+    if super::ai_overlay::is_open() {
+        if let Some(effects) = dispatch_overlay(ev) {
+            return effects;
+        }
+    }
+    // 桌面空白处右键 → 打开全宽 AI 浮层。
+    if let Event::MouseDown { x, y, button: MouseButton::Right } = ev {
+        if comp.hit_test(*x, *y).is_none() {
+            super::ai_overlay::overlay()
+                .lock()
+                .unwrap()
+                .open_at(*x, *y, comp.width(), comp.height());
+            return vec![Effect::Redraw];
+        }
+    }
     // 命令板已打开时，它优先消费所有按键（含 Esc 关闭），避免被工作区快捷键抢走。
     if super::command_palette::is_open() {
         if let Some(effects) = super::command_palette::intercept(comp, ev) {
@@ -320,6 +336,38 @@ pub fn dispatch(comp: &mut Compositor, ev: &Event) -> Vec<Effect> {
     }
 }
 
+/// AI 浮层键盘分发：返回 `Some` 表示事件已被消费。
+fn dispatch_overlay(ev: &Event) -> Option<Vec<Effect>> {
+    match ev {
+        Event::KeyDown(Key::Escape) => {
+            super::ai_overlay::overlay().lock().unwrap().close();
+            Some(vec![Effect::Redraw])
+        }
+        Event::KeyDown(Key::Enter) => {
+            let mut o = super::ai_overlay::overlay().lock().unwrap();
+            let intent = o.submit();
+            if let Some(intent) = intent {
+                super::workspace::workspaces()
+                    .lock()
+                    .unwrap()
+                    .handle_intent(intent);
+            }
+            Some(vec![Effect::Redraw])
+        }
+        Event::KeyDown(Key::Backspace) => {
+            let mut o = super::ai_overlay::overlay().lock().unwrap();
+            o.input.pop();
+            Some(vec![Effect::Redraw])
+        }
+        Event::KeyDown(Key::Char(c)) => {
+            let mut o = super::ai_overlay::overlay().lock().unwrap();
+            o.input.push(*c);
+            Some(vec![Effect::Redraw])
+        }
+        _ => None,
+    }
+}
+
 /// 意图优先分发：只处理明确的工作区级意图，返回 `Some` 表示事件已被消费。
 fn dispatch_intent_first(comp: &mut Compositor, ev: &Event) -> Option<Vec<Effect>> {
     let key_name = match ev {
@@ -328,8 +376,15 @@ fn dispatch_intent_first(comp: &mut Compositor, ev: &Event) -> Option<Vec<Effect
         Event::KeyDown(Key::Other(s)) if s.eq_ignore_ascii_case("cmdk") => Some("CmdK"),
         Event::KeyDown(Key::Other(s)) if s.eq_ignore_ascii_case("cmdtab") => Some("CmdTab"),
         Event::KeyDown(Key::Other(s)) if s.eq_ignore_ascii_case("cmdshift tab") => Some("CmdShiftTab"),
+        Event::KeyDown(Key::Other(s)) if s.eq_ignore_ascii_case("ctrl+alt+t") => Some("CtrlAltT"),
         _ => None,
     };
+    // Ctrl+Alt+T 直接打开浮动终端窗口（不属于工作区页面）。
+    if key_name == Some("CtrlAltT") {
+        let id = comp.open_terminal("TERMINAL", 560, 340, "hib> ");
+        comp.focus(id);
+        return Some(vec![Effect::Focused(Some(id)), Effect::Redraw]);
+    }
     if let Some(name) = key_name {
         if let Some(intent) = super::intent::IntentRouter::resolve_key(name) {
             let mut ws = super::workspace::workspaces().lock().unwrap();

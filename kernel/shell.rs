@@ -1356,6 +1356,20 @@ impl Shell {
                 Ok(msg) => sh_println!("{}", msg),
                 Err(e) => sh_println!("gui wallpaper 失败: {}", e),
             },
+            "theme" => {
+                let name = rest.trim();
+                if name.is_empty() {
+                    let mgr = gui::theme::theme_manager().lock().unwrap();
+                    sh_println!("当前主题: {}  可用: {}", mgr.current_theme().name, mgr.theme_names().join(", "));
+                } else {
+                    let ok = gui::theme::theme_manager().lock().unwrap().set_theme(name);
+                    if ok {
+                        sh_println!("主题已切换为 {}", name);
+                    } else {
+                        sh_println!("未知主题: {}", name);
+                    }
+                }
+            }
             "font" | "fnt" => {
                 match rest.trim().to_ascii_lowercase().as_str() {
                     "serif" | "song" | "宋体" => gui::text_render::set_family(0),

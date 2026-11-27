@@ -3446,6 +3446,38 @@ impl Default for ModelServingEngine {
 // 全局单例
 // =====================================================================================
 
+/// AI 浮层仪表盘用的真实指标快照（模型名 / 缓存命中率 / 上下文占用）。
+#[derive(Clone, Debug)]
+pub struct AiMetricsSnapshot {
+    pub model_name: String,
+    pub cache_hit_rate: f32,
+    pub context_chars: usize,
+    pub context_limit: usize,
+}
+
+/// 读取当前 AI 运行指标，供 GUI 仪表盘显示。
+pub fn ai_metrics_snapshot() -> AiMetricsSnapshot {
+    let model_name = crate::llm::provider("deepseek")
+        .map(|p| p.model)
+        .unwrap_or_else(|| "local-model".to_string());
+    let cache_hit_rate = model_serving_engine()
+        .lock()
+        .map(|e| e.response_cache.hit_rate())
+        .unwrap_or(0.0);
+    let (context_chars, context_limit) = {
+        let reg = model_registry().lock().unwrap();
+        let used: usize = reg.instances().values().map(|i| i.kv_used as usize).sum();
+        let limit = reg
+            .models()
+            .values()
+            .map(|m| m.ctx_window as usize)
+            .max()
+            .unwrap_or(4096);
+        (used, limit)
+    };
+    AiMetricsSnapshot { model_name, cache_hit_rate, context_chars, context_limit }
+}
+
 static SERVING: OnceLock<Mutex<ModelServingEngine>> = OnceLock::new();
 
 pub fn model_serving_engine() -> &'static Mutex<ModelServingEngine> {

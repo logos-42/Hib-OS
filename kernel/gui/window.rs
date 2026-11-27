@@ -235,7 +235,8 @@ impl Window {
         let left = px - r.x;
         let right = r.right() - px;
         let bottom = r.bottom() - py;
-        if left < 0 || right < 0 || bottom < 0 || py < r.y {
+        // 标题栏区域不参与左右边拉伸（拖拽=移动窗口）。
+        if left < 0 || right < 0 || bottom < 0 || py < r.y + TITLEBAR_H as i32 {
             return None;
         }
         let l = left <= CORNER;

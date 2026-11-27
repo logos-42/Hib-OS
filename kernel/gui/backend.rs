@@ -15,7 +15,7 @@ use winit::event::{
     ElementState, MouseButton as WinitMouseButton, MouseScrollDelta, TouchPhase, WindowEvent,
 };
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
-use winit::keyboard::{Key as WinitKey, NamedKey};
+use winit::keyboard::{Key as WinitKey, ModifiersState, NamedKey};
 use winit::window::{Window as WinitWindow, WindowId};
 
 use super::input::{Effect, Event, Key, MouseButton};
@@ -35,6 +35,8 @@ struct App {
     last_error: Option<String>,
     /// 上一帧的光标闪烁相位（用于检测变化触发重绘）。
     last_cursor_phase: bool,
+    /// 当前修饰键状态（用于组合快捷键）。
+    modifiers: ModifiersState,
 }
 
 impl App {
@@ -47,6 +49,7 @@ impl App {
             size_px: (super::DEFAULT_WIDTH, super::DEFAULT_HEIGHT),
             last_error: None,
             last_cursor_phase: super::terminal_cursor_visible(),
+            modifiers: ModifiersState::empty(),
         }
     }
 
@@ -227,8 +230,23 @@ impl ApplicationHandler for App {
                     }
                 }
             }
+            WindowEvent::ModifiersChanged(mods) => {
+                self.modifiers = mods.state();
+            }
             WindowEvent::KeyboardInput { event, .. } => {
                 if event.state != ElementState::Pressed {
+                    return;
+                }
+                // Ctrl+Alt+T：打开终端（不受焦点窗口影响）。
+                if self.modifiers.control_key()
+                    && self.modifiers.alt_key()
+                    && matches!(&event.logical_key, WinitKey::Character(s) if s.eq_ignore_ascii_case("t"))
+                {
+                    let eff = inject(Event::KeyDown(Key::Other("ctrl+alt+t".into())));
+                    Self::handle_effects(eff);
+                    if let Some(w) = &self.window {
+                        w.request_redraw();
+                    }
                     return;
                 }
                 let mut keys: Vec<Key> = Vec::new();
@@ -278,6 +296,13 @@ impl ApplicationHandler for App {
         // 终端光标闪烁：相位变化时请求重绘（默认 600ms 周期）。
         if super::terminal_cursor_visible() != self.last_cursor_phase {
             self.last_cursor_phase = !self.last_cursor_phase;
+            if let Some(w) = &self.window {
+                w.request_redraw();
+            }
+        }
+        // AI 浮层流式输出：推进动画并在内容变化时重绘。
+        if super::ai_overlay::is_open() {
+            super::ai_overlay::tick();
             if let Some(w) = &self.window {
                 w.request_redraw();
             }

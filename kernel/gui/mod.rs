@@ -13,6 +13,7 @@
 //! 3. 没有「预览专用代码」：终端里看到的 ANSI 预览和导出的 BMP、
 //!    以及 `gui run` 打开的真实窗口，用的是同一份像素。
 
+pub mod ai_overlay;
 pub mod apps;
 pub mod agent_workspace;
 pub mod bmp;
@@ -135,8 +136,14 @@ pub fn ensure_demo() {
     init_event_subscription();
     let mut d = desktop().lock().unwrap();
     if d.windows().is_empty() {
-        build_demo(&mut d);
+        build_desktop(&mut d);
     }
+}
+
+/// 默认桌面：干净空桌面，只保留壁纸 + 外壳，不预开任何窗口。
+/// 终端由 Ctrl+Alt+T 打开；状态页由桌面图标 / Dock 打开。
+pub fn build_desktop(comp: &mut Compositor) {
+    let _ = comp.use_named_wallpaper("circuit");
 }
 
 /// 构建一套能证明各子系统都在跑的演示桌面。

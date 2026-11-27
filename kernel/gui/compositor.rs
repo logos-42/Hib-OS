@@ -277,6 +277,8 @@ impl Compositor {
         super::command_palette::render(&mut frame, &self.windows);
         // 桌面外壳（极简顶栏 + 网格图标 + 三态 Dock）在最上层。
         super::desktop_shell::draw_shell(&mut frame, &self.windows, focused);
+        // AI 全宽浮层（右键自然语言入口）压在最上。
+        super::ai_overlay::draw(&mut frame);
         self.frame = frame;
         self.frames += 1;
         self.last_compose_ns = get_time_ns().saturating_sub(began);

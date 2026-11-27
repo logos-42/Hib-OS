@@ -56,6 +56,8 @@ pub enum AuthLevel {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Intent {
     OpenPage(PageKind),
+    /// 打开一个浮动终端窗口（默认桌面无终端）。
+    OpenTerminal,
     ReturnDesktop,
     NextPage,
     PrevPage,
@@ -122,6 +124,7 @@ impl IntentRouter {
             "Cmd2" => Some(Intent::OpenPage(PageKind::Tasks)),
             "Cmd3" => Some(Intent::OpenPage(PageKind::Permission)),
             "Cmd4" => Some(Intent::OpenPage(PageKind::Files)),
+            "ctrl+alt+t" => Some(Intent::OpenTerminal),
             _ => None,
         }
     }

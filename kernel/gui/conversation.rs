@@ -38,6 +38,7 @@ impl Conversation {
             Some(Intent::NextPage) => Reply::plain("已切换到下一个页面"),
             Some(Intent::PrevPage) => Reply::plain("已切换到上一个页面"),
             Some(Intent::ToggleDock) => Reply::plain("已展开底部图标"),
+            Some(Intent::OpenTerminal) => Reply::plain("已为你打开终端"),
             Some(Intent::RequestPermission { what, level }) => Reply {
                 feedback: format!("“{}”需要你的确认", what),
                 page: None,
