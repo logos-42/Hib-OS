@@ -67,14 +67,12 @@ impl CpuTopology {
 #[derive(Debug)]
 pub struct SpinLock<T> {
     data: std::sync::Mutex<T>,
-    locked: std::sync::atomic::AtomicBool,
 }
 
 impl<T> SpinLock<T> {
     pub fn new(data: T) -> Self {
         Self {
             data: std::sync::Mutex::new(data),
-            locked: std::sync::atomic::AtomicBool::new(false),
         }
     }
 
@@ -83,20 +81,11 @@ impl<T> SpinLock<T> {
     }
 
     pub fn try_lock(&self) -> Option<std::sync::MutexGuard<'_, T>> {
-        if self
-            .locked
-            .compare_exchange(false, true, std::sync::atomic::Ordering::Acquire, std::sync::atomic::Ordering::Relaxed)
-            .is_ok()
-        {
-            Some(self.data.lock().unwrap())
-        } else {
-            None
-        }
+        // 直接委托给内层 Mutex：旧的 atomic `locked` 标志与 data mutex
+        // 不同步（lock() 不置位），CAS 成功后阻塞式 lock() 会自死锁。
+        self.data.try_lock().ok()
     }
 
-    pub fn unlock(&self) {
-        self.locked.store(false, std::sync::atomic::Ordering::Release);
-    }
 }
 
 impl<T> Default for SpinLock<T>
