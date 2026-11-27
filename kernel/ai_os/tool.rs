@@ -277,8 +277,13 @@ pub fn status() -> String {
 /// * `status` 摘要
 pub fn tool_act(payload: &str) -> Result<String, String> {
     let mut it = payload.split_whitespace();
+    let op = it.next();
+    // status 只读：status() 内部自取 tools() 锁，不得持锁调用。
+    if op == Some("status") {
+        return Ok(status());
+    }
     let mut reg = tools().lock().unwrap();
-    match it.next() {
+    match op {
         Some("list") | None => {
             let mut out = String::from("工具注册表:\n");
             for name in reg.names() {
@@ -413,8 +418,13 @@ mod tests {
     fn builtin_init_is_idempotent() {
         init();
         init();
-        let reg = tools().lock().unwrap();
-        assert!(reg.find("fs.read").is_some());
+        // 守卫必须在调用 status() 前释放：
+        // status() 内部会再次锁 tools()，std Mutex 不可重入。
+        let found = {
+            let reg = tools().lock().unwrap();
+            reg.find("fs.read").is_some()
+        };
+        assert!(found);
         assert!(status().contains("tools="));
     }
 }

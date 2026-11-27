@@ -213,13 +213,17 @@ impl ChannelNotifier {
 
     /// 向指定通道的全部订阅者发送事件。
     pub fn notify_subscribers(&self, channel: &str, event: &ChannelEvent) {
-        let list = match self.subscribers.get(channel) {
-            Some(l) => l,
-            None => return,
-        };
-        for cb in list {
-            (cb)(channel, event);
+        for cb in self.callbacks_for(channel) {
+            cb(channel, event);
         }
+    }
+
+    /// 克隆指定通道的订阅者列表（Arc 廉价克隆）。
+    ///
+    /// 调用方应在**释放本通知器的锁之后**再逐个调用回调：
+    /// 回调内若重新进入任何与本通知器相关的互斥量，持锁分发就是自死锁。
+    pub fn callbacks_for(&self, channel: &str) -> Vec<Arc<ChannelSubscriber>> {
+        self.subscribers.get(channel).cloned().unwrap_or_default()
     }
 
     /// 返回指定通道的订阅者数量。
@@ -314,10 +318,10 @@ impl ExtendedChannelRegistry {
     pub fn close(&self, name: &str) -> Result<(), ChannelError> {
         self.base.lock().unwrap().close(name)?;
         self.meta.lock().unwrap().remove(name);
-        self.notifier
-            .lock()
-            .unwrap()
-            .notify_subscribers(name, &ChannelEvent::Deleted);
+        let cbs = self.notifier.lock().unwrap().callbacks_for(name);
+        for cb in cbs {
+            cb(name, &ChannelEvent::Deleted);
+        }
         Ok(())
     }
 
@@ -330,10 +334,12 @@ impl ExtendedChannelRegistry {
                     m.record_sense();
                     m.last_epoch = lease::epoch(name);
                 }
-                self.notifier
-                    .lock()
-                    .unwrap()
-                    .notify_subscribers(name, &ChannelEvent::Updated);
+                // 先克隆订阅者列表再释放通知器锁，回调在锁外执行，
+                // 避免回调重入任何相关互斥量时自死锁。
+                let cbs = self.notifier.lock().unwrap().callbacks_for(name);
+                for cb in cbs {
+                    cb(name, &ChannelEvent::Updated);
+                }
             }
             Err(_) => {
                 if let Some(m) = self.meta.lock().unwrap().get_mut(name) {
@@ -353,10 +359,10 @@ impl ExtendedChannelRegistry {
                     m.record_act();
                     m.last_epoch = lease::epoch(name);
                 }
-                self.notifier
-                    .lock()
-                    .unwrap()
-                    .notify_subscribers(name, &ChannelEvent::Updated);
+                let cbs = self.notifier.lock().unwrap().callbacks_for(name);
+                for cb in cbs {
+                    cb(name, &ChannelEvent::Updated);
+                }
             }
             Err(_) => {
                 if let Some(m) = self.meta.lock().unwrap().get_mut(name) {
@@ -369,9 +375,14 @@ impl ExtendedChannelRegistry {
 
     /// 注册一个订阅者，关注指定通道的变更。返回订阅者 ID。
     pub fn subscribe(&self, channel: &str, callback: ChannelSubscriber) -> u64 {
-        let id = next_sub_id().lock().unwrap();
-        let id = *id;
-        *next_sub_id().lock().unwrap() += 1;
+        // MutexGuard 绑定到变量会存活到作用域结束；
+        // 期间再对同一互斥量 lock 就是自死锁，必须在同一临界区内完成自增。
+        let id = {
+            let mut g = next_sub_id().lock().unwrap();
+            let id = *g;
+            *g += 1;
+            id
+        };
         self.notifier.lock().unwrap().subscribe(channel, callback);
         if let Some(m) = self.meta.lock().unwrap().get_mut(channel) {
             m.subscribers.push(id);

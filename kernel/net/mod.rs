@@ -279,7 +279,7 @@ impl NetStack {
         for _ in 0..16 {
             let mut progressed = false;
             while let Some(bytes) = self.device.recv() {
-                let _ = self.process_frame(&bytes);
+                    let _ = self.process_frame(&bytes);
                 progressed = true;
             }
             while let Some(frame) = self.out_queue.pop_front() {

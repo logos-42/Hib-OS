@@ -863,9 +863,15 @@ pub fn wm_sense() -> String {
 /// `act gui/wm <op> ...`：对窗口执行行动。
 pub fn wm_act(payload: &str) -> Result<String, String> {
     let mut it = payload.split_whitespace();
+    let op = it.next().unwrap_or("").to_string();
+    // list 是只读操作：wm_sense 内部自取 window_manager 锁，
+    // 绝不能在本函数持锁期间调用（std Mutex 不可重入）。
+    if op == "list" {
+        return Ok(wm_sense());
+    }
     let mgr = window_manager();
     let mut m = mgr.lock().unwrap();
-    match it.next().unwrap_or("") {
+    match op.as_str() {
         "create" => {
             let title = it.next().unwrap_or("window");
             let x: i32 = it.next().and_then(|v| v.parse().ok()).unwrap_or(100);
@@ -908,7 +914,7 @@ pub fn wm_act(payload: &str) -> Result<String, String> {
             if m.focus(id) {
                 Ok(format!("窗口 #{} 已聚焦", id))
             } else {
-                Err(format!("无法聚焦窗口 #{}", id))
+                Err(format!("窗口 #{} 不存在，无法聚焦", id))
             }
         }
         "blur" => {
@@ -992,7 +998,7 @@ pub fn wm_act(payload: &str) -> Result<String, String> {
             m.tile_windows();
             Ok("窗口已平铺布局".to_string())
         }
-        "list" => Ok(wm_sense()),
+        "list" => Ok(wm_sense()), // 已在持锁前处理，此处不会到达
         _ => Err(
             "用法: wm create|show|hide|close|focus|blur|minimize|maximize|restore|move|resize|z_order|raise|alt_tab|layout|tile|list".to_string(),
         ),

@@ -88,7 +88,7 @@ pub trait EventSubscriber: Send + Sync {
 pub struct EventBus {
     next_id: Mutex<SystemEventId>,
     next_sub_id: Mutex<SubscriptionId>,
-    subscribers: Mutex<Vec<(SubscriptionId, EventFilter, Box<dyn EventSubscriber>)>>,
+    subscribers: Mutex<Vec<(SubscriptionId, EventFilter, Arc<dyn EventSubscriber>)>>,
     history: Mutex<VecDeque<SystemEvent>>,
     max_history: usize,
 }
@@ -115,12 +115,18 @@ impl EventBus {
             }
         }
 
-        // 分发给订阅者
-        let subs = self.subscribers.lock().unwrap();
-        for (_, filter, subscriber) in subs.iter() {
-            if Self::matches_filter(&event, filter) {
-                subscriber.on_event(&event);
-            }
+        // 分发给订阅者：先克隆匹配列表（Arc 廉价克隆）再锁外回调。
+        // std Mutex 不可重入，订阅者回调内若再发布事件/查询总线，
+        // 持锁分发就会自死锁。
+        let matched: Vec<Arc<dyn EventSubscriber>> = {
+            let subs = self.subscribers.lock().unwrap();
+            subs.iter()
+                .filter(|(_, filter, _)| Self::matches_filter(&event, filter))
+                .map(|(_, _, s)| Arc::clone(s))
+                .collect()
+        };
+        for subscriber in matched {
+            subscriber.on_event(&event);
         }
     }
 
@@ -139,7 +145,7 @@ impl EventBus {
         self.subscribers
             .lock()
             .unwrap()
-            .push((id, filter, subscriber));
+            .push((id, filter, Arc::from(subscriber)));
         id
     }
 

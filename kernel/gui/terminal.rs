@@ -1038,9 +1038,14 @@ pub fn terminal_sense() -> String {
 /// `act gui/terminal <op> ...`：对终端执行行动。
 pub fn terminal_act(payload: &str) -> Result<String, String> {
     let mut it = payload.split_whitespace();
+    let op = it.next().unwrap_or("").to_string();
+    // list 只读：terminal_sense 内部自取同一把锁，不得持锁调用。
+    if op == "list" {
+        return Ok(terminal_sense());
+    }
     let t = terminal();
     let mut t = t.lock().unwrap();
-    match it.next().unwrap_or("") {
+    match op.as_str() {
         "write" => {
             let text = it.next().ok_or("缺少文本")?;
             t.write_str(text);
@@ -1098,7 +1103,6 @@ pub fn terminal_act(payload: &str) -> Result<String, String> {
             Ok(format!("光标样式={:?}", style))
         }
         "render" => Ok(t.render()),
-        "list" => Ok(terminal_sense()),
         _ => Err(
             "用法: terminal write|resize|scroll|select|copy|paste|clear|reset|cursor_visible|cursor_style|render|list"
                 .to_string(),

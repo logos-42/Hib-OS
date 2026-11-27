@@ -705,12 +705,16 @@ mod tests {
         c.bind_lease([10, 0, 0, 50], [255, 255, 255, 0], [10, 0, 0, 1], vec![[8, 8, 8, 8]], 100, 1000);
         assert_eq!(c.state, DhcpState::Bound);
         assert_eq!(c.lease.remaining_time, 100);
-        // 流逝 40 秒（<= 一半 50 -> Renewing）。
+        // 流逝 40 秒（剩 60 > 半程 50，应保持 Bound）。
         c.tick_lease(40);
         assert_eq!(c.lease.remaining_time, 60);
+        assert_eq!(c.state, DhcpState::Bound);
+        // 再流逝 10 秒 -> 剩 50（到达一半）-> Renewing。
+        c.tick_lease(10);
+        assert_eq!(c.lease.remaining_time, 50);
         assert_eq!(c.state, DhcpState::Renewing);
-        // 流逝 60 秒 -> 剩 0 -> Rebinding。
-        c.tick_lease(60);
+        // 流逝 50 秒 -> 剩 0 -> Rebinding。
+        c.tick_lease(50);
         assert_eq!(c.lease.remaining_time, 0);
         assert_eq!(c.state, DhcpState::Rebinding);
         // 再流逝 -> Init，IP 清零。

@@ -152,13 +152,8 @@ pub fn query_pte(pid: ExecId, vaddr: u64) -> Option<PageTableEntry> {
 
 /// 处理缺页中断：若未映射则分配页框并映射。
 pub fn handle_fault(pid: ExecId, vaddr: u64, write: bool) -> Result<u64, String> {
-    let mut g = as_registry().lock().unwrap();
-    let space = g
-        .spaces
-        .get_mut(&pid)
-        .ok_or_else(|| format!("地址空间不存在: pid={}", pid))?;
-
-    // 已映射则直接返回 pfn。
+    // query_pte / set_pte_flags / map_vaddr 内部都会取 as_registry 锁，
+    // 因此本函数在调用它们时绝不能持有该锁（std Mutex 不可重入，会自死锁）。
     if let Some(pte) = query_pte(pid, vaddr) {
         if pte.is_present() {
             // 标记 accessed / dirty。
@@ -170,10 +165,16 @@ pub fn handle_fault(pid: ExecId, vaddr: u64, write: bool) -> Result<u64, String>
         }
     }
 
-    // 未映射：分配页框并映射。
-    space.fault_count += 1;
-    drop(g);
+    {
+        let mut g = as_registry().lock().unwrap();
+        let space = g
+            .spaces
+            .get_mut(&pid)
+            .ok_or_else(|| format!("地址空间不存在: pid={}", pid))?;
+        space.fault_count += 1;
+    }
 
+    // 未映射：分配页框并映射。
     let pfn = alloc_phys_frame(pid)?;
     let mut flags = PteFlags::PRESENT | PteFlags::USER;
     if write {
@@ -185,22 +186,23 @@ pub fn handle_fault(pid: ExecId, vaddr: u64, write: bool) -> Result<u64, String>
 
 /// 处理 COW 缺页：将共享页框复制一份，映射为私有可写页。
 pub fn handle_cow_fault(pid: ExecId, vaddr: u64) -> Result<u64, String> {
-    let mut g = as_registry().lock().unwrap();
-    let space = g
-        .spaces
-        .get_mut(&pid)
-        .ok_or_else(|| format!("地址空间不存在: pid={}", pid))?;
-    space.cow_fault_count += 1;
+    // query_pte 内部自取注册表锁；先无锁查询，再短临界区取锁修改计数。
     let pte = match query_pte(pid, vaddr) {
         Some(pte) => pte,
         None => return Err("COW 缺页但无 PTE".to_string()),
     };
-    let old_pfn = pte.pfn;
-    drop(g);
+    let _old_pfn = pte.pfn;
+    {
+        let mut g = as_registry().lock().unwrap();
+        let space = g
+            .spaces
+            .get_mut(&pid)
+            .ok_or_else(|| format!("地址空间不存在: pid={}", pid))?;
+        space.cow_fault_count += 1;
+    }
 
     // 分配新页框并复制内容（模拟：内容全零，实际应从 old_pfn 读取）。
     let new_pfn = alloc_phys_frame(pid)?;
-    let _ = old_pfn; // 简化：不实际复制内容
     let flags = PteFlags::PRESENT | PteFlags::READ_WRITE | PteFlags::USER;
     map_vaddr(pid, vaddr, new_pfn, flags)?;
     Ok(new_pfn)

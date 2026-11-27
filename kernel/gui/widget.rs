@@ -1154,9 +1154,14 @@ pub fn widget_sense() -> String {
 /// `act gui/widget <op> ...`：对控件执行行动。
 pub fn widget_act(payload: &str) -> Result<String, String> {
     let mut it = payload.split_whitespace();
+    let op = it.next().unwrap_or("").to_string();
+    // list 只读：widget_sense 内部自取同一把锁，不得持锁调用。
+    if op == "list" {
+        return Ok(widget_sense());
+    }
     let mgr = widget_manager();
     let mut m = mgr.lock().unwrap();
-    match it.next().unwrap_or("") {
+    match op.as_str() {
         "add" => {
             let kind = it.next().ok_or("用法: widget add <种类> ...")?;
             let x: i32 = it.next().and_then(|v| v.parse().ok()).ok_or("缺少 x")?;
@@ -1242,7 +1247,6 @@ pub fn widget_act(payload: &str) -> Result<String, String> {
                 Ok("无可聚焦控件".to_string())
             }
         }
-        "list" => Ok(widget_sense()),
         _ => Err("用法: widget add|set_text|set_enabled|set_visible|focus|blur|focus_next|focus_prev|list".to_string()),
     }
 }

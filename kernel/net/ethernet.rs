@@ -61,11 +61,10 @@ impl EthernetFrame {
         dst.copy_from_slice(&bytes[0..6]);
         src.copy_from_slice(&bytes[6..12]);
         let ethertype = u16::from_be_bytes([bytes[12], bytes[13]]);
-        // 去掉序列化时补的尾部零填充（原型简化：填充字节恒为 0）。
-        let mut payload = bytes[14..].to_vec();
-        while payload.last() == Some(&0) {
-            payload.pop();
-        }
+        // 不剥离尾部零填充：TCP 首部以 2 字节全零的 urgent_ptr 结尾，
+        // 空载荷 TCP 段会被误剥导致首部截断、整个握手链路失效。
+        // 上层（IPv4/ARP）都按各自的总长/定长字段解析，可正确忽略填充。
+        let payload = bytes[14..].to_vec();
         Some(Self {
             header: EthernetHeader { dst, src, ethertype },
             payload,
@@ -164,7 +163,9 @@ mod tests {
         assert_eq!(parsed.header.dst, f.header.dst);
         assert_eq!(parsed.header.src, f.header.src);
         assert_eq!(parsed.header.ethertype, ETH_TYPE_IPV4);
-        assert_eq!(parsed.payload, b"hello ethernet");
+        // parse 不剥离尾部零填充（TCP 首部以零结尾，剥离会截断首部）；
+        // 载荷按原长前缀比较，填充留在尾部。
+        assert_eq!(&parsed.payload[..f.payload.len()], &f.payload[..]);
     }
 
     #[test]

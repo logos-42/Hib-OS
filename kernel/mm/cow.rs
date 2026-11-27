@@ -55,8 +55,9 @@ pub fn cow_fork(source_pid: ExecId, target_pid: ExecId) -> Result<(), String> {
         if !pte.is_user() {
             continue;
         }
-        // 目标空间映射同一页框，但标记为只读 + COW。
-        let flags = PteFlags::PRESENT | PteFlags::USER; // 只读，无 READ_WRITE
+        // 目标空间映射同一页框，标记为只读 + COW。
+        // 缺少 COW 位会导致后续 cow_is_cow 误判为「非 COW 页」。
+        let flags = PteFlags::PRESENT | PteFlags::USER | PteFlags::COW;
         map_vaddr(target_pid, *vaddr, pte.pfn, flags)?;
         cow_regions.push(CowRegion {
             start_vaddr: *vaddr,
@@ -71,11 +72,8 @@ pub fn cow_fork(source_pid: ExecId, target_pid: ExecId) -> Result<(), String> {
     g.regions.insert(target_pid, cow_regions);
 
     // 将源空间的可写用户页也标记为 COW（只读）。
-    let mut g2 = as_registry().lock().unwrap();
-    let _source_space = g2
-        .spaces
-        .get_mut(&source_pid)
-        .ok_or("源地址空间不存在")?;
+    // 不能在持有 as_registry 锁时调用 map_vaddr：std Mutex 不可重入，
+    // 会自死锁。map_vaddr 自带空间存在性检查，无需额外持锁。
     for (vaddr, pte) in &source.mappings {
         if pte.is_user() && pte.is_writable() && pte.is_present() {
             let _ = map_vaddr(
@@ -193,7 +191,8 @@ mod tests {
         cow_fork(source, target).unwrap();
         // 目标空间应能翻译。
         let (paddr, _) = translate_vaddr(target, 0x4000).unwrap();
-        assert_eq!(paddr, 0x7000);
+        // translate_vaddr 返回物理地址（pfn << PAGE_SHIFT）。
+        assert_eq!(paddr, 0x7000 << 12);
         // 源空间的页应已标记 COW。
         assert!(cow_is_cow(source, 0x4000).unwrap());
     }

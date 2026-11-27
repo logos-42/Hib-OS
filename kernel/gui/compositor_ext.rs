@@ -709,9 +709,14 @@ pub fn compositor_ext_sense() -> String {
 /// `act gui/compositor_ext <op> ...`：对合成器扩展执行行动。
 pub fn compositor_ext_act(payload: &str) -> Result<String, String> {
     let mut it = payload.split_whitespace();
+    let op = it.next().unwrap_or("").to_string();
+    // list 只读：compositor_ext_sense 内部自取同一把锁，不得持锁调用。
+    if op == "list" {
+        return Ok(compositor_ext_sense());
+    }
     let c = compositor_ext();
     let mut c = c.lock().unwrap();
-    match it.next().unwrap_or("") {
+    match op.as_str() {
         "add_layer" => {
             let w: u32 = it.next().and_then(|v| v.parse().ok()).unwrap_or(960);
             let h: u32 = it.next().and_then(|v| v.parse().ok()).unwrap_or(600);
@@ -794,7 +799,6 @@ pub fn compositor_ext_act(payload: &str) -> Result<String, String> {
             c.tear_free = enable;
             Ok(format!("防撕裂={}", enable))
         }
-        "list" => Ok(compositor_ext_sense()),
         _ => Err(
             "用法: compositor_ext add_layer|set_alpha|round_corners|shadow|add_animation|render_frame|vsync|fps|double_buffer|tear_free|list"
                 .to_string(),

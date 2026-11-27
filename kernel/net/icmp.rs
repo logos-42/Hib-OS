@@ -30,7 +30,9 @@ pub struct Instant(u64);
 
 impl Instant {
     pub fn now() -> Self {
-        Instant(crate::time::get_time_ns())
+        // 必须用不推进的时钟：get_time_ns 每读一次推进 1 秒，
+        // 「注册 pending → 收到应答测 RTT」若读两次，RTT 恒为 1 秒。
+        Instant(crate::time::peek_time_ns())
     }
 
     pub fn saturating_add(self, duration: Duration) -> Self {
@@ -413,7 +415,8 @@ pub struct IcmpStats {
     /// 清理过期的未解决查询（超过超时时间）。
     pub fn expire_pending(&mut self, timeout: Duration) {
         let now = Instant::now();
-        self.pending.retain(|_, p| now.saturating_sub(p.sent_at) <= timeout);
+        // 严格小于：timeout=0 表示立即过期（条目年龄 0 也要清除）。
+        self.pending.retain(|_, p| now.saturating_sub(p.sent_at) < timeout);
     }
     /// 未解决查询数量。
     pub fn pending_count(&self) -> usize { self.pending.len() }
@@ -671,7 +674,7 @@ mod tests {
                 assert_eq!(id, 0x5678);
                 assert_eq!(seq, 3);
                 // 刚注册的 pending，RTT 应很小（<100ms）。
-                assert!(rtt_us < 100_000);
+                assert!(rtt_us < 100_000, "rtt_us={}", rtt_us);
             }
             _ => panic!("期望 EchoReply 事件，实际 {:?}", event),
         }

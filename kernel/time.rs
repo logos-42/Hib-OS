@@ -10,6 +10,15 @@ pub fn get_time_ns() -> u64 {
     TIME_NS.fetch_add(1_000_000_000, Ordering::Relaxed)
 }
 
+/// 读取当前时间戳但**不推进**时钟。
+///
+/// 供 TTL/超时比较使用：get_time_ns 每读一次就推进 1 秒，
+/// 若用「读取即推进」的时钟做 expire 比较，「插入 → 立即查询」
+/// 也会消耗掉整个 TTL，产生 off-by-one 过期。
+pub fn peek_time_ns() -> u64 {
+    TIME_NS.load(Ordering::Relaxed)
+}
+
 /// 推进时间戳（供测试或定时器调用）。
 pub fn advance_ns(ns: u64) {
     TIME_NS.fetch_add(ns, Ordering::Relaxed);

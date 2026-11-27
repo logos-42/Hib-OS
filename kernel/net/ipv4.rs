@@ -327,7 +327,9 @@ impl IcmpPacket {
     }
 
     pub fn parse(bytes: &[u8]) -> Option<Self> {
-        if bytes.len() < 4 { return None; }
+        // 首部固定 8 字节：type/code/checksum/rest。短于 8 字节的报文是
+        // 畸形包，必须返回 None 丢弃而不是越界崩溃。
+        if bytes.len() < 8 { return None; }
         Some(Self {
             icmp_type: bytes[0],
             code: bytes[1],
@@ -450,7 +452,10 @@ impl Ipv4Layer {
                     ];
                     let mut udp_bytes = header.serialize();
                     udp_bytes.extend_from_slice(&packet.payload[UdpHeader::len()..]);
-                    if compute_checksum(&[&pseudo, &udp_bytes]) != 0xFFFF {
+                    // compute_checksum 返回反码和：首部+数据含正确校验和时
+                    // 16 位和为 0xFFFF，取反后应为 0。若与 0xFFFF 比较会把
+                    // 合法报文全部丢弃（校验逻辑写反）。
+                    if compute_checksum(&[&pseudo, &udp_bytes]) != 0 {
                         return Ipv4Event::Drop;
                     }
                 }

@@ -520,9 +520,14 @@ pub fn gesture_sense() -> String {
 /// `act gui/gesture <op> ...`：对手势识别器执行行动。
 pub fn gesture_act(payload: &str) -> Result<String, String> {
     let mut it = payload.split_whitespace();
+    let op = it.next().unwrap_or("").to_string();
+    // list 只读：gesture_sense 内部自取同一把锁，不得在本函数持锁期间调用。
+    if op == "list" {
+        return Ok(gesture_sense());
+    }
     let gr = gesture_recognizer();
     let mut gr = gr.lock().unwrap();
-    match it.next().unwrap_or("") {
+    match op.as_str() {
         "touch_down" => {
             let id: u64 = it
                 .next()
@@ -579,7 +584,6 @@ pub fn gesture_act(payload: &str) -> Result<String, String> {
             }
             Ok(format!("配置 {} = {}", key, val))
         }
-        "list" => Ok(gesture_sense()),
         _ => Err(
             "用法: gesture touch_down|touch_move|touch_up|recognize|clear|config|list".to_string(),
         ),

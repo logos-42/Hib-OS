@@ -50,13 +50,18 @@ impl DreamCycle {
     }
 
     pub fn enter_stage(&mut self, stage: DreamStage, now_ns: u128) {
-        if let Some(started) = self.started_at {
-            self.stage_duration_ns = now_ns - started;
+        // 全局梦境周期可能被任意来源的时间戳驱动（测试/执行体并行），
+        // 时间倒退时不得下溢：时长取饱和差。
+        let prior = self.started_at;
+        if let Some(started) = prior {
+            self.stage_duration_ns = now_ns.saturating_sub(started);
             self.total_duration_ns += self.stage_duration_ns;
         }
         self.stage = stage;
         self.started_at = Some(now_ns);
-        if stage == DreamStage::Wake && self.started_at.is_some() {
+        // 只有从上一个阶段进入 Wake 才算完成一个周期；
+        // 直接在空白状态进 Wake（prior 为 None）不计。
+        if stage == DreamStage::Wake && prior.is_some() {
             self.cycle_count += 1;
         }
     }

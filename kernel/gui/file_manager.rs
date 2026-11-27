@@ -706,9 +706,14 @@ pub fn file_manager_sense() -> String {
 /// `act gui/file_manager <op> ...`：对文件管理器执行行动。
 pub fn file_manager_act(payload: &str) -> Result<String, String> {
     let mut it = payload.split_whitespace();
+    let op = it.next().unwrap_or("").to_string();
+    // list 只读：file_manager_sense 内部自取同一把锁，不得持锁调用。
+    if op == "list" {
+        return Ok(file_manager_sense());
+    }
     let fm = file_manager();
     let mut fm = fm.lock().unwrap();
-    match it.next().unwrap_or("") {
+    match op.as_str() {
         "browse" => {
             let path = it.next().ok_or("缺少路径")?;
             let n = fm.browse(Path::new(path)).len();
@@ -796,7 +801,6 @@ pub fn file_manager_act(payload: &str) -> Result<String, String> {
             fm.toggle_hidden();
             Ok(format!("显示隐藏文件：{}", fm.show_hidden))
         }
-        "list" => Ok(file_manager_sense()),
         _ => Err(
             "用法: file_manager browse|parent|enter|copy|cut|paste|delete|rename|mkdir|search|drag_drop|select|select_all|clear_selection|view|sort|filter|hidden|list"
                 .to_string(),

@@ -490,9 +490,8 @@ mod tests {
         let mut alloc = || test_alloc_frame();
         PageTable::map(&mut tables, root, vaddr, paddr, flags, &mut alloc).unwrap();
         let result = PageTable::translate(&tables, root, vaddr).unwrap();
-        assert_eq!(result, PAddr(0x1000 + 0));
-        // 页内偏移：vaddr 0x1000 偏移为 0，pfn<<12 = 0x5000
-        assert_eq!(result.0, 0x5000);
+        // 翻译必须返回映射时的物理地址：pfn<<12 = 0x5000（页内偏移为 0）。
+        assert_eq!(result, PAddr(0x5000));
     }
 
     #[test]

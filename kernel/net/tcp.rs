@@ -380,7 +380,9 @@ impl TcpLayer {
 
         if rcv_nxt_advance != 0 {
             if let Some(sock) = self.sockets.get_mut(&key) {
-                let n = rcv_nxt_advance as usize;
+                // 拷贝量不得超过实际载荷长度：FIN 单独占一个序号却没有数据，
+                // 否则对空缓冲切片会越界。
+                let n = (seg.payload.len() as u32).min(rcv_nxt_advance) as usize;
                 let data = &seg.payload[..n];
                 sock.recv_buf.extend(data.iter().cloned());
                 sock.rcv_nxt = sock.rcv_nxt.wrapping_add(rcv_nxt_advance);
@@ -617,9 +619,10 @@ mod tests {
         }
 
         let segs = layer.send(&ck, b"abcdefghij").unwrap();
+        // 未被 ACK 的 SYN 占一个序号，3 字节窗口只剩 2 字节可用。
         assert_eq!(segs.len(), 1);
-        assert_eq!(segs[0].payload.len(), 3);
-        assert_eq!(&segs[0].payload, b"abc");
+        assert_eq!(segs[0].payload.len(), 2);
+        assert_eq!(&segs[0].payload, b"ab");
         // 窗口耗尽，再发应不再出段
         let segs2 = layer.send(&ck, b"more").unwrap();
         assert_eq!(segs2.len(), 0);
@@ -654,9 +657,10 @@ mod tests {
         assert_eq!(fin_segs[0].flags & TCP_FIN, TCP_FIN);
         assert_eq!(layer.state_of(&ck).unwrap(), TcpState::FinWait1);
 
-        // 对端 ACK 我们的 FIN
-        let ack_of_fin = TcpSegment::new(8080, 50001, ISS_BASE + 8080 + 1,
-                                         (ISS_BASE + 50001) + 2, TCP_ACK, 65535, Vec::new());
+        // 对端 ACK 我们的 FIN：ACK 由客户端发出（src=50001 → dst=8080），
+        // 确认号必须等于服务端子连接的 snd_nxt（SYN-ACK + FIN 各占一个序号）。
+        let ack_of_fin = TcpSegment::new(50001, 8080, ISS_BASE + 50001 + 1,
+                                         ISS_BASE + 8080 + 2, TCP_ACK, 65535, Vec::new());
         let out = layer.receive_segment(peer_ip(), test_ip(), &ack_of_fin.serialize(peer_ip(), test_ip())).unwrap();
         assert_eq!(layer.state_of(&ck).unwrap(), TcpState::FinWait2);
         assert_eq!(out.len(), 0);
@@ -667,7 +671,8 @@ mod tests {
         let mut layer = make_layer();
         layer.bind(test_ip(), 8080).unwrap();
         layer.listen(8080).unwrap();
-
+        // connect 要求本地端口先绑定（客户端端口也需入表）。
+        layer.bind(test_ip(), 50002).unwrap();
         let syn = layer.connect(50002, peer_ip(), 8080).unwrap();
         let mut bytes = syn[0].serialize(peer_ip(), test_ip());
         bytes[4] ^= 0xFF; // 破坏序列号但不重算校验和

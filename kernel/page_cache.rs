@@ -926,7 +926,7 @@ mod tests {
         cache.get_page("y");
         cache.get_page("x"); // hit
         let rate = cache.cache_hit_rate();
-        assert!((rate - 2.0 / 3.0).abs() < 1e-6);
+        assert!((rate - 1.0 / 3.0).abs() < 1e-6, "rate={}", rate);
     }
 
     #[test]
@@ -964,7 +964,7 @@ mod tests {
         let _ = cache.bread(2).unwrap();
         let _ = cache.bread(1).unwrap(); // hit
         let rate = cache.cache_hit_rate();
-        assert!((rate - 2.0 / 3.0).abs() < 1e-6);
+        assert!((rate - 1.0 / 3.0).abs() < 1e-6, "rate={}", rate);
     }
 
     #[test]
