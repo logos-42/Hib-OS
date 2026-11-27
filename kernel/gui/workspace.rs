@@ -74,7 +74,7 @@ impl WorkspaceManager {
             return;
         };
         // 页面底色：近黑，避免抢走内容。
-        frame.fill_rect(0, 0, frame.width(), frame.height(), 0xFF141518);
+        frame.fill_rect(0, 0, frame.width(), frame.height(), 0xFF161922);
 
         // 顶部：页面标题 + 强调色细线。
         let title = page.kind.label_en();
@@ -84,10 +84,10 @@ impl WorkspaceManager {
             30,
             title,
             20.0,
-            0xFFE6E8EC,
+            text_render::FG,
             frame.width() as i32 - 40,
         );
-        frame.fill_rect(40, 58, 140, 2, 0xFF7FB3A0);
+        frame.fill_rect(40, 58, 140, 2, text_render::ACCENT);
 
         // 内容区：真实数据行，逐行绘制（行距 16px，适配 5x7 字形）。
         let lines = page_lines(page.kind);
@@ -251,6 +251,6 @@ mod tests {
         mgr.open(PageKind::Help, 400, 300);
         let mut s = Surface::new(400, 300);
         mgr.draw(&mut s);
-        assert_eq!(s.get(5, 5), Some(0xFF141518));
+        assert_eq!(s.get(5, 5), Some(0xFF161922));
     }
 }

@@ -343,6 +343,25 @@ pub fn dark_theme() -> Theme {
     t
 }
 
+/// 柔光主题（默认）：低饱和深蓝灰底 + 柔和蓝紫强调，现代干净。
+pub fn aurora_theme() -> Theme {
+    let mut t = Theme::new("柔光");
+    t.set_color(ColorRole::Background, argb(255, 0x16, 0x19, 0x22));
+    t.set_color(ColorRole::Foreground, argb(255, 0xE8, 0xEA, 0xF2));
+    t.set_color(ColorRole::Primary, argb(255, 0x8B, 0x9C, 0xF5));
+    t.set_color(ColorRole::Secondary, argb(255, 0xB8, 0xA2, 0xE8));
+    t.set_color(ColorRole::Success, argb(255, 0x7F, 0xD4, 0xA8));
+    t.set_color(ColorRole::Warning, argb(255, 0xE8, 0xC0, 0x7A));
+    t.set_color(ColorRole::Error, argb(255, 0xE8, 0x8F, 0x92));
+    t.set_color(ColorRole::Hover, argb(255, 0x22, 0x27, 0x36));
+    t.set_color(ColorRole::Pressed, argb(255, 0x2B, 0x32, 0x44));
+    t.set_color(ColorRole::Disabled, argb(255, 0x1E, 0x22, 0x2E));
+    t.set_color(ColorRole::Border, argb(255, 0x32, 0x38, 0x4A));
+    t.set_color(ColorRole::Shadow, argb(150, 0, 0, 0));
+    t.set_font("default", 13);
+    t
+}
+
 /// 高对比度主题。
 pub fn high_contrast_theme() -> Theme {
     let mut t = Theme::new("高对比度");
@@ -409,9 +428,10 @@ impl ThemeManager {
         let mut themes = BTreeMap::new();
         themes.insert("浅色".to_string(), light_theme());
         themes.insert("深色".to_string(), dark_theme());
+        themes.insert("柔光".to_string(), aurora_theme());
         themes.insert("高对比度".to_string(), high_contrast_theme());
         themes.insert("赛博朋克".to_string(), cyberpunk_theme());
-        let current = "深色".to_string();
+        let current = "柔光".to_string();
         Self {
             themes,
             current: current.clone(),
@@ -550,7 +570,12 @@ impl ThemeManager {
         ];
         for (i, role) in roles.iter().enumerate() {
             let c = theme.color(*role);
-            json.push_str(&format!("    \"{}\": #{:08X}", role.label(), c));
+            // 输出 #RRGGBBAA，与 parse_color 的 8 位格式一致。
+            let r = (c >> 16) & 0xff;
+            let g = (c >> 8) & 0xff;
+            let b = c & 0xff;
+            let a = (c >> 24) & 0xff;
+            json.push_str(&format!("    \"{}\": #{:02X}{:02X}{:02X}{:02X}", role.label(), r, g, b, a));
             if i < roles.len() - 1 {
                 json.push(',');
             }
@@ -824,7 +849,7 @@ mod tests {
     #[test]
     fn theme_manager_switch() {
         let mut tm = ThemeManager::new();
-        assert_eq!(tm.current_name(), "深色");
+        assert_eq!(tm.current_name(), "柔光");
         assert!(tm.set_theme("浅色"));
         assert_eq!(tm.current_name(), "浅色");
         assert!(!tm.set_theme("不存在"));

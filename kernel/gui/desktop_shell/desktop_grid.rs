@@ -1,4 +1,4 @@
-//! 桌面图标网格：固定 64×64 格点，拖拽自动吸附，hover / 选中 / 拖拽预览三态。
+//! 桌面图标网格：固定 64×64 单元格，拖拽自动吸附，hover / 选中 / 拖拽预览三态。
 
 use super::super::surface::Surface;
 use super::{GRID, TOPBAR_H};
@@ -29,7 +29,7 @@ impl DesktopIcon {
     }
 }
 
-/// 把任意像素坐标吸附到最近格点（返回格点索引）。
+/// 把任意像素坐标吸附到最近网格单元（返回行、列索引）。
 pub fn snap_to_grid(x: i32, y: i32) -> (i32, i32) {
     let gx = if x >= 0 { x / GRID } else { (x - GRID + 1) / GRID };
     let gy = if y >= 0 { y / GRID } else { (y - GRID + 1) / GRID };
@@ -42,17 +42,24 @@ pub fn draw(frame: &mut Surface) {
         DesktopIcon::new("TASK", 1, 0),
         DesktopIcon::new("FILE", 2, 0),
     ];
+    let count = icons.len() as i32;
+    // 整行图标居中：总宽 = 单元格宽 × 数量，水平居中；垂直放在工作区上四分之一处。
+    let total_w = count * GRID;
+    let origin_x = (frame.width() as i32 - total_w) / 2;
+    let content_h = frame.height() as i32 - TOPBAR_H;
+    let origin_y = TOPBAR_H + content_h / 4;
     for icon in &icons {
-        let (x, y) = icon.pixel_pos();
+        let x = origin_x + icon.gx * GRID + (GRID - 32) / 2;
+        let y = origin_y + icon.gy * GRID;
         let bg = match icon.state {
-            IconState::Hover => 0xFF2E3238,
-            IconState::Selected => 0xFF37424A,
-            IconState::Dragging => 0xFF3A4450,
-            IconState::Normal => 0xFF23262B,
+            IconState::Hover => 0xFF222736,
+            IconState::Selected => 0xFF2B3244,
+            IconState::Dragging => 0xFF323A50,
+            IconState::Normal => 0xFF1E222E,
         };
         frame.fill_rect(x, y, 32, 32, bg);
         let label: String = icon.label.chars().take(3).collect();
-        frame.draw_ui_text(x + 4, y + 10, &label, 0xFFC8CCD4, x + 30);
+        frame.draw_ui_text(x + 4, y + 10, &label, 0xFFE8EAF2, x + 30);
     }
 }
 

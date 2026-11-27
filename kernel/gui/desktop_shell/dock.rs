@@ -40,6 +40,29 @@ impl Icon {
     }
 }
 
+const ICON_ORDER: [Icon; 6] = [
+    Icon::Conversation,
+    Icon::Tasks,
+    Icon::Files,
+    Icon::Permission,
+    Icon::Notification,
+    Icon::Advanced,
+];
+const ICON_W: i32 = 32;
+const ICON_STEP: i32 = 48;
+
+/// 可见图标数量。
+fn visible_count(d: &Dock) -> usize {
+    ICON_ORDER.iter().filter(|i| d.icon_visible(**i)).count()
+}
+
+/// Dock 图标行水平居中起点（draw / hit 共用）。
+fn origin_x(frame_w: u32, d: &Dock) -> i32 {
+    let count = visible_count(d) as i32;
+    let total_w = count.saturating_sub(1) * ICON_STEP + ICON_W;
+    (frame_w as i32 - total_w) / 2
+}
+
 /// 命中 Dock 图标，返回应打开的页面；未命中返回 None。
 pub fn hit_page(x: i32, y: i32, frame_w: u32, frame_h: u32) -> Option<PageKind> {
     let dock = super::dock_state();
@@ -51,24 +74,15 @@ pub fn hit_page(x: i32, y: i32, frame_w: u32, frame_h: u32) -> Option<PageKind> 
     if y < top || y > top + 32 {
         return None;
     }
-    let order = [
-        Icon::Conversation,
-        Icon::Tasks,
-        Icon::Files,
-        Icon::Permission,
-        Icon::Notification,
-        Icon::Advanced,
-    ];
-    let mut cx = 24;
-    for icon in order {
+    let mut cx = origin_x(frame_w, &d);
+    for icon in ICON_ORDER {
         if d.icon_visible(icon) {
-            if x >= cx && x < cx + 32 {
+            if x >= cx && x < cx + ICON_W {
                 return Some(icon.page());
             }
-            cx += 48;
+            cx += ICON_STEP;
         }
     }
-    let _ = frame_w;
     None
 }
 
@@ -119,26 +133,19 @@ pub fn draw(frame: &mut Surface, _windows: &[Window], _focused: Option<u64>) {
         return;
     }
     let y = h - DOCK_H;
-    frame.fill_rect(0, y, frame.width(), DOCK_H as u32, 0xFF1B1C1F);
-    frame.fill_rect(0, y, frame.width(), 1, 0xFF303238);
+    frame.fill_rect(0, y, frame.width(), DOCK_H as u32, 0xFF161922);
+    frame.fill_rect(0, y, frame.width(), 1, 0xFF32384A);
 
-    let mut x = 24;
-    for icon in [
-        Icon::Conversation,
-        Icon::Tasks,
-        Icon::Files,
-        Icon::Permission,
-        Icon::Notification,
-        Icon::Advanced,
-    ] {
+    let mut x = origin_x(frame.width(), &d);
+    for icon in ICON_ORDER {
         if !d.icon_visible(icon) {
             continue;
         }
-        frame.fill_rect(x, y + 12, 32, 32, 0xFF25282D);
+        frame.fill_rect(x, y + 12, ICON_W as u32, ICON_W as u32, 0xFF1E222E);
         // 标签过长时按 8×12 字形截断到图标宽度。
         let label: String = icon.label().chars().take(3).collect();
-        frame.draw_ui_text(x + 4, y + 22, &label, 0xFFC8CCD4, x + 30);
-        x += 48;
+        frame.draw_ui_text(x + 4, y + 22, &label, 0xFFE8EAF2, x + ICON_W - 2);
+        x += ICON_STEP;
     }
 }
 

@@ -55,12 +55,12 @@ pub const BODY_LINE_H: i32 = 16;
 pub const PAD: i32 = 16;
 
 // ── 配色（低饱和深色，非像素风）───────────────────────────────────────────
-pub const WINDOW_BG: u32 = 0xFF14161A;
-pub const FG: u32 = 0xFFD8DCE4;
-pub const MUTED: u32 = 0xFF8F98A6;
-pub const ACCENT: u32 = 0xFF7FB3A0;
-pub const ERROR: u32 = 0xFFE08A63;
-pub const PROMPT: u32 = 0xFF9FD7C0;
+pub const WINDOW_BG: u32 = 0xFF161922;
+pub const FG: u32 = 0xFFE8EAF2;
+pub const MUTED: u32 = 0xFF9AA2B8;
+pub const ACCENT: u32 = 0xFF8B9CF5;
+pub const ERROR: u32 = 0xFFE88F92;
+pub const PROMPT: u32 = 0xFFB8A2E8;
 
 /// 把「像素字号」换算成位图字形的放大倍数。
 pub fn scale_for(size: u32) -> u32 {

@@ -12,11 +12,11 @@ use std::sync::OnceLock;
 use super::super::surface::Surface;
 use super::TOPBAR_H;
 
-const BG: u32 = 0xFF1B1C1F;
-const LINE: u32 = 0xFF303238;
-const TEXT: u32 = 0xFFB9BCC4;
-const ACCENT: u32 = 0xFF7FB3A0;
-const OFFLINE: u32 = 0xFF7A5A5A;
+const BG: u32 = 0xFF161922;
+const LINE: u32 = 0xFF32384A;
+const TEXT: u32 = 0xFFE8EAF2;
+const ACCENT: u32 = 0xFF8B9CF5;
+const OFFLINE: u32 = 0xFF7A7F92;
 
 /// 累计生成的 token 数（真实计数，由推理路径调用 [`record_tokens`] 累加）。
 static TOKENS: AtomicU64 = AtomicU64::new(0);
@@ -64,15 +64,17 @@ pub fn draw(frame: &mut Surface) {
     frame.fill_rect(11, 9, 2, 2, ACCENT);
 
     // 右侧：真实 token 速率 / 联网 / 时钟 / 通知徽章。
+    // 顶栏仅 20px：用 9px 字号并将行顶对齐到 y=2，避免文字视觉偏下。
+    use super::super::text_render;
     let right = w as i32 - 8;
     let rate = format!("{}t/s", token_rate());
-    frame.draw_ui_text(right - 110, 3, &rate, TEXT, right);
+    text_render::draw_text(frame, right - 110, 2, &rate, 9.0, TEXT, right);
     let (net_label, net_color) = if link_up() { ("~", ACCENT) } else { ("x", OFFLINE) };
-    frame.draw_ui_text(right - 70, 3, net_label, net_color, right);
+    text_render::draw_text(frame, right - 70, 2, net_label, 9.0, net_color, right);
     let clock = clock_hms();
-    frame.draw_ui_text(right - 56, 3, &clock, TEXT, right);
+    text_render::draw_text(frame, right - 56, 2, &clock, 9.0, TEXT, right);
     if super::super::notification::unread_notifications() > 0 {
-        frame.fill_rect(right - 4, 9, 3, 3, 0xFFE08A63);
+        frame.fill_rect(right - 4, 7, 3, 3, 0xFFE8C07A);
     }
 }
 
