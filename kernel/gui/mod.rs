@@ -134,6 +134,8 @@ pub fn pump_all() -> Vec<input::Effect> {
 pub fn ensure_demo() {
     // GUI 一启动就订阅系统事件，实时视图由事件驱动而不是定时轮询。
     init_event_subscription();
+    // 加载已持久化的 AI 生成物（重启后仍可见）。
+    crate::ai_factory::load_all();
     let mut d = desktop().lock().unwrap();
     if d.windows().is_empty() {
         build_desktop(&mut d);

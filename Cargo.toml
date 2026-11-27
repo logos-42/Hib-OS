@@ -23,6 +23,8 @@ serde_json = "1"
 winit = { version = "0.30", optional = true }
 softbuffer = { version = "0.4", optional = true }
 fontdue = "0.9.5"
+wasmtime = { version = "51.0.0", features = ["wat"] }
+wat = "1.263.0"
 
 [features]
 default = []

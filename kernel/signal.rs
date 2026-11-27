@@ -172,9 +172,14 @@ pub struct ProcessSignalState {
     /// 信号投递次数。
     delivered_count: BTreeMap<Signal, u64>,
     /// 进程是否已终止（由信号导致）。
+    ///
+    /// 终止是**不可复活**的：`SIGCONT` 不允许清除它。
+    /// 可被 `SIGCONT` 恢复的「停止」用 [`Self::stopped`] 表达，两者语义分离。
     pub terminated: bool,
     /// 终止信号（若 terminated 为 true）。
     pub term_signal: Option<Signal>,
+    /// 进程是否被 SIGSTOP 停止（可由 SIGCONT 恢复）。
+    stopped: bool,
 }
 
 impl ProcessSignalState {
@@ -188,6 +193,7 @@ impl ProcessSignalState {
             delivered_count: BTreeMap::new(),
             terminated: false,
             term_signal: None,
+            stopped: false,
         }
     }
 
@@ -292,14 +298,13 @@ impl ProcessSignalState {
                 self.term_signal = Some(signal);
             }
             Signal::SIGSTOP => {
-                // 停止进程：此处标记为 terminated 以简化模拟。
-                self.terminated = true;
-                self.term_signal = Some(signal);
+                // 停止进程：只置 stopped（可被 SIGCONT 恢复），不触碰 terminated。
+                self.stopped = true;
             }
             Signal::SIGCONT => {
-                // 继续：若之前停止，则恢复（此处仅清除终止标记，模拟恢复）。
-                self.terminated = false;
-                self.term_signal = None;
+                // 继续：只清除「停止」标记。绝不清除 terminated ——
+                // SIGKILL/SIGTERM 造成的终止是不可复活的。
+                self.stopped = false;
             }
             Signal::SIGCHLD | Signal::SIGPIPE => {
                 // 忽略。
@@ -326,6 +331,11 @@ impl ProcessSignalState {
         self.terminated
     }
 
+    /// 返回进程是否被 SIGSTOP 停止（可由 SIGCONT 恢复）。
+    pub fn is_stopped(&self) -> bool {
+        self.stopped
+    }
+
     /// 返回终止信号。
     pub fn term_signal(&self) -> Option<Signal> {
         self.term_signal
@@ -334,9 +344,10 @@ impl ProcessSignalState {
     /// 返回文本摘要。
     pub fn summary(&self) -> String {
         format!(
-            "pid={} terminated={} term_signal={:?} pending={} masked={}",
+            "pid={} terminated={} stopped={} term_signal={:?} pending={} masked={}",
             self.pid,
             self.terminated,
+            self.stopped,
             self.term_signal.map(|s| s.name()),
             self.pending.len(),
             self.mask.len(),
@@ -461,6 +472,13 @@ impl SignalHandler {
             .unwrap_or(false)
     }
 
+    /// 返回进程是否被 SIGSTOP 停止。
+    pub fn is_stopped(&self, pid: Pid) -> bool {
+        self.process_state(pid)
+            .map(|s| s.is_stopped())
+            .unwrap_or(false)
+    }
+
     /// 返回进程的终止信号。
     pub fn term_signal(&self, pid: Pid) -> Option<Signal> {
         self.process_state(pid).and_then(|s| s.term_signal())
@@ -561,6 +579,16 @@ pub fn signal_deliver(pid: Pid) -> Vec<Signal> {
 /// 返回进程是否已终止。
 pub fn signal_is_terminated(pid: Pid) -> bool {
     signal_handler().lock().unwrap().is_terminated(pid)
+}
+
+/// 返回进程是否被 SIGSTOP 停止。
+pub fn signal_is_stopped(pid: Pid) -> bool {
+    signal_handler().lock().unwrap().is_stopped(pid)
+}
+
+/// 返回进程的终止信号。
+pub fn signal_term_signal_of(pid: Pid) -> Option<Signal> {
+    signal_handler().lock().unwrap().term_signal(pid)
 }
 
 /// 返回信号处理器摘要。
@@ -733,23 +761,23 @@ mod tests {
     #[test]
     fn send_and_pending() {
         let h = SignalHandler::new();
-        signal_send(1, Signal::SIGINT);
-        signal_send(1, Signal::SIGTERM);
-        let pending = signal_pending(1);
+        signal_send(11, Signal::SIGINT);
+        signal_send(11, Signal::SIGTERM);
+        let pending = signal_pending(11);
         assert!(pending.contains(&Signal::SIGINT));
         assert!(pending.contains(&Signal::SIGTERM));
-        assert_eq!(h.sent_count(1, Signal::SIGINT), 1);
+        assert_eq!(h.sent_count(11, Signal::SIGINT), 1);
     }
 
     #[test]
     fn masked_signal_not_pending() {
         let h = SignalHandler::new();
-        signal_mask_add(1, Signal::SIGINT);
-        signal_send(1, Signal::SIGINT);
-        let pending = signal_pending(1);
+        signal_mask_add(12, Signal::SIGINT);
+        signal_send(12, Signal::SIGINT);
+        let pending = signal_pending(12);
         assert!(!pending.contains(&Signal::SIGINT));
         // 但 sent_count 仍记录
-        assert_eq!(h.sent_count(1, Signal::SIGINT), 1);
+        assert_eq!(h.sent_count(12, Signal::SIGINT), 1);
     }
 
     #[test]
@@ -757,58 +785,75 @@ mod tests {
         let _h = SignalHandler::new();
         let invoked = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let invoked2 = invoked.clone();
-        signal_register_handler_fn(1, Signal::SIGUSR1, move |sig| {
+        signal_register_handler_fn(13, Signal::SIGUSR1, move |sig| {
             assert_eq!(sig, Signal::SIGUSR1);
             invoked2.store(true, Ordering::SeqCst);
             true
         });
-        signal_send(1, Signal::SIGUSR1);
-        assert!(signal_pending(1).contains(&Signal::SIGUSR1));
-        let delivered = signal_deliver(1);
+        signal_send(13, Signal::SIGUSR1);
+        assert!(signal_pending(13).contains(&Signal::SIGUSR1));
+        let delivered = signal_deliver(13);
         assert!(delivered.contains(&Signal::SIGUSR1));
         assert!(invoked.load(Ordering::SeqCst));
-        assert!(!signal_pending(1).contains(&Signal::SIGUSR1));
+        assert!(!signal_pending(13).contains(&Signal::SIGUSR1));
     }
 
     #[test]
     fn sigkill_always_default_terminates() {
         let h = SignalHandler::new();
         // 即使注册了自定义处理，SIGKILL 也应终止进程
-        signal_register_handler_fn(1, Signal::SIGKILL, |_| true);
-        signal_send(1, Signal::SIGKILL);
-        signal_deliver(1);
-        assert!(signal_is_terminated(1));
-        assert_eq!(h.term_signal(1), Some(Signal::SIGKILL));
+        signal_register_handler_fn(14, Signal::SIGKILL, |_| true);
+        signal_send(14, Signal::SIGKILL);
+        signal_deliver(14);
+        assert!(signal_is_terminated(14));
+        assert_eq!(h.term_signal(14), Some(Signal::SIGKILL));
     }
 
     #[test]
     fn sigcont_resumes() {
         let _h = SignalHandler::new();
-        signal_send(1, Signal::SIGSTOP);
-        signal_deliver(1);
-        assert!(signal_is_terminated(1));
-        signal_send(1, Signal::SIGCONT);
-        signal_deliver(1);
-        assert!(!signal_is_terminated(1));
+        signal_send(15, Signal::SIGSTOP);
+        signal_deliver(15);
+        assert!(!signal_is_terminated(15), "SIGSTOP 是停止不是终止");
+        signal_send(15, Signal::SIGCONT);
+        signal_deliver(15);
+        assert!(!signal_is_stopped(15), "SIGCONT 应恢复被停止的进程");
+        assert!(!signal_is_terminated(15));
+    }
+
+    #[test]
+    fn sigcont_cannot_revive_killed_process() {
+        let _h = SignalHandler::new();
+        signal_send(2, Signal::SIGKILL);
+        signal_deliver(2);
+        assert!(signal_is_terminated(2));
+        // 终止不可复活：SIGCONT 不允许清除 SIGKILL 留下的终止标记。
+        signal_send(2, Signal::SIGCONT);
+        signal_deliver(2);
+        assert!(
+            signal_is_terminated(2),
+            "SIGCONT 不得复活已被 SIGKILL 终止的进程"
+        );
+        assert_eq!(signal_term_signal_of(2), Some(Signal::SIGKILL));
     }
 
     #[test]
     fn handler_return_false_terminates() {
         let h = SignalHandler::new();
-        signal_register_handler_fn(1, Signal::SIGUSR2, |_| false);
-        signal_send(1, Signal::SIGUSR2);
-        signal_deliver(1);
-        assert!(signal_is_terminated(1));
-        assert_eq!(h.term_signal(1), Some(Signal::SIGUSR2));
+        signal_register_handler_fn(16, Signal::SIGUSR2, |_| false);
+        signal_send(16, Signal::SIGUSR2);
+        signal_deliver(16);
+        assert!(signal_is_terminated(16));
+        assert_eq!(h.term_signal(16), Some(Signal::SIGUSR2));
     }
 
     #[test]
     fn pending_signals_cleared_after_deliver() {
         let _h = SignalHandler::new();
-        signal_send(1, Signal::SIGINT);
-        signal_send(1, Signal::SIGINT); // 重复发送同一信号，pending 是 set，只保留一份
-        let _d1 = signal_deliver(1);
-        assert!(!signal_pending(1).contains(&Signal::SIGINT));
+        signal_send(17, Signal::SIGINT);
+        signal_send(17, Signal::SIGINT); // 重复发送同一信号，pending 是 set，只保留一份
+        let _d1 = signal_deliver(17);
+        assert!(!signal_pending(17).contains(&Signal::SIGINT));
     }
 
     #[test]
@@ -851,15 +896,15 @@ mod tests {
     #[test]
     fn signal_mask_set_and_operations() {
         let _h = SignalHandler::new();
-        signal_mask_add(1, Signal::SIGINT);
-        signal_mask_add(1, Signal::SIGTERM);
-        let set = signal_mask_set(1);
+        signal_mask_add(21, Signal::SIGINT);
+        signal_mask_add(21, Signal::SIGTERM);
+        let set = signal_mask_set(21);
         assert!(set.is_member(Signal::SIGINT));
         assert!(set.is_member(Signal::SIGTERM));
         assert!(!set.is_member(Signal::SIGKILL));
 
-        signal_mask_del_set(1, &set);
-        let set2 = signal_mask_set(1);
+        signal_mask_del_set(21, &set);
+        let set2 = signal_mask_set(21);
         assert!(!set2.is_member(Signal::SIGINT));
     }
 
@@ -869,11 +914,11 @@ mod tests {
         let mut set = SigSet::empty();
         set.add(Signal::SIGUSR1);
         set.add(Signal::SIGUSR2);
-        signal_send_set(1, &set);
-        let pending = signal_pending(1);
+        signal_send_set(18, &set);
+        let pending = signal_pending(18);
         assert!(pending.contains(&Signal::SIGUSR1));
         assert!(pending.contains(&Signal::SIGUSR2));
-        let delivered = signal_deliver(1);
+        let delivered = signal_deliver(18);
         assert!(delivered.contains(&Signal::SIGUSR1));
         assert!(delivered.contains(&Signal::SIGUSR2));
     }
@@ -881,15 +926,15 @@ mod tests {
     #[test]
     fn signal_suspend_returns_pending() {
         let _h = SignalHandler::new();
-        signal_send(1, Signal::SIGALRM);
-        let sig = signal_suspend(1);
+        signal_send(19, Signal::SIGALRM);
+        let sig = signal_suspend(19);
         assert_eq!(sig, Some(Signal::SIGALRM));
-        assert!(!signal_pending(1).contains(&Signal::SIGALRM));
+        assert!(!signal_pending(19).contains(&Signal::SIGALRM));
     }
 
     #[test]
     fn signal_suspend_none_when_no_pending() {
-        let sig = signal_suspend(1);
+        let sig = signal_suspend(20);
         assert_eq!(sig, None);
     }
 

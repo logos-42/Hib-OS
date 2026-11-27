@@ -475,6 +475,32 @@ impl CompositorExt {
         self.animations.remove(&id).is_some()
     }
 
+    /// 采样所有 AI 生成的 WASM 动画，按返回值驱动已注册动画的进度。
+    /// 返回采样的动画数量（供状态查询）。
+    pub fn sample_wasm_animations(&mut self, now_ms: u64) -> usize {
+        let names: Vec<String> = crate::ai_factory::list_manifests()
+            .into_iter()
+            .filter(|m| m.kind == "animation")
+            .map(|m| m.name)
+            .collect();
+        let mut count = 0;
+        for name in names {
+            let Some(inst) = crate::wasman_runtime::get(&name) else { continue };
+            let Ok(packed) = inst.call_i32_i64("animate", now_ms as i32) else { continue };
+            // 高 32 位为相位（ms）；用它偏移动画开始时间，使 WASM 动画驱动外观。
+            let phase_ms = (packed >> 32) as u64;
+            for anim in self.animations.values_mut() {
+                // 只用相位驱动重复动画，避免覆盖手动启动的计时。
+                if anim.repeat && anim.target.is_none() {
+                    anim.start_time = now_ms.saturating_sub(phase_ms % anim.duration_ns.max(1));
+                }
+            }
+            let _ = name;
+            count += 1;
+        }
+        count
+    }
+
     /// 设置 vsync 间隔（ns）。
     pub fn set_vsync_interval(&mut self, ns: u64) {
         self.vsync_interval_ns = ns;

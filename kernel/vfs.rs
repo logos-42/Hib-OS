@@ -124,6 +124,9 @@ impl Vfs {
         );
         root.children.insert("bin".into(), bin);
 
+        // /apps：AI 生成 app 的只读清单/源码快照目录（由 ai_factory 填充）。
+        root.children.insert("apps".into(), Node::dir("apps"));
+
         // /etc
         let mut etc = Node::dir("etc");
         etc.children.insert(

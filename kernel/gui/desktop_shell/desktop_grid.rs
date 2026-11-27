@@ -37,11 +37,19 @@ pub fn snap_to_grid(x: i32, y: i32) -> (i32, i32) {
 }
 
 pub fn draw(frame: &mut Surface) {
-    let icons = [
+    // 内置入口 + AI 生成的 app（运行时从 ai_factory 注册表读取）。
+    let mut icons = vec![
         DesktopIcon::new("CHAT", 0, 0),
         DesktopIcon::new("TASK", 1, 0),
         DesktopIcon::new("FILE", 2, 0),
     ];
+    let mut gx = 3;
+    for m in crate::ai_factory::list_manifests() {
+        if m.kind != "app" { continue; }
+        let tag: String = m.name.chars().take(3).collect();
+        icons.push(DesktopIcon::new(&tag, gx, 0));
+        gx += 1;
+    }
     let count = icons.len() as i32;
     // 整行图标居中：总宽 = 单元格宽 × 数量，水平居中；垂直放在工作区上四分之一处。
     let total_w = count * GRID;

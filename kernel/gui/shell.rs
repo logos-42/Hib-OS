@@ -49,7 +49,13 @@ impl DesktopShell {
                 height: gui::DEFAULT_HEIGHT,
                 scale: 100,
             }],
-            launcher: vec!["terminal".into(), "files".into(), "monitor".into(), "settings".into()],
+            launcher: {
+                let mut items = vec!["terminal".into(), "files".into(), "monitor".into(), "settings".into()];
+                for m in crate::ai_factory::list_manifests() {
+                    if m.kind == "app" { items.push(m.name); }
+                }
+                items
+            },
             focus_policy: "click".to_string(),
             routed: 0,
             composed: 0,

@@ -34,29 +34,95 @@ thread_local! {
     static CURRENT: Cell<Option<ExecId>> = const { Cell::new(None) };
 }
 
-/// 执行体状态机。
+/// 执行体状态机 —— **单一真相源**。
 ///
-/// `Created → Ready → Running → (Blocked ⇄ Running) → Exited`
-/// 任意活跃态都可以被 `Suspended`（睡眠），唤醒后回到原状态。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum RunState {
+/// `Running → Blocked{key} ⇄ Running`；任意活跃态 `→ Suspended{resume_to}`；
+/// 任意态 `→ Exited`。阻塞键与「挂起后回到哪里」都编码在状态内部，
+/// 恢复时直接读 `resume_to`，不再从散落字段反推。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ExecState {
     Ready,
     Running,
-    Blocked,
-    Suspended,
+    /// 阻塞在某个通道键上。
+    Blocked { key: String },
+    /// 被挂起（睡眠）；`resume_to` 记录恢复后回到的状态。
+    Suspended { resume_to: ResumeTo },
     Exited,
 }
 
-impl RunState {
-    pub fn name(self) -> &'static str {
+/// 挂起前记住的「恢复目标」。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ResumeTo {
+    /// 回到 Running。
+    Idle,
+    /// 回到 Blocked{key}。
+    Blocked(String),
+}
+
+impl ExecState {
+    pub fn name(&self) -> &'static str {
         match self {
-            RunState::Ready => "ready",
-            RunState::Running => "running",
-            RunState::Blocked => "blocked",
-            RunState::Suspended => "suspended",
-            RunState::Exited => "exited",
+            ExecState::Ready => "ready",
+            ExecState::Running => "running",
+            ExecState::Blocked { .. } => "blocked",
+            ExecState::Suspended { .. } => "suspended",
+            ExecState::Exited => "exited",
         }
     }
+}
+
+/// 受控迁移事件。所有对 `Body::state` 的写入必须经 [`transition`]。
+#[derive(Debug)]
+enum ExecEvent {
+    /// Running/Ready → Blocked{key}（对同一键重复阻塞幂等）。
+    Block { key: String },
+    /// Blocked → Running（已 Running 时幂等）。
+    Unblock,
+    /// 活跃态 → Suspended{resume_to}（已挂起时幂等，保留最初的 resume_to）。
+    Suspend,
+    /// Suspended → 恢复到 `resume_to` 记忆的原状态。
+    Resume,
+    /// 任意态 → Exited。
+    Exit,
+}
+
+/// 集中状态迁移：非法迁移被拒绝（返回 `Err` 且**不修改状态**）。
+fn transition(b: &mut Body, event: ExecEvent) -> Result<(), String> {
+    match (&b.state, event) {
+        (ExecState::Ready | ExecState::Running, ExecEvent::Block { key }) => {
+            b.state = ExecState::Blocked { key };
+        }
+        (ExecState::Blocked { key: old }, ExecEvent::Block { key }) if *old == key => {}
+        (ExecState::Blocked { .. } | ExecState::Running, ExecEvent::Unblock) => {
+            b.state = ExecState::Running;
+        }
+        (ExecState::Ready | ExecState::Running, ExecEvent::Suspend) => {
+            b.state = ExecState::Suspended {
+                resume_to: ResumeTo::Idle,
+            };
+        }
+        (ExecState::Blocked { key }, ExecEvent::Suspend) => {
+            b.state = ExecState::Suspended {
+                resume_to: ResumeTo::Blocked(key.clone()),
+            };
+        }
+        (ExecState::Suspended { .. }, ExecEvent::Suspend) => {}
+        (ExecState::Suspended { resume_to }, ExecEvent::Resume) => {
+            b.state = match resume_to {
+                ResumeTo::Idle => ExecState::Running,
+                ResumeTo::Blocked(key) => ExecState::Blocked { key: key.clone() },
+            };
+        }
+        (_, ExecEvent::Exit) => b.state = ExecState::Exited,
+        (from, event) => {
+            return Err(format!(
+                "exec: 非法迁移 {} --{:?}-->（已拒绝）",
+                from.name(),
+                event
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// 一次阻塞的结束原因。
@@ -88,13 +154,11 @@ impl WakeReason {
 pub struct Body {
     pub id: ExecId,
     pub name: String,
-    pub state: RunState,
+    pub state: ExecState,
     /// 当前有效优先级（可能被优先级继承临时抬升）。
     pub priority: CpuPriority,
     /// 基础优先级（继承结束后恢复到这个）。
     pub base_priority: CpuPriority,
-    /// 正在等待的通道键。
-    pub wait_key: Option<String>,
     /// 父执行体（子意识主体的来源）。
     pub parent: Option<ExecId>,
     /// 所属调度域（None 表示全局/默认域，不归属任何专用 MLFQ）。
@@ -106,10 +170,24 @@ pub struct Body {
     pub cpu_ns: u64,
     pub wakeups: u64,
     pub checkpoints: u64,
-    /// 被 `wake` 置位、但尚未被等待者消费的信号。
+    /// 被 `wake`/`signal` 置位、但尚未被等待者消费的边沿闩锁。
+    /// （这是事件闩锁机制，不是状态机的一部分——状态只看 `state`。）
     pub signaled: bool,
     /// 优先级被继承抬升过。
     pub inherited: bool,
+}
+
+impl Body {
+    /// 当前正在等待（或挂起前等待）的通道键。
+    pub fn wait_key(&self) -> Option<&str> {
+        match &self.state {
+            ExecState::Blocked { key } => Some(key),
+            ExecState::Suspended {
+                resume_to: ResumeTo::Blocked(key),
+            } => Some(key),
+            _ => None,
+        }
+    }
 }
 
 /// 执行体快照（供 `sense exec/threads`）。
@@ -195,10 +273,9 @@ where
             Body {
                 id,
                 name: name.to_string(),
-                state: RunState::Running,
+                state: ExecState::Running,
                 priority,
                 base_priority: priority,
-                wait_key: None,
                 parent,
                 domain: None,
                 created_ns: get_time_ns() as u128,
@@ -230,7 +307,7 @@ where
         let mut g = ex().inner.lock().unwrap();
         g.failed_spawns += 1;
         if let Some(b) = g.bodies.get_mut(&id) {
-            b.state = RunState::Exited;
+            let _ = transition(b, ExecEvent::Exit);
             b.exit_ns = Some(get_time_ns() as u128);
             b.exit_code = Some(-1);
         }
@@ -259,10 +336,9 @@ where
             Body {
                 id,
                 name: name.to_string(),
-                state: RunState::Running,
+                state: ExecState::Running,
                 priority,
                 base_priority: priority,
-                wait_key: None,
                 parent,
                 domain: Some(domain),
                 created_ns: get_time_ns() as u128,
@@ -293,7 +369,7 @@ where
         let mut g = ex().inner.lock().unwrap();
         g.failed_spawns += 1;
         if let Some(b) = g.bodies.get_mut(&id) {
-            b.state = RunState::Exited;
+            let _ = transition(b, ExecEvent::Exit);
             b.exit_ns = Some(get_time_ns() as u128);
             b.exit_code = Some(-1);
         }
@@ -319,11 +395,10 @@ fn sanitize(name: &str) -> String {
 fn finish(id: ExecId, elapsed: Duration, code: i32) {
     let mut g = ex().inner.lock().unwrap();
     if let Some(b) = g.bodies.get_mut(&id) {
-        b.state = RunState::Exited;
+        let _ = transition(b, ExecEvent::Exit);
         b.exit_ns = Some(get_time_ns() as u128);
         b.exit_code = Some(code);
         b.cpu_ns = elapsed.as_nanos().min(u64::MAX as u128) as u64;
-        b.wait_key = None;
         b.signaled = false;
     }
     drop(g);
@@ -365,8 +440,7 @@ pub fn block_on(key: &str, timeout: Option<Duration>) -> WakeReason {
             }
             if let Some(b) = g.bodies.get_mut(&id) {
                 b.wakeups += 1;
-                b.wait_key = None;
-                b.state = RunState::Running;
+                let _ = transition(b, ExecEvent::Unblock);
             }
             return WakeReason::Signaled;
         }
@@ -374,9 +448,10 @@ pub fn block_on(key: &str, timeout: Option<Duration>) -> WakeReason {
 
     {
         let b = g.bodies.get_mut(&id).unwrap();
-        b.wait_key = Some(key.to_string());
+        if transition(b, ExecEvent::Block { key: key.to_string() }).is_err() {
+            return WakeReason::NotCurrent;
+        }
         b.signaled = false;
-        b.state = RunState::Blocked;
     }
     g.wait_table.entry(key.to_string()).or_default().push(id);
 
@@ -384,7 +459,11 @@ pub fn block_on(key: &str, timeout: Option<Duration>) -> WakeReason {
     loop {
         let (signaled, suspended, gone) = {
             match g.bodies.get(&id) {
-                Some(b) => (b.signaled, b.state == RunState::Suspended, false),
+                Some(b) => (
+                    b.signaled,
+                    matches!(b.state, ExecState::Suspended { .. }),
+                    false,
+                ),
                 None => (false, false, true),
             }
         };
@@ -436,15 +515,14 @@ pub fn block_on(key: &str, timeout: Option<Duration>) -> WakeReason {
 
     let (suspended, signaled) = match g.bodies.get_mut(&id) {
         Some(b) => {
-            b.wait_key = None;
             let sig = std::mem::take(&mut b.signaled);
-            if b.state != RunState::Suspended {
-                b.state = RunState::Running;
+            if !matches!(b.state, ExecState::Suspended { .. }) {
+                let _ = transition(b, ExecEvent::Unblock);
                 if timed_out {
                     b.wakeups += 1;
                 }
             }
-            (b.state == RunState::Suspended, sig)
+            (matches!(b.state, ExecState::Suspended { .. }), sig)
         }
         None => (false, false),
     };
@@ -475,8 +553,8 @@ pub fn wake(key: &str) -> usize {
         if let Some(b) = g.bodies.get_mut(id) {
             // 已退出/已挂起的等待者只登记信号，不改变其状态。
             b.signaled = true;
-            if b.state == RunState::Blocked {
-                b.state = RunState::Running;
+            if matches!(b.state, ExecState::Blocked { .. }) {
+                let _ = transition(b, ExecEvent::Unblock);
                 b.wakeups += 1;
             }
             woke += 1;
@@ -509,9 +587,8 @@ pub fn note_blocked(key: &str) {
     let Some(id) = current() else { return };
     let mut g = ex().inner.lock().unwrap();
     if let Some(b) = g.bodies.get_mut(&id) {
-        if b.state == RunState::Running || b.state == RunState::Ready {
-            b.state = RunState::Blocked;
-            b.wait_key = Some(key.to_string());
+        if matches!(b.state, ExecState::Running | ExecState::Ready) {
+            let _ = transition(b, ExecEvent::Block { key: key.to_string() });
         }
     }
 }
@@ -521,9 +598,8 @@ pub fn note_running() {
     let Some(id) = current() else { return };
     let mut g = ex().inner.lock().unwrap();
     if let Some(b) = g.bodies.get_mut(&id) {
-        if b.state == RunState::Blocked {
-            b.state = RunState::Running;
-            b.wait_key = None;
+        if matches!(b.state, ExecState::Blocked { .. }) {
+            let _ = transition(b, ExecEvent::Unblock);
         }
     }
 }
@@ -547,8 +623,8 @@ pub fn signal(key: &str) -> usize {
     for id in &ids {
         if let Some(b) = g.bodies.get_mut(id) {
             b.signaled = true;
-            if b.state == RunState::Blocked {
-                b.state = RunState::Running;
+            if matches!(b.state, ExecState::Blocked { .. }) {
+                let _ = transition(b, ExecEvent::Unblock);
             }
             woke += 1;
             if let Some(domain) = b.domain {
@@ -580,7 +656,7 @@ pub fn checkpoint() {
         let suspended = g
             .bodies
             .get(&id)
-            .map(|b| b.state == RunState::Suspended)
+            .map(|b| matches!(b.state, ExecState::Suspended { .. }))
             .unwrap_or(false);
         if !suspended {
             break;
@@ -612,8 +688,8 @@ pub fn suspend(id: ExecId) -> bool {
     let ex = ex();
     let mut g = ex.inner.lock().unwrap();
     match g.bodies.get_mut(&id) {
-        Some(b) if b.state != RunState::Exited => {
-            b.state = RunState::Suspended;
+        Some(b) if !matches!(b.state, ExecState::Exited) => {
+            let _ = transition(b, ExecEvent::Suspend);
             drop(g);
             ex.cv.notify_all();
             true
@@ -622,17 +698,13 @@ pub fn suspend(id: ExecId) -> bool {
     }
 }
 
-/// 唤醒单个执行体。阻塞中的回到 Blocked（继续等它的键），其余回到 Running。
+/// 唤醒单个执行体。恢复到挂起时记忆的原状态（`resume_to`），不再反推。
 pub fn resume(id: ExecId) -> bool {
     let ex = ex();
     let mut g = ex.inner.lock().unwrap();
     match g.bodies.get_mut(&id) {
-        Some(b) if b.state == RunState::Suspended => {
-            b.state = if b.wait_key.is_some() {
-                RunState::Blocked
-            } else {
-                RunState::Running
-            };
+        Some(b) if matches!(b.state, ExecState::Suspended { .. }) => {
+            let _ = transition(b, ExecEvent::Resume);
             drop(g);
             ex.cv.notify_all();
             true
@@ -649,8 +721,8 @@ pub fn suspend_all() -> usize {
     let mut g = ex.inner.lock().unwrap();
     let mut n = 0;
     for b in g.bodies.values_mut() {
-        if b.state != RunState::Exited {
-            b.state = RunState::Suspended;
+        if !matches!(b.state, ExecState::Exited) {
+            let _ = transition(b, ExecEvent::Suspend);
             n += 1;
         }
     }
@@ -665,12 +737,8 @@ pub fn resume_all() -> usize {
     let mut g = ex.inner.lock().unwrap();
     let mut n = 0;
     for b in g.bodies.values_mut() {
-        if b.state == RunState::Suspended {
-            b.state = if b.wait_key.is_some() {
-                RunState::Blocked
-            } else {
-                RunState::Running
-            };
+        if matches!(b.state, ExecState::Suspended { .. }) {
+            let _ = transition(b, ExecEvent::Resume);
             n += 1;
         }
     }
@@ -687,7 +755,7 @@ pub fn join(id: ExecId, timeout: Option<Duration>) -> Option<i32> {
         {
             let g = ex().inner.lock().unwrap();
             match g.bodies.get(&id) {
-                Some(b) if b.state == RunState::Exited => return b.exit_code,
+                Some(b) if b.state == ExecState::Exited => return b.exit_code,
                 Some(_) => {}
                 None => return None,
             }
@@ -733,11 +801,11 @@ pub fn snapshot() -> ExecSnapshot {
     };
     for b in g.bodies.values() {
         match b.state {
-            RunState::Ready => s.ready += 1,
-            RunState::Running => s.running += 1,
-            RunState::Blocked => s.blocked += 1,
-            RunState::Suspended => s.suspended += 1,
-            RunState::Exited => s.exited += 1,
+            ExecState::Ready => s.ready += 1,
+            ExecState::Running => s.running += 1,
+            ExecState::Blocked { .. } => s.blocked += 1,
+            ExecState::Suspended { .. } => s.suspended += 1,
+            ExecState::Exited => s.exited += 1,
         }
         s.wakeups += b.wakeups;
         s.checkpoints += b.checkpoints;
@@ -767,7 +835,7 @@ pub fn reap() -> usize {
     let dead: Vec<ExecId> = g
         .bodies
         .iter()
-        .filter(|(_, b)| b.state == RunState::Exited)
+        .filter(|(_, b)| b.state == ExecState::Exited)
         .map(|(id, _)| *id)
         .collect();
     for id in &dead {
@@ -799,7 +867,7 @@ pub fn list() -> String {
             b.name,
             b.state.name(),
             b.priority.name(),
-            b.wait_key.unwrap_or_else(|| "-".to_string()),
+            b.wait_key().unwrap_or("-"),
             b.wakeups,
             b.checkpoints,
             b.parent
@@ -825,7 +893,7 @@ mod tests {
         assert_eq!(code, Some(0));
         assert!(flag.load(Ordering::SeqCst));
         let g = ex().inner.lock().unwrap();
-        assert_eq!(g.bodies[&id].state, RunState::Exited);
+        assert_eq!(g.bodies[&id].state, ExecState::Exited);
     }
 
     #[test]
@@ -846,7 +914,7 @@ mod tests {
                 let g = ex().inner.lock().unwrap();
                 g.bodies
                     .get(&id)
-                    .map(|b| b.state == RunState::Blocked)
+                    .map(|b| matches!(b.state, ExecState::Blocked { .. }))
                     .unwrap_or(false)
             };
             if blocked {
@@ -892,7 +960,10 @@ mod tests {
         assert!(suspend(id));
         {
             let g = ex().inner.lock().unwrap();
-            assert_eq!(g.bodies[&id].state, RunState::Suspended);
+            assert!(matches!(
+                g.bodies[&id].state,
+                ExecState::Suspended { .. }
+            ));
             // 挂起不应把等待者从表里删掉
             assert!(g.wait_table.get(key).map(|v| v.contains(&id)).unwrap_or(false));
         }
@@ -937,5 +1008,107 @@ mod tests {
             .join()
             .unwrap();
         assert_eq!(r, WakeReason::NotCurrent);
+    }
+
+    fn fake_body() -> Body {
+        Body {
+            id: 9999,
+            name: "unit-sm".into(),
+            state: ExecState::Running,
+            priority: CpuPriority::Medium,
+            base_priority: CpuPriority::Medium,
+            parent: None,
+            domain: None,
+            created_ns: 0,
+            exit_ns: None,
+            exit_code: None,
+            cpu_ns: 0,
+            wakeups: 0,
+            checkpoints: 0,
+            signaled: false,
+            inherited: false,
+        }
+    }
+
+    #[test]
+    fn illegal_transitions_are_rejected_without_mutation() {
+        let mut b = fake_body();
+        // Running 上 Resume / Exit 之外的非法事件必须被拒绝且状态不变。
+        assert!(transition(&mut b, ExecEvent::Resume).is_err());
+        assert_eq!(b.state, ExecState::Running);
+        assert!(transition(&mut b, ExecEvent::Unblock).is_ok()); // 幂等
+        assert_eq!(b.state, ExecState::Running);
+        // Exited 之后一切活跃迁移都被拒绝。
+        let _ = transition(&mut b, ExecEvent::Exit);
+        assert!(transition(&mut b, ExecEvent::Block { key: "k".into() }).is_err());
+        assert!(transition(&mut b, ExecEvent::Resume).is_err());
+        assert_eq!(b.state, ExecState::Exited);
+    }
+
+    #[test]
+    fn suspend_resume_restores_state_not_inferred() {
+        let mut b = fake_body();
+        // Running → Suspend → Resume 应回到 Running（不靠 wait_key 反推）。
+        assert!(transition(&mut b, ExecEvent::Suspend).is_ok());
+        assert_eq!(
+            b.state,
+            ExecState::Suspended {
+                resume_to: ResumeTo::Idle
+            }
+        );
+        assert!(transition(&mut b, ExecEvent::Resume).is_ok());
+        assert_eq!(b.state, ExecState::Running);
+
+        // Blocked → Suspend → Resume 应回到 Blocked{同一个 key}。
+        assert!(transition(&mut b, ExecEvent::Block { key: "chan/x".into() }).is_ok());
+        assert!(transition(&mut b, ExecEvent::Suspend).is_ok());
+        assert_eq!(
+            b.state,
+            ExecState::Suspended {
+                resume_to: ResumeTo::Blocked("chan/x".into())
+            }
+        );
+        assert_eq!(b.wait_key(), Some("chan/x"));
+        assert!(transition(&mut b, ExecEvent::Resume).is_ok());
+        assert_eq!(
+            b.state,
+            ExecState::Blocked {
+                key: "chan/x".into()
+            }
+        );
+
+        // 已挂起时再次 Suspend 幂等：不覆盖最初的 resume_to。
+        assert!(transition(&mut b, ExecEvent::Suspend).is_ok());
+        assert_eq!(
+            b.state,
+            ExecState::Suspended {
+                resume_to: ResumeTo::Blocked("chan/x".into())
+            }
+        );
+    }
+
+    #[test]
+    fn suspend_resume_roundtrip_keeps_running_body_running() {
+        let id = spawn(
+            "unit-sres",
+            CpuPriority::Medium,
+            || {
+                std::thread::sleep(Duration::from_millis(300));
+            },
+        );
+        assert!(suspend(id));
+        {
+            let g = ex().inner.lock().unwrap();
+            assert!(matches!(
+                g.bodies[&id].state,
+                ExecState::Suspended { resume_to: ResumeTo::Idle }
+            ));
+        }
+        assert!(resume(id));
+        {
+            let g = ex().inner.lock().unwrap();
+            assert_eq!(g.bodies[&id].state, ExecState::Running);
+        }
+        assert_eq!(join(id, Some(Duration::from_secs(2))), Some(0));
     }
 }

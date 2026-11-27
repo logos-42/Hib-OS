@@ -680,7 +680,12 @@ static FILE_MANAGER: OnceLock<Mutex<FileManager>> = OnceLock::new();
 
 /// 获取全局文件管理器。
 pub fn file_manager() -> &'static Mutex<FileManager> {
-    FILE_MANAGER.get_or_init(|| Mutex::new(FileManager::new(std::env::temp_dir())))
+    FILE_MANAGER.get_or_init(|| {
+        let root = std::env::var("HOME")
+            .map(|h| std::path::PathBuf::from(h).join(".hibos"))
+            .unwrap_or_else(|_| std::env::temp_dir());
+        Mutex::new(FileManager::new(root))
+    })
 }
 
 /// `sense gui/file_manager`：返回文件管理器状态摘要。

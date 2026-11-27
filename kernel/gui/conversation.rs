@@ -39,6 +39,10 @@ impl Conversation {
             Some(Intent::PrevPage) => Reply::plain("已切换到上一个页面"),
             Some(Intent::ToggleDock) => Reply::plain("已展开底部图标"),
             Some(Intent::OpenTerminal) => Reply::plain("已为你打开终端"),
+            Some(Intent::GenerateApp(_)) | Some(Intent::GeneratePlugin(_))
+            | Some(Intent::GenerateIme(_)) | Some(Intent::GenerateAnimation(_)) => {
+                Reply::plain("可以，请在桌面右键的 AI 浮层里说出需求，我会为你生成。")
+            }
             Some(Intent::RequestPermission { what, level }) => Reply {
                 feedback: format!("“{}”需要你的确认", what),
                 page: None,

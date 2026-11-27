@@ -10,7 +10,19 @@
 use std::sync::{Mutex, OnceLock};
 use std::time::{Instant, UNIX_EPOCH};
 
+use crate::wasman_runtime::Kind;
+
 use super::intent::{Intent, IntentRouter};
+
+/// 从需求文本生成安全的 app 名（ASCII、小写、短）。
+fn ai_name(req: &str) -> String {
+    let name: String = req
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .take(12)
+        .collect();
+    if name.is_empty() { "generated".to_string() } else { name.to_lowercase() }
+}
 use super::surface::Surface;
 use super::{text_render, theme};
 
@@ -79,6 +91,22 @@ impl Overlay {
             Some(Intent::PrevPage) => "切换到上一个页面。".to_string(),
             Some(Intent::ToggleDock) => "已展开底部图标。".to_string(),
             Some(Intent::OpenTerminal) => "正在打开终端。".to_string(),
+            Some(Intent::GenerateApp(req)) => match crate::ai_factory::create(Kind::App, &ai_name(req), req, None) {
+                Ok(msg) => format!("{}，可在启动台打开。", msg),
+                Err(e) => format!("创建应用时遇到问题：{}，已用简易模式代替。", e),
+            },
+            Some(Intent::GeneratePlugin(req)) => match crate::ai_factory::create(Kind::Plugin, &ai_name(req), req, None) {
+                Ok(msg) => msg,
+                Err(e) => format!("创建插件时遇到问题：{}", e),
+            },
+            Some(Intent::GenerateIme(req)) => match crate::ai_factory::create(Kind::Ime, &ai_name(req), req, None) {
+                Ok(msg) => msg,
+                Err(e) => format!("创建输入法时遇到问题：{}", e),
+            },
+            Some(Intent::GenerateAnimation(req)) => match crate::ai_factory::create(Kind::Animation, &ai_name(req), req, None) {
+                Ok(msg) => msg,
+                Err(e) => format!("创建动画时遇到问题：{}", e),
+            },
             Some(Intent::RequestPermission { what, .. }) => {
                 format!("“{}”需要你的确认。", what)
             }

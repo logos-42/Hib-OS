@@ -63,6 +63,11 @@ pub enum Intent {
     PrevPage,
     ToggleDock,
     RequestPermission { what: String, level: AuthLevel },
+    /// AI 生成创造物：需求文本。
+    GenerateApp(String),
+    GeneratePlugin(String),
+    GenerateIme(String),
+    GenerateAnimation(String),
     Unknown(String),
 }
 
@@ -88,6 +93,19 @@ impl IntentRouter {
                 what: "删除所有文件".into(),
                 level: AuthLevel::Once,
             }),
+            // AI 创造意图：前缀式表达（需求自由文本）。
+            _ if t.starts_with("做一个") || t.starts_with("生成app") || t.starts_with("create app") => {
+                Some(Intent::GenerateApp(t.to_string()))
+            }
+            _ if t.starts_with("写个插件") || t.starts_with("生成插件") => {
+                Some(Intent::GeneratePlugin(t.to_string()))
+            }
+            _ if t.starts_with("自定义输入法") || t.starts_with("生成输入法") => {
+                Some(Intent::GenerateIme(t.to_string()))
+            }
+            _ if t.starts_with("做个动画") || t.starts_with("生成动画") => {
+                Some(Intent::GenerateAnimation(t.to_string()))
+            }
             // 精确匹配失败后走语义兜底：同义短语 + 最长匹配 + 高风险优先。
             _ => Self::resolve_fuzzy(t),
         }

@@ -53,10 +53,19 @@ fn draw_status_icons(frame: &mut Surface, right: i32) {
     }
     frame.fill_rect(x0 + 9, y + 8, 2, 2, color);
 
-    // 2. 输入法：首字母 "A" 的几何笔画（英文态）；中文态用方块标记。
+    // 2. 输入法：读取真实 IME 状态（WASM 生成物注册后高亮）。
     let ime_x = x0 + 18;
-    frame.draw_rect(ime_x, y + 2, 8, 8, TEXT, 1);
-    frame.fill_rect(ime_x + 2, y + 6, 4, 1, TEXT); // 中/英切换指示横线
+    let ime_active = crate::ai_factory::list_manifests()
+        .iter()
+        .any(|m| m.kind == "ime");
+    let ime_color = if ime_active { ACCENT } else { TEXT };
+    frame.draw_rect(ime_x, y + 2, 8, 8, ime_color, 1);
+    if ime_active {
+        frame.fill_rect(ime_x + 2, y + 4, 4, 1, ime_color);
+        frame.fill_rect(ime_x + 2, y + 6, 4, 1, ime_color);
+    } else {
+        frame.fill_rect(ime_x + 2, y + 6, 4, 1, ime_color);
+    }
 
     // 3. 音量：梯形喇叭 + 两道声波。
     let vol_x = x0 + 34;

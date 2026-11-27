@@ -80,6 +80,60 @@ impl AgentState {
     }
 }
 
+/// 受控迁移事件。所有对 `AgentEntry::state` 的写入必须经 [`transition`]。
+#[derive(Debug)]
+enum AgentEvent {
+    /// Created/Initializing → Idle（初始化完成）。
+    Init,
+    /// Idle → Running（从邮箱取出任务）。
+    AcceptTask,
+    /// Running → Idle（任务完成，成败记入计数）。
+    TaskDone,
+    /// 任意活跃态 → Stopped（线程确认退出后）。
+    Stop,
+    /// 终止态/Created → Idle（重新拉起）。
+    Restart,
+}
+
+/// 集中状态迁移：非法迁移被拒绝（返回 `Err` 且**不修改状态**）。
+fn transition(a: &mut AgentEntry, event: AgentEvent) -> Result<(), String> {
+    match (&a.state, event) {
+        (AgentState::Created | AgentState::Initializing, AgentEvent::Init) => {
+            a.state = AgentState::Idle;
+        }
+        (AgentState::Idle, AgentEvent::AcceptTask) => a.state = AgentState::Running,
+        (AgentState::Running, AgentEvent::TaskDone) => a.state = AgentState::Idle,
+        (
+            AgentState::Created
+            | AgentState::Initializing
+            | AgentState::Idle
+            | AgentState::Running
+            | AgentState::Waiting
+            | AgentState::Blocked
+            | AgentState::Paused
+            | AgentState::Completed
+            | AgentState::Failed
+            | AgentState::Stopped,
+            AgentEvent::Stop,
+        ) => a.state = AgentState::Stopped,
+        (
+            AgentState::Created
+            | AgentState::Completed
+            | AgentState::Failed
+            | AgentState::Stopped,
+            AgentEvent::Restart,
+        ) => a.state = AgentState::Idle,
+        (from, event) => {
+            return Err(format!(
+                "agent: 非法迁移 {} --{:?}-->（已拒绝）",
+                from.name(),
+                event
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// 一条已完成的任务记录。
 #[derive(Clone, Debug)]
 pub struct TaskRecord {
@@ -200,7 +254,7 @@ pub fn spawn(name: &str, role: &str, priority: CpuPriority) -> Result<AgentId, S
                 } else {
                     role.to_string()
                 },
-                state: AgentState::Idle,
+                state: AgentState::Created,
                 exec_id: 0,
                 priority,
                 domain: None,
@@ -268,7 +322,7 @@ pub fn spawn_in_domain(
                 } else {
                     role.to_string()
                 },
-                state: AgentState::Idle,
+                state: AgentState::Created,
                 exec_id: 0,
                 priority,
                 domain: Some(domain),
@@ -302,24 +356,30 @@ pub fn spawn_in_domain(
 fn agent_loop(id: AgentId, mailbox: &str) {
     loop {
         exec::checkpoint();
+        {
+            // 初始化阶段：Created → Idle（一次性，之后 Init 幂等跳过）。
+            let mut o = orch().lock().unwrap();
+            if let Some(a) = o.agents.get_mut(&id) {
+                if matches!(a.state, AgentState::Created | AgentState::Initializing) {
+                    let _ = transition(a, AgentEvent::Init);
+                }
+            }
+        }
         let (task, stopped) = {
             let mut o = orch().lock().unwrap();
             let Some(a) = o.agents.get_mut(&id) else {
                 return;
             };
             if a.stop {
-                a.state = AgentState::Stopped;
+                let _ = transition(a, AgentEvent::Stop);
                 (None, true)
             } else {
                 match a.mailbox.pop_front() {
                     Some(t) => {
-                        a.state = AgentState::Running;
+                        let _ = transition(a, AgentEvent::AcceptTask);
                         (Some(t), false)
                     }
-                    None => {
-                        a.state = AgentState::Idle;
-                        (None, false)
-                    }
+                    None => (None, false),
                 }
             }
         };
@@ -348,7 +408,7 @@ fn agent_loop(id: AgentId, mailbox: &str) {
                     };
                     o.push_result(rec);
                     if let Some(a) = o.agents.get_mut(&id) {
-                        a.state = AgentState::Idle;
+                        let _ = transition(a, AgentEvent::TaskDone);
                         if ok {
                             a.done += 1;
                         } else {
@@ -507,8 +567,10 @@ pub fn broadcast(payload: &str) -> Result<String, String> {
 
 /// 等待某个子体空闲（当前任务完成）。
 ///
-/// 「空闲」的定义是 **邮箱为空且不在 Working**：只判 `state != Working` 会在线程
-/// 还没来得及取走任务时提前返回（提交与执行之间的竞态）。
+/// 「空闲」以状态机为唯一真相：**state == Idle 且邮箱为空**。取任务
+/// （Idle→Running）与投递都在编排锁内发生，因此「邮箱非空 ⇒ 将转 Running」
+/// 的竞态窗口被状态迁移覆盖：只判 `state != Running` 会在线程还没来得及
+/// 取走任务时提前返回。
 pub fn wait_idle(name_or_id: &str, timeout: Option<Duration>) -> Result<String, String> {
     let id = resolve(name_or_id)?;
     let began = std::time::Instant::now();
@@ -516,7 +578,7 @@ pub fn wait_idle(name_or_id: &str, timeout: Option<Duration>) -> Result<String, 
         {
             let o = orch().lock().unwrap();
             match o.agents.get(&id) {
-                Some(a) if a.state != AgentState::Running && a.mailbox.is_empty() => {
+                Some(a) if a.state == AgentState::Idle && a.mailbox.is_empty() => {
                     return Ok(format!(
                         "{} 已空闲 state={} done={} failed={} last={:?}",
                         a.name,
@@ -540,6 +602,11 @@ pub fn wait_idle(name_or_id: &str, timeout: Option<Duration>) -> Result<String, 
 }
 
 /// 停止并回收一个子体。
+///
+/// `stop` 标志只是**停止请求**；只有线程确认退出（`join` 成功，或执行体
+/// 已被回收）才允许 `Stopped` 迁移。线程卡死时如实返回 `Err` 并保持
+/// 原状态——状态机不再掩盖「标了 Stopped 但线程还活着」的谎言；
+/// 线程稍后自行退出时会在 `agent_loop` 里自己完成 Stop 迁移。
 pub fn stop(name_or_id: &str) -> Result<String, String> {
     let id = resolve(name_or_id)?;
     let (exec_id, name) = {
@@ -553,11 +620,30 @@ pub fn stop(name_or_id: &str) -> Result<String, String> {
     };
     exec::signal(&mailbox_key(id));
     let code = exec::join(exec_id, Some(Duration::from_secs(2)));
-    let mut o = orch().lock().unwrap();
-    if let Some(a) = o.agents.get_mut(&id) {
-        a.state = AgentState::Stopped;
+    let thread_gone = match code {
+        Some(_) => true,
+        None => exec::bodies()
+            .iter()
+            .find(|b| b.id == exec_id)
+            .map(|b| b.state == exec::ExecState::Exited)
+            .unwrap_or(true), // 执行体已被 reap → 线程必然已结束
+    };
+    if !thread_gone {
+        return Err(format!(
+            "{} 停止超时：线程 2s 内未退出（保持当前状态，等待其自行停止）",
+            name
+        ));
     }
+    let mut o = orch().lock().unwrap();
+    let stopped = o
+        .agents
+        .get_mut(&id)
+        .map(|a| transition(a, AgentEvent::Stop).is_ok())
+        .unwrap_or(false);
     drop(o);
+    if !stopped {
+        return Err(format!("{} 无法迁移到 stopped（非法迁移被拒绝）", name));
+    }
     sync_identity(id, AgentState::Stopped);
     Ok(format!("{} 已停止 (exit={:?})", name, code))
 }
@@ -667,7 +753,8 @@ pub fn start(name_or_id: &str) -> Result<String, String> {
             .ok_or_else(|| format!("子智能体 {} 不存在", name_or_id))?;
         a.stop = false;
         a.mailbox.clear();
-        a.state = AgentState::Idle;
+        transition(a, AgentEvent::Restart)
+            .map_err(|_| format!("{} 无法从 state={} 重新启动", a.name, a.state.name()))?;
     }
     let exec_id = exec::spawn(&format!("agent:{}", name), priority, move || {
         agent_loop(id, &mb);
@@ -944,5 +1031,80 @@ mod tests {
         spawn("ut-dup", "worker", CpuPriority::Low).unwrap();
         assert!(spawn("ut-dup", "worker", CpuPriority::Low).is_err());
         stop("ut-dup").unwrap();
+    }
+
+    fn fake_entry() -> AgentEntry {
+        AgentEntry {
+            id: 999,
+            name: "ut-fsm".into(),
+            role: "worker".into(),
+            state: AgentState::Created,
+            exec_id: 0,
+            priority: CpuPriority::Medium,
+            domain: None,
+            mailbox: VecDeque::new(),
+            done: 0,
+            failed: 0,
+            stop: false,
+            born_ns: 0,
+            parent: None,
+            last_result: None,
+            epoch_seen: 0,
+        }
+    }
+
+    #[test]
+    fn agent_transitions_reject_illegal_moves() {
+        let mut a = fake_entry();
+        // Created 上不能直接接受任务或停止线程语义之外的操作。
+        assert!(transition(&mut a, AgentEvent::AcceptTask).is_err());
+        assert_eq!(a.state, AgentState::Created);
+        assert!(transition(&mut a, AgentEvent::Init).is_ok());
+        assert_eq!(a.state, AgentState::Idle);
+        assert!(transition(&mut a, AgentEvent::Init).is_err()); // Idle 上再 Init 非法
+        assert!(transition(&mut a, AgentEvent::AcceptTask).is_ok());
+        assert_eq!(a.state, AgentState::Running);
+        assert!(transition(&mut a, AgentEvent::AcceptTask).is_err()); // Running 上重复接受
+        assert!(transition(&mut a, AgentEvent::TaskDone).is_ok());
+        assert_eq!(a.state, AgentState::Idle);
+        assert!(transition(&mut a, AgentEvent::Stop).is_ok());
+        assert_eq!(a.state, AgentState::Stopped);
+        assert!(transition(&mut a, AgentEvent::AcceptTask).is_err()); // 终止态不可接任务
+        assert!(transition(&mut a, AgentEvent::Restart).is_ok());
+        assert_eq!(a.state, AgentState::Idle);
+    }
+
+    #[test]
+    fn stop_of_stuck_agent_does_not_lie() {
+        let _serial = test_guard();
+        let id = spawn("ut-stuck", "worker", CpuPriority::Low).unwrap();
+        submit("ut-stuck", "sleep 3000").unwrap();
+        // 等线程真正取走任务进入 Running（避免 stop 清空邮箱造成 flaky）。
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        loop {
+            let running = orch().lock().unwrap().agents[&id].state == AgentState::Running;
+            if running {
+                break;
+            }
+            assert!(std::time::Instant::now() < deadline, "任务未被取走");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        // join 2s 超时 → stop 必须如实报错，不得谎报 Stopped。
+        let r = stop("ut-stuck");
+        assert!(r.is_err(), "卡死的子体不应被谎报为已停止: {:?}", r);
+        {
+            let o = orch().lock().unwrap();
+            assert_ne!(o.agents[&id].state, AgentState::Stopped);
+        }
+        // 线程完成任务后自行 Stop 迁移（事件驱动，而非 stop() 强行置位）。
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            let stopped = orch().lock().unwrap().agents[&id].state == AgentState::Stopped;
+            if stopped {
+                break;
+            }
+            assert!(std::time::Instant::now() < deadline, "线程应自行完成 Stop 迁移");
+            std::thread::sleep(Duration::from_millis(20));
+        }
     }
 }
